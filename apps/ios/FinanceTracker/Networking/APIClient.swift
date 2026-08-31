@@ -115,7 +115,7 @@ struct APIClient: Sendable {
     }
 
     func createTransaction(
-        _ transaction: CreateTransactionRequest
+        _ transaction: TransactionRequest
     ) async throws -> FinanceTransaction {
         try await post(
             transaction,
@@ -127,6 +127,17 @@ struct APIClient: Sendable {
         baseURL
             .appending(path: "api")
             .appending(path: "v1")
+    }
+
+    func updateTransaction(
+        id: UUID,
+        with transaction: TransactionRequest
+    ) async throws -> FinanceTransaction {
+        var request = URLRequest(url: apiURL.appending(path: "transactions").appending(path: id.uuidString))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(transaction)
+        return try await send(request)
     }
 
     private func get<Response: Decodable>(url: URL) async throws -> Response {
@@ -165,7 +176,12 @@ struct APIClient: Sendable {
 
     private static var jsonEncoder: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var container = encoder.singleValueContainer()
+            try container.encode(formatter.string(from: date))
+        }
         return encoder
     }
 

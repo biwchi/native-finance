@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: finance_tracker
       POSTGRES_PASSWORD: finance_tracker
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finance_tracker -d finance_tracker"]
       interval: 5s
@@ -17,4 +17,3 @@ services:
 
 volumes:
   finance_tracker_postgres:
-

@@ -9,6 +9,16 @@ import { transactionKindSchema } from "./categories.ts";
 const amountPattern =
   "^(?=.{1,20}$)(?!0+(?:\\.0{1,4})?$)(?:0|[1-9]\\d{0,14})(?:\\.\\d{1,4})?$";
 
+const transactionBody = t.Object({
+  accountId: t.String({ format: "uuid" }),
+  kind: transactionKindSchema,
+  amount: t.String({ pattern: amountPattern }),
+  categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+  description: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
+  note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
+  occurredAt: t.String({ format: "date-time" }),
+});
+
 const transactionSelection = {
   ...getTableColumns(transactions),
   category: {
@@ -46,67 +56,15 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
   .post(
     "/",
     async ({ body, set }) => {
-      const [account] = await db
-        .select()
-        .from(accounts)
-        .where(eq(accounts.id, body.accountId))
-        .limit(1);
-
-      if (!account) {
-        set.status = 404;
-        return { message: "Account not found" };
+      const prepared = await prepareTransaction(body);
+      if ("error" in prepared) {
+        set.status = prepared.status;
+        return { message: prepared.error };
       }
 
-      let category: CategorySummary | null = null;
-      if (body.categoryId) {
-        const [selectedCategory] = await db
-          .select({
-            id: categories.id,
-            systemKey: categories.systemKey,
-            name: categories.name,
-            kind: categories.kind,
-            isSystem: categories.isSystem,
-          })
-          .from(categories)
-          .where(eq(categories.id, body.categoryId))
-          .limit(1);
-
-        if (!selectedCategory) {
-          set.status = 404;
-          return { message: "Category not found" };
-        }
-
-        if (selectedCategory.kind !== body.kind) {
-          set.status = 400;
-          return { message: "Category kind must match transaction kind" };
-        }
-
-        category = selectedCategory;
-      }
-
-      const occurredAt = new Date(body.occurredAt);
-      if (Number.isNaN(occurredAt.getTime())) {
-        set.status = 400;
-        return { message: "occurredAt must be a valid date and time" };
-      }
-
-      const description = cleanOptionalText(body.description);
-      const note = cleanOptionalText(body.note);
       const [transaction] = await db
         .insert(transactions)
-        .values({
-          accountId: account.id,
-          kind: body.kind,
-          amount: body.amount,
-          currency: account.currency,
-          categoryId: category?.id,
-          description,
-          normalizedDescription: description
-            ? normalizeTransactionDescription(description)
-            : null,
-          note,
-          occurredAt,
-        })
+        .values(prepared.values)
         .returning();
 
       if (!transaction) {
@@ -114,18 +72,53 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
       }
 
       set.status = 201;
-      return toTransactionResponse({ ...transaction, category });
+      return toTransactionResponse({ ...transaction, category: prepared.category });
+    },
+    { body: transactionBody },
+  )
+  .put(
+    "/:id",
+    async ({ params, body, set }) => {
+      const [existing] = await db
+        .select({ accountId: transactions.accountId, currency: transactions.currency })
+        .from(transactions)
+        .where(eq(transactions.id, params.id))
+        .limit(1);
+
+      if (!existing) {
+        set.status = 404;
+        return { message: "Transaction not found" };
+      }
+
+      const prepared = await prepareTransaction(body);
+      if ("error" in prepared) {
+        set.status = prepared.status;
+        return { message: prepared.error };
+      }
+
+      const [transaction] = await db
+        .update(transactions)
+        .set({
+          ...prepared.values,
+          // Keep the historical currency unless the transaction moves to another account.
+          currency: existing.accountId === body.accountId
+            ? existing.currency
+            : prepared.values.currency,
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, params.id))
+        .returning();
+
+      if (!transaction) {
+        set.status = 404;
+        return { message: "Transaction not found" };
+      }
+
+      return toTransactionResponse({ ...transaction, category: prepared.category });
     },
     {
-      body: t.Object({
-        accountId: t.String({ format: "uuid" }),
-        kind: transactionKindSchema,
-        amount: t.String({ pattern: amountPattern }),
-        categoryId: t.Optional(t.String({ format: "uuid" })),
-        description: t.Optional(t.String({ maxLength: 2_000 })),
-        note: t.Optional(t.String({ maxLength: 2_000 })),
-        occurredAt: t.String({ format: "date-time" }),
-      }),
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      body: transactionBody,
     },
   );
 
@@ -146,7 +139,58 @@ function toTransactionResponse(row: TransactionResponseRow) {
   return transaction;
 }
 
-function cleanOptionalText(value: string | undefined): string | null {
+function cleanOptionalText(value: string | null | undefined): string | null {
   const cleaned = value?.trim();
   return cleaned ? cleaned : null;
+}
+
+async function prepareTransaction(body: typeof transactionBody.static) {
+  const [account] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, body.accountId))
+    .limit(1);
+
+  if (!account) {
+    return { error: "Account not found", status: 404 as const };
+  }
+
+  let category: CategorySummary | null = null;
+  if (body.categoryId) {
+    const [selectedCategory] = await db
+      .select(transactionSelection.category)
+      .from(categories)
+      .where(eq(categories.id, body.categoryId))
+      .limit(1);
+
+    if (!selectedCategory) {
+      return { error: "Category not found", status: 404 as const };
+    }
+    if (selectedCategory.kind !== body.kind) {
+      return { error: "Category kind must match transaction kind", status: 400 as const };
+    }
+    category = selectedCategory;
+  }
+
+  const occurredAt = new Date(body.occurredAt);
+  if (Number.isNaN(occurredAt.getTime())) {
+    return { error: "occurredAt must be a valid date and time", status: 400 as const };
+  }
+
+  const description = cleanOptionalText(body.description);
+  return {
+    category,
+    values: {
+      accountId: account.id,
+      kind: body.kind,
+      amount: body.amount,
+      currency: account.currency,
+      // PUT replaces all editable fields, so missing optionals clear their stored values.
+      categoryId: category?.id ?? null,
+      description,
+      normalizedDescription: description ? normalizeTransactionDescription(description) : null,
+      note: cleanOptionalText(body.note),
+      occurredAt,
+    },
+  };
 }

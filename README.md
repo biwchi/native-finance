@@ -18,6 +18,12 @@ bun run db:migrate
 bun run dev
 ```
 
+If another PostgreSQL instance already uses port `5432`, set `POSTGRES_PORT=5433`
+in a `.env` file at the repository root and change the port in
+`apps/backend/.env`'s `DATABASE_URL` to `5433`. Then run
+`docker compose up -d postgres` again before applying migrations. The root `.env`
+configures Docker Compose; `apps/backend/.env` configures the backend and migrations.
+
 The API listens on `http://localhost:3000`. Check it with:
 
 ```sh

@@ -3,6 +3,59 @@ import XCTest
 
 @MainActor
 final class AddTransactionViewModelTests: XCTestCase {
+    func testEditingPrefillsAndPreservesSavedFieldsWhileAccountsAndCategoriesLoad() {
+        let account = Self.account(name: "Original account")
+        let otherAccount = Self.account(name: "Selected account")
+        let category = Self.category(name: "Food & Drink", key: "expense.food-drink", kind: .expense)
+        let transaction = Self.transaction(accountID: account.id, category: category)
+        let viewModel = AddTransactionViewModel(transaction: transaction)
+
+        viewModel.configureAccount(
+            selectedAccountID: otherAccount.id,
+            lastUsedAccountID: otherAccount.id,
+            accounts: [account, otherAccount]
+        )
+        viewModel.refreshCategoryResolution(categories: [category])
+
+        XCTAssertEqual(viewModel.accountID, transaction.accountId)
+        XCTAssertEqual(viewModel.canonicalAmount(), "12.5")
+        XCTAssertEqual(viewModel.kind, transaction.kind)
+        XCTAssertEqual(viewModel.categoryID, category.id)
+        XCTAssertEqual(viewModel.description, transaction.description)
+        XCTAssertEqual(viewModel.note, transaction.note)
+        XCTAssertEqual(viewModel.occurredAt, transaction.occurredAt)
+        XCTAssertFalse(viewModel.isResolvingCategory)
+        XCTAssertTrue(viewModel.canSave)
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+
+        viewModel.setAmountText("12.50")
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+        viewModel.setNote("Updated note")
+        XCTAssertTrue(viewModel.hasChanges(from: transaction))
+        viewModel.setNote(transaction.note!)
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+        viewModel.setCategoryID(nil)
+        XCTAssertTrue(viewModel.hasChanges(from: transaction))
+    }
+
+    func testEditingAnUncategorizedTransactionDoesNotInferACategory() async throws {
+        let category = Self.category(name: "Food & Drink", key: "expense.food-drink", kind: .expense)
+        let transaction = Self.transaction(accountID: UUID(), category: nil)
+        let viewModel = AddTransactionViewModel(
+            transaction: transaction,
+            resolver: StubCategoryResolver { _, _, _ in
+                CategoryResolution(categoryID: category.id, confidence: 1, source: .seed)
+            }
+        )
+        viewModel.refreshCategoryResolution(categories: [category])
+        viewModel.setDescription("Coffee", categories: [category])
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertNil(viewModel.categoryID)
+        XCTAssertEqual(viewModel.categorySource, .manual)
+        XCTAssertFalse(viewModel.isResolvingCategory)
+    }
+
     func testManualFieldsAreNotOverwrittenByLaterCommands() {
         let viewModel = AddTransactionViewModel(
             resolver: StubCategoryResolver { _, _, _ in nil },
@@ -123,6 +176,14 @@ final class AddTransactionViewModelTests: XCTestCase {
         calendar.timeZone = TimeZone(identifier: "UTC")!
         return calendar.date(from: DateComponents(year: 2026, month: 8, day: 31, hour: 12))!
     }()
+
+    private static func transaction(accountID: UUID, category: TransactionCategory?) -> FinanceTransaction {
+        FinanceTransaction(
+            id: UUID(), accountId: accountID, kind: .expense, amount: "12.5000", currency: "USD",
+            category: category, description: "Coffee", note: "Saved note",
+            occurredAt: manualDate, createdAt: fixedDate, updatedAt: fixedDate
+        )
+    }
 
     private static let manualDate: Date = {
         var calendar = Calendar(identifier: .gregorian)

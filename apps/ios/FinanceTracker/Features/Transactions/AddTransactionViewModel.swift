@@ -38,6 +38,7 @@ final class AddTransactionViewModel: ObservableObject {
     private var hasConfiguredAccount = false
 
     init(
+        transaction: FinanceTransaction? = nil,
         parser: TransactionCommandParser = TransactionCommandParser(),
         resolver: any CategoryResolving = AdaptiveCategoryResolver(),
         now: @escaping () -> Date = Date.init
@@ -45,7 +46,24 @@ final class AddTransactionViewModel: ObservableObject {
         self.parser = parser
         self.resolver = resolver
         self.now = now
-        occurredAt = now()
+        occurredAt = transaction?.occurredAt ?? now()
+
+        if let transaction {
+            accountID = transaction.accountId
+            amountText = Decimal(string: transaction.amount)?.formatted(
+                .number.grouping(.never).precision(.fractionLength(0...4))
+            ) ?? transaction.amount
+            kind = transaction.kind
+            categoryID = transaction.category?.id
+            description = transaction.description ?? ""
+            note = transaction.note ?? ""
+            hasConfiguredAccount = true
+            amountSource = .manual
+            kindSource = .manual
+            categorySource = .manual
+            descriptionSource = .manual
+            dateSource = .manual
+        }
     }
 
     deinit {
@@ -183,14 +201,6 @@ final class AddTransactionViewModel: ObservableObject {
         scheduleCategoryResolution(categories: categories)
     }
 
-    func selectCreatedCategory(_ category: TransactionCategory) {
-        categoryTask?.cancel()
-        isResolvingCategory = false
-        categoryID = category.id
-        categorySource = .manual
-        categoryResolutionSource = nil
-    }
-
     func canonicalAmount(locale: Locale = .autoupdatingCurrent) -> String? {
         canonicalTransactionAmount(amountText, locale: locale)
     }
@@ -200,6 +210,16 @@ final class AddTransactionViewModel: ObservableObject {
             canonicalAmount() != nil &&
             !amountConflict &&
             !dateConflict
+    }
+
+    func hasChanges(from transaction: FinanceTransaction) -> Bool {
+        accountID != transaction.accountId ||
+            canonicalAmount().flatMap { Decimal(string: $0) } != Decimal(string: transaction.amount) ||
+            kind != transaction.kind ||
+            categoryID != transaction.category?.id ||
+            description.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.description ?? "") ||
+            note.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.note ?? "") ||
+            occurredAt != transaction.occurredAt
     }
 
     private func scheduleCategoryResolution(categories: [TransactionCategory]) {

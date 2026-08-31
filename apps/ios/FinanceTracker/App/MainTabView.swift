@@ -1,29 +1,20 @@
 import SwiftUI
-
-private enum AppTab: Hashable {
-    case home
-    case transactions
-    case assistant
-    case add
-}
+import UIKit
 
 struct MainTabView: View {
     @EnvironmentObject private var accountStore: AccountStore
-    @State private var selection: AppTab = .home
+    @EnvironmentObject private var transactionStore: TransactionStore
     @State private var isPresentingAddSheet = false
 
     var body: some View {
-        Group {
-            if #available(iOS 18.0, *) {
-                modernTabView
-            } else {
-                legacyTabView
-            }
+        MainTabController(accountStore: accountStore, transactionStore: transactionStore) {
+            isPresentingAddSheet = true
         }
+        .ignoresSafeArea()
         .sheet(isPresented: $isPresentingAddSheet) {
             AddTransactionView()
                 .environmentObject(accountStore)
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $accountStore.editor) { editor in
@@ -57,73 +48,91 @@ struct MainTabView: View {
         .task {
             await accountStore.loadAccounts()
         }
-    }
-
-    private var tabSelection: Binding<AppTab> {
-        Binding(
-            get: { selection },
-            set: { newValue in
-                guard newValue == .add else {
-                    selection = newValue
-                    return
-                }
-
-                isPresentingAddSheet = true
-            }
-        )
-    }
-
-    @available(iOS 18.0, *)
-    private var modernTabView: some View {
-        TabView(selection: tabSelection) {
-            Tab("Home", systemImage: "house", value: .home) {
-                DashboardView()
-            }
-
-            Tab("Transactions", systemImage: "list.bullet.rectangle", value: .transactions) {
-                TransactionsView()
-            }
-
-            Tab("Assistant", systemImage: "sparkles", value: .assistant) {
-                AssistantView()
-            }
-
-            Tab(
-                "Add",
-                systemImage: "plus",
-                value: .add,
-                role: .search
-            ) {
-                Color.clear
-            }
+        .task(id: accountStore.selectedAccountID) {
+            await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         }
     }
+}
 
-    private var legacyTabView: some View {
-        TabView(selection: tabSelection) {
-            DashboardView()
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-                .tag(AppTab.home)
+private struct MainTabController: UIViewControllerRepresentable {
+    let accountStore: AccountStore
+    let transactionStore: TransactionStore
+    var onAdd: () -> Void
 
-            TransactionsView()
-                .tabItem {
-                    Label("Transactions", systemImage: "list.bullet.rectangle")
-                }
-                .tag(AppTab.transactions)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onAdd: onAdd)
+    }
 
-            AssistantView()
-                .tabItem {
-                    Label("Assistant", systemImage: "sparkles")
-                }
-                .tag(AppTab.assistant)
+    func makeUIViewController(context: Context) -> UITabBarController {
+        let controller = UITabBarController()
+        controller.delegate = context.coordinator
+        controller.view.tintColor = UIColor(Color.accentColor)
 
-            Color.clear
-                .tabItem {
-                    Label("Add", systemImage: "plus")
-                }
-                .tag(AppTab.add)
+        // Keep the same hosting controllers (and navigation/scroll state) when the sheet opens.
+        let home = hostingController(DashboardView(), title: "Home", systemImage: "house")
+        let transactions = hostingController(
+            TransactionsView(), title: "Transactions", systemImage: "list.bullet.rectangle"
+        )
+        let assistant = hostingController(AssistantView(), title: "Assistant", systemImage: "sparkles")
+        let add = context.coordinator.addViewController
+        add.tabBarItem = UITabBarItem(title: "Add", image: UIImage(systemName: "plus"), tag: 0)
+
+        if #available(iOS 18.0, *) {
+            let addTab = UISearchTab { _ in add }
+            addTab.title = "Add"
+            addTab.image = UIImage(systemName: "plus")
+            controller.tabs = [
+                UITab(title: "Home", image: home.tabBarItem.image, identifier: "home") { _ in home },
+                UITab(title: "Transactions", image: transactions.tabBarItem.image, identifier: "transactions") { _ in transactions },
+                UITab(title: "Assistant", image: assistant.tabBarItem.image, identifier: "assistant") { _ in assistant },
+                addTab
+            ]
+        } else {
+            controller.viewControllers = [home, transactions, assistant, add]
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UITabBarController, context: Context) {
+        context.coordinator.onAdd = onAdd
+    }
+
+    private func hostingController<Content: View>(
+        _ content: Content, title: String, systemImage: String
+    ) -> UIViewController {
+        let controller = UIHostingController(
+            rootView: content
+                .environmentObject(accountStore)
+                .environmentObject(transactionStore)
+        )
+        controller.tabBarItem = UITabBarItem(title: title, image: UIImage(systemName: systemImage), tag: 0)
+        return controller
+    }
+
+    final class Coordinator: NSObject, UITabBarControllerDelegate {
+        let addViewController = UIViewController()
+        var onAdd: () -> Void
+
+        init(onAdd: @escaping () -> Void) {
+            self.onAdd = onAdd
+        }
+
+        @available(iOS 18.0, *)
+        func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
+            shouldSelect(tab.viewController)
+        }
+
+        func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+            shouldSelect(viewController)
+        }
+
+        private func shouldSelect(_ viewController: UIViewController?) -> Bool {
+            guard viewController === addViewController else { return true }
+
+            // Veto selection before UIKit transitions to the empty Add tab. Rejecting a
+            // SwiftUI selection binding happens too late to prevent a visible flash.
+            onAdd()
+            return false
         }
     }
 }

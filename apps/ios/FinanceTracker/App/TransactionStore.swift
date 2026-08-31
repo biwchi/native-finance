@@ -96,9 +96,22 @@ final class TransactionStore: ObservableObject {
 
     @discardableResult
     func createTransaction(
-        _ request: CreateTransactionRequest
+        _ request: TransactionRequest
     ) async throws -> FinanceTransaction {
         let transaction = try await apiClient.createTransaction(request)
+        apply(transaction)
+        return transaction
+    }
+
+    @discardableResult
+    func updateTransaction(id: UUID, with request: TransactionRequest) async throws -> FinanceTransaction {
+        let transaction = try await apiClient.updateTransaction(id: id, with: request)
+        apply(transaction)
+        return transaction
+    }
+
+    private func apply(_ transaction: FinanceTransaction) {
+        transactions.removeAll { $0.id == transaction.id }
 
         if currentAccountID == nil || currentAccountID == transaction.accountId {
             transactions.append(transaction)
@@ -108,9 +121,7 @@ final class TransactionStore: ObservableObject {
                 }
                 return $0.createdAt > $1.createdAt
             }
-            state = .loaded
         }
-
-        return transaction
+        state = .loaded
     }
 }

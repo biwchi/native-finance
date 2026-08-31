@@ -28,7 +28,7 @@ struct FinanceTransaction: Codable, Identifiable, Hashable {
     let updatedAt: Date
 }
 
-struct CreateTransactionRequest: Encodable {
+struct TransactionRequest: Encodable {
     let accountId: UUID
     let kind: TransactionKind
     let amount: String

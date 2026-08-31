@@ -8,7 +8,6 @@ struct AssistantView: View {
                 systemImage: "sparkles",
                 description: Text("The assistant will help you understand your finances.")
             )
-            .navigationTitle("Assistant")
             .accountSelectorToolbar()
         }
     }

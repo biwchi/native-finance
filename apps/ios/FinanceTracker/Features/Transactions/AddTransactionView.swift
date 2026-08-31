@@ -6,16 +6,24 @@ struct AddTransactionView: View {
     @EnvironmentObject private var transactionStore: TransactionStore
     @AppStorage("lastTransactionAccountID") private var lastAccountID = ""
 
-    @StateObject private var viewModel = AddTransactionViewModel()
+    let transaction: FinanceTransaction?
+
+    @StateObject private var viewModel: AddTransactionViewModel
     @State private var isSaving = false
     @State private var errorMessage: String?
-    @State private var isPresentingNewCategory = false
+
+    init(transaction: FinanceTransaction? = nil) {
+        self.transaction = transaction
+        _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: transaction))
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 accountSection
-                quickEntrySection
+                if transaction == nil {
+                    quickEntrySection
+                }
                 detailsSection
 
                 if let categoryError = transactionStore.categoryErrorMessage,
@@ -35,7 +43,6 @@ struct AddTransactionView: View {
                     }
                 }
             }
-            .navigationTitle("New transaction")
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(isSaving)
             .toolbar {
@@ -58,10 +65,11 @@ struct AddTransactionView: View {
                 }
                 .controlSize(.large)
                 .tint(.accentColor)
-                .disabled(!viewModel.canSave || isSaving)
+                .disabled(isSubmitDisabled)
+                .opacity(isSubmitDisabled ? 0 : 1)
+                .accessibilityHidden(isSubmitDisabled)
                 .padding(.horizontal)
                 .padding(.vertical, 12)
-                .background(.bar)
             }
         }
         .task {
@@ -76,14 +84,6 @@ struct AddTransactionView: View {
         }
         .onChange(of: transactionStore.categories) { _, categories in
             viewModel.refreshCategoryResolution(categories: categories)
-        }
-        .sheet(isPresented: $isPresentingNewCategory) {
-            NewTransactionCategoryView(kind: viewModel.kind) { category in
-                viewModel.selectCreatedCategory(category)
-            }
-            .environmentObject(transactionStore)
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
         }
     }
 
@@ -136,7 +136,7 @@ struct AddTransactionView: View {
                         .keyboardType(.decimalPad)
                         .font(.body.monospacedDigit())
 
-                    if let currency = selectedAccount?.currency {
+                    if let currency = draftCurrency {
                         Text(currency)
                             .foregroundStyle(.secondary)
                     }
@@ -164,45 +164,29 @@ struct AddTransactionView: View {
                     .lineLimit(1...3)
             }
 
-            LabeledContent {
-                Menu {
-                    Button("No category") {
-                        viewModel.setCategoryID(nil)
-                    }
+            NavigationLink {
+                CategoryPickerView(selection: categoryBinding, kind: viewModel.kind)
+            } label: {
+                HStack(spacing: 12) {
+                    fieldLabel("Category", source: viewModel.categorySource)
 
-                    ForEach(categoriesForKind) { category in
-                        Button {
-                            viewModel.setCategoryID(category.id)
-                        } label: {
-                            HStack {
-                                Text(category.name)
-                                if viewModel.categoryID == category.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
+                    Spacer(minLength: 8)
 
-                    Divider()
-
-                    Button {
-                        isPresentingNewCategory = true
-                    } label: {
-                        Label("New category", systemImage: "plus")
-                    }
-                } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 8) {
                         if transactionStore.isLoadingCategories || viewModel.isResolvingCategory {
                             ProgressView()
                                 .controlSize(.small)
                         }
+
+                        if let category = selectedCategory {
+                            CategoryIcon(category: category, size: 28)
+                        }
+
                         Text(selectedCategory?.name ?? "None")
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
-            } label: {
-                fieldLabel("Category", source: viewModel.categorySource)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -235,22 +219,36 @@ struct AddTransactionView: View {
                     ProgressView()
                         .tint(.white)
                 }
-                Text("Add transaction")
+                Text(transaction == nil ? "Add transaction" : "Save changes")
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    private var isSubmitDisabled: Bool {
+        !viewModel.canSave || isSaving ||
+            transaction.map { !viewModel.hasChanges(from: $0) } == true
     }
 
     private var selectedAccount: Account? {
         accountStore.accounts.first { $0.id == viewModel.accountID }
     }
 
-    private var categoriesForKind: [TransactionCategory] {
-        transactionStore.categories(for: viewModel.kind)
+    private var draftCurrency: String? {
+        if let transaction, transaction.accountId == viewModel.accountID {
+            transaction.currency
+        } else {
+            selectedAccount?.currency
+        }
     }
 
     private var selectedCategory: TransactionCategory? {
-        transactionStore.categories.first { $0.id == viewModel.categoryID }
+        transactionStore.categories.first { $0.id == viewModel.categoryID } ??
+            (transaction?.category?.id == viewModel.categoryID ? transaction?.category : nil)
+    }
+
+    private var categoryBinding: Binding<UUID?> {
+        Binding(get: { viewModel.categoryID }, set: viewModel.setCategoryID)
     }
 
     private var accountBinding: Binding<UUID?> {
@@ -261,7 +259,7 @@ struct AddTransactionView: View {
                 viewModel.setCommand(
                     viewModel.command,
                     categories: transactionStore.categories,
-                    currencyCode: accountStore.accounts.first(where: { $0.id == accountID })?.currency
+                    currencyCode: draftCurrency
                 )
             }
         )
@@ -274,7 +272,7 @@ struct AddTransactionView: View {
                 viewModel.setCommand(
                     command,
                     categories: transactionStore.categories,
-                    currencyCode: selectedAccount?.currency
+                    currencyCode: draftCurrency
                 )
             }
         )
@@ -339,6 +337,7 @@ struct AddTransactionView: View {
 
     private func save() async {
         guard
+            !isSubmitDisabled,
             let accountID = viewModel.accountID,
             let amount = viewModel.canonicalAmount()
         else {
@@ -350,17 +349,21 @@ struct AddTransactionView: View {
         defer { isSaving = false }
 
         do {
-            try await transactionStore.createTransaction(
-                CreateTransactionRequest(
-                    accountId: accountID,
-                    kind: viewModel.kind,
-                    amount: amount,
-                    categoryId: viewModel.categoryID,
-                    description: optionalText(viewModel.description),
-                    note: optionalText(viewModel.note),
-                    occurredAt: viewModel.occurredAt
-                )
+            let request = TransactionRequest(
+                accountId: accountID,
+                kind: viewModel.kind,
+                amount: amount,
+                categoryId: viewModel.categoryID,
+                description: optionalText(viewModel.description),
+                note: optionalText(viewModel.note),
+                occurredAt: viewModel.occurredAt
             )
+
+            if let transaction {
+                try await transactionStore.updateTransaction(id: transaction.id, with: request)
+            } else {
+                try await transactionStore.createTransaction(request)
+            }
             lastAccountID = accountID.uuidString
             dismiss()
         } catch {
@@ -371,70 +374,6 @@ struct AddTransactionView: View {
     private func optionalText(_ value: String) -> String? {
         let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? nil : cleaned
-    }
-}
-
-private struct NewTransactionCategoryView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var transactionStore: TransactionStore
-
-    let kind: TransactionKind
-    let onCreated: (TransactionCategory) -> Void
-
-    @State private var name = ""
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Category") {
-                    TextField("Name", text: $name)
-                    LabeledContent("Type", value: kind.title)
-                }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-            .navigationTitle("New category")
-            .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(isSaving)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .disabled(isSaving)
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        Task {
-                            await create()
-                        }
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
-                }
-            }
-        }
-    }
-
-    private func create() async {
-        isSaving = true
-        errorMessage = nil
-        defer { isSaving = false }
-
-        do {
-            let category = try await transactionStore.createCategory(name: name, kind: kind)
-            onCreated(category)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
     }
 }
 

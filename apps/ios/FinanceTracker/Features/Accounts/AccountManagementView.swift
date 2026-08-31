@@ -31,7 +31,6 @@ struct AccountSelector: View {
                 accountLabel(
                     title: "Total",
                     systemImage: "square.stack.3d.up.fill",
-                    color: .accentColor,
                     isSelected: accountStore.selectedAccountID == nil
                 )
             }
@@ -59,22 +58,14 @@ struct AccountSelector: View {
                 Button {
                     accountStore.editor = .edit(account)
                 } label: {
-                    menuLabel(
-                        title: "Edit account",
-                        systemImage: "pencil",
-                        color: account.iconColor.color
-                    )
+                    Label("Edit account", systemImage: "pencil")
                 }
             }
 
             Button {
                 accountStore.editor = .add
             } label: {
-                menuLabel(
-                    title: "Add account",
-                    systemImage: "plus",
-                    color: .accentColor
-                )
+                Label("Add account", systemImage: "plus")
             }
         } label: {
             HStack(spacing: 7) {
@@ -97,6 +88,7 @@ struct AccountSelector: View {
             .accessibilityLabel("Account, \(accountStore.selectionTitle)")
             .accessibilityHint("Opens the account picker")
         }
+        .tint(.primary)
     }
 
     private var selectedIcon: String {
@@ -104,13 +96,13 @@ struct AccountSelector: View {
     }
 
     private var selectedColor: Color {
-        accountStore.selectedAccount?.iconColor.color ?? .accentColor
+        accountStore.selectedAccount?.iconColor.color ?? .primary
     }
 
     private func accountLabel(
         title: String,
         systemImage: String,
-        color: Color,
+        color: Color? = nil,
         isSelected: Bool
     ) -> some View {
         HStack {
@@ -126,22 +118,10 @@ struct AccountSelector: View {
         }
     }
 
-    private func menuLabel(
-        title: String,
-        systemImage: String,
-        color: Color
-    ) -> some View {
-        Label {
-            Text(title)
-        } icon: {
-            menuIcon(systemImage: systemImage, color: color)
-        }
-    }
-
     @ViewBuilder
-    private func menuIcon(systemImage: String, color: Color) -> some View {
+    private func menuIcon(systemImage: String, color: Color?) -> some View {
 #if canImport(UIKit)
-        if let image = UIImage(systemName: systemImage) {
+        if let color, let image = UIImage(systemName: systemImage) {
             Image(
                 uiImage: image.withTintColor(
                     UIColor(color),
@@ -150,11 +130,12 @@ struct AccountSelector: View {
             )
         } else {
             Image(systemName: systemImage)
-                .foregroundStyle(color)
+                .renderingMode(.template)
+                .foregroundStyle(.primary)
         }
 #else
         Image(systemName: systemImage)
-            .foregroundStyle(color)
+            .foregroundStyle(color ?? .primary)
 #endif
     }
 }
@@ -282,7 +263,6 @@ struct AccountEditorView: View {
                     }
                 }
             }
-            .navigationTitle(account == nil ? "New account" : "Edit account")
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(isSaving)
             .toolbar {
@@ -424,7 +404,6 @@ private struct CurrencyPickerView: View {
                 ContentUnavailableView.search(text: query)
             }
         }
-        .navigationTitle("Currency")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Code or currency name")
     }
@@ -449,10 +428,11 @@ private struct CurrencyPickerView: View {
 
 extension View {
     func accountSelectorToolbar() -> some View {
-        toolbar {
-            ToolbarItem(placement: .principal) {
-                AccountSelector()
+        navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    AccountSelector()
+                }
             }
-        }
     }
 }
