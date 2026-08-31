@@ -21,8 +21,9 @@ struct MainTabView: View {
             }
         }
         .sheet(isPresented: $isPresentingAddSheet) {
-            Color.clear
-                .presentationDetents([.medium])
+            AddTransactionView()
+                .environmentObject(accountStore)
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $accountStore.editor) { editor in
@@ -130,4 +131,5 @@ struct MainTabView: View {
 #Preview {
     MainTabView()
         .environmentObject(AccountStore())
+        .environmentObject(TransactionStore())
 }

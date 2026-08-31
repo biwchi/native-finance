@@ -1,19 +1,18 @@
-import Combine
 import Foundation
 import SwiftUI
 
 struct TransactionsView: View {
     @EnvironmentObject private var accountStore: AccountStore
-    @StateObject private var viewModel = TransactionsViewModel()
+    @EnvironmentObject private var transactionStore: TransactionStore
 
     var body: some View {
         NavigationStack {
             Group {
-                switch viewModel.state {
+                switch transactionStore.state {
                 case .idle, .loading:
                     ProgressView("Loading transactions")
 
-                case .loaded where viewModel.transactions.isEmpty:
+                case .loaded where transactionStore.transactions.isEmpty:
                     ContentUnavailableView(
                         "No transactions",
                         systemImage: "list.bullet.rectangle",
@@ -21,12 +20,14 @@ struct TransactionsView: View {
                     )
 
                 case .loaded:
-                    List(viewModel.transactions) { transaction in
+                    List(transactionStore.transactions) { transaction in
                         TransactionRow(transaction: transaction)
                     }
                     .listStyle(.plain)
                     .refreshable {
-                        await viewModel.load(accountID: accountStore.selectedAccountID)
+                        await transactionStore.loadTransactions(
+                            accountID: accountStore.selectedAccountID
+                        )
                     }
 
                 case let .failed(message):
@@ -37,7 +38,9 @@ struct TransactionsView: View {
                     } actions: {
                         Button("Try Again") {
                             Task {
-                                await viewModel.load(accountID: accountStore.selectedAccountID)
+                                await transactionStore.loadTransactions(
+                                    accountID: accountStore.selectedAccountID
+                                )
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -48,7 +51,9 @@ struct TransactionsView: View {
             .accountSelectorToolbar()
         }
         .task(id: accountStore.selectedAccountID) {
-            await viewModel.load(accountID: accountStore.selectedAccountID)
+            await transactionStore.loadTransactions(
+                accountID: accountStore.selectedAccountID
+            )
         }
     }
 
@@ -76,7 +81,7 @@ struct TransactionRow: View {
                 Text(title)
                     .font(.body.weight(.medium))
 
-                Text(transaction.occurredOn)
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -98,51 +103,36 @@ struct TransactionRow: View {
     }
 
     private var title: String {
-        if let category = transaction.category, !category.isEmpty {
-            category
+        if let description = transaction.description, !description.isEmpty {
+            description
+        } else if let category = transaction.category {
+            category.name
         } else {
-            transaction.kind == .income ? "Income" : "Expense"
+            transaction.kind.title
         }
     }
-}
 
-@MainActor
-final class TransactionsViewModel: ObservableObject {
-    enum State: Equatable {
-        case idle
-        case loading
-        case loaded
-        case failed(String)
-    }
+    private var subtitle: String {
+        let date = transaction.occurredAt.formatted(
+            .dateTime
+                .month(.abbreviated)
+                .day()
+                .year()
+                .hour()
+                .minute()
+        )
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var transactions: [FinanceTransaction] = []
-
-    private let apiClient: APIClient
-
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
-    }
-
-    func load(accountID: UUID?) async {
-        state = .loading
-
-        do {
-            let transactions = try await apiClient.transactions(accountID: accountID)
-            guard !Task.isCancelled else { return }
-
-            self.transactions = transactions
-            state = .loaded
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled else { return }
-            state = .failed(error.localizedDescription)
+        if transaction.description?.isEmpty == false,
+           let category = transaction.category {
+            return "\(category.name) · \(date)"
         }
+
+        return date
     }
 }
 
 #Preview {
     TransactionsView()
         .environmentObject(AccountStore())
+        .environmentObject(TransactionStore())
 }

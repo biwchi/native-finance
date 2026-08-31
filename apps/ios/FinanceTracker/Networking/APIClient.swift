@@ -76,6 +76,53 @@ struct APIClient: Sendable {
         return try await get(url: url)
     }
 
+    func categories(kind: TransactionKind? = nil) async throws -> [TransactionCategory] {
+        var components = URLComponents(
+            url: apiURL.appending(path: "categories"),
+            resolvingAgainstBaseURL: false
+        )
+
+        if let kind {
+            components?.queryItems = [
+                URLQueryItem(name: "kind", value: kind.rawValue),
+            ]
+        }
+
+        guard let url = components?.url else {
+            throw APIClientError.invalidResponse
+        }
+
+        return try await get(url: url)
+    }
+
+    func createCategory(_ category: CreateCategoryRequest) async throws -> TransactionCategory {
+        try await post(
+            category,
+            to: apiURL.appending(path: "categories")
+        )
+    }
+
+    func categorySuggestions(
+        description: String,
+        kind: TransactionKind
+    ) async throws -> CategorySuggestionsResponse {
+        try await post(
+            CategorySuggestionsRequest(description: description, kind: kind),
+            to: apiURL
+                .appending(path: "categories")
+                .appending(path: "suggest")
+        )
+    }
+
+    func createTransaction(
+        _ transaction: CreateTransactionRequest
+    ) async throws -> FinanceTransaction {
+        try await post(
+            transaction,
+            to: apiURL.appending(path: "transactions")
+        )
+    }
+
     private var apiURL: URL {
         baseURL
             .appending(path: "api")
@@ -84,6 +131,18 @@ struct APIClient: Sendable {
 
     private func get<Response: Decodable>(url: URL) async throws -> Response {
         try await send(URLRequest(url: url))
+    }
+
+    private func post<Body: Encodable, Response: Decodable>(
+        _ body: Body,
+        to url: URL
+    ) async throws -> Response {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(body)
+
+        return try await send(request)
     }
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
@@ -101,7 +160,43 @@ struct APIClient: Sendable {
             )
         }
 
-        return try JSONDecoder().decode(Response.self, from: data)
+        return try Self.jsonDecoder.decode(Response.self, from: data)
+    }
+
+    private static var jsonEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private static var jsonDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+
+            let fractionalFormatter = ISO8601DateFormatter()
+            fractionalFormatter.formatOptions = [
+                .withInternetDateTime,
+                .withFractionalSeconds,
+            ]
+
+            if let date = fractionalFormatter.date(from: value) {
+                return date
+            }
+
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO 8601 date: \(value)"
+            )
+        }
+        return decoder
     }
 
     private static var configuredBaseURL: URL {

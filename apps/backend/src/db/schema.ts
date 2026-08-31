@@ -1,11 +1,14 @@
+import { sql } from "drizzle-orm";
 import {
-  date,
+  boolean,
   index,
+  integer,
   numeric,
   pgEnum,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -38,6 +41,36 @@ export const accounts = pgTable("accounts", {
     .notNull(),
 });
 
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    systemKey: varchar("system_key", { length: 80 }),
+    name: varchar("name", { length: 80 }).notNull(),
+    kind: transactionKind("kind").notNull(),
+    isSystem: boolean("is_system").default(false).notNull(),
+    examples: text("examples")
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    sortOrder: integer("sort_order").default(1_000).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("categories_system_key_unique").on(table.systemKey),
+    uniqueIndex("categories_kind_name_unique").on(
+      table.kind,
+      sql`lower(${table.name})`,
+    ),
+    index("categories_kind_sort_order_idx").on(table.kind, table.sortOrder),
+  ],
+);
+
 export const transactions = pgTable(
   "transactions",
   {
@@ -48,9 +81,13 @@ export const transactions = pgTable(
     kind: transactionKind("kind").notNull(),
     amount: numeric("amount", { precision: 19, scale: 4 }).notNull(),
     currency: varchar("currency", { length: 3 }).notNull(),
-    category: varchar("category", { length: 80 }),
+    categoryId: uuid("category_id").references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    description: text("description"),
+    normalizedDescription: text("normalized_description"),
     note: text("note"),
-    occurredOn: date("occurred_on", { mode: "string" }).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -60,11 +97,24 @@ export const transactions = pgTable(
   },
   (table) => [
     index("transactions_account_id_idx").on(table.accountId),
-    index("transactions_occurred_on_idx").on(table.occurredOn),
+    index("transactions_category_id_idx").on(table.categoryId),
+    index("transactions_occurred_at_idx").on(table.occurredAt),
+    index("transactions_kind_normalized_description_idx").on(
+      table.kind,
+      table.normalizedDescription,
+    ),
+    index("transactions_normalized_description_trgm_idx")
+      .using(
+        "gist",
+        table.normalizedDescription.asc().op("gist_trgm_ops"),
+      )
+      .where(sql`${table.normalizedDescription} is not null`),
   ],
 );
 
 export type Account = typeof accounts.$inferSelect;
 export type NewAccount = typeof accounts.$inferInsert;
+export type Category = typeof categories.$inferSelect;
+export type NewCategory = typeof categories.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;

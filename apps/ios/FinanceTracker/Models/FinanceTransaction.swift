@@ -1,8 +1,17 @@
 import Foundation
 
-enum TransactionKind: String, Codable {
+enum TransactionKind: String, Codable, CaseIterable, Identifiable {
     case expense
     case income
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .expense: "Expense"
+        case .income: "Income"
+        }
+    }
 }
 
 struct FinanceTransaction: Codable, Identifiable, Hashable {
@@ -11,10 +20,20 @@ struct FinanceTransaction: Codable, Identifiable, Hashable {
     let kind: TransactionKind
     let amount: String
     let currency: String
-    let category: String?
+    let category: TransactionCategory?
+    let description: String?
     let note: String?
-    let occurredOn: String
-    let createdAt: String
-    let updatedAt: String
+    let occurredAt: Date
+    let createdAt: Date
+    let updatedAt: Date
 }
 
+struct CreateTransactionRequest: Encodable {
+    let accountId: UUID
+    let kind: TransactionKind
+    let amount: String
+    let categoryId: UUID?
+    let description: String?
+    let note: String?
+    let occurredAt: Date
+}

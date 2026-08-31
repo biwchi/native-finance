@@ -15,6 +15,13 @@
       "when": 1788181233833,
       "tag": "0001_aberrant_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788183015126,
+      "tag": "0002_careless_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

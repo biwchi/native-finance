@@ -4,6 +4,8 @@
 <dict>
 	<key>API_BASE_URL</key>
 	<string>http://localhost:3000</string>
+	<key>FOUNDATION_CATEGORY_RESOLVER_ENABLED</key>
+	<false/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -42,4 +44,3 @@
 	<dict/>
 </dict>
 </plist>
-
