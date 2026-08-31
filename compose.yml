@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: finance_tracker
+      POSTGRES_USER: finance_tracker
+      POSTGRES_PASSWORD: finance_tracker
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance_tracker -d finance_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - finance_tracker_postgres:/var/lib/postgresql/data
+
+volumes:
+  finance_tracker_postgres:
+

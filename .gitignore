@@ -1,0 +1,21 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# JavaScript and Bun
+node_modules/
+*.tsbuildinfo
+coverage/
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+
+# Local tooling
+.idea/
+.vscode/
+
