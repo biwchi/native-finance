@@ -24,6 +24,8 @@ struct AccountSelector: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
 
+    var compact = false
+
     var body: some View {
         Menu {
             Button {
@@ -69,6 +71,33 @@ struct AccountSelector: View {
                 Label("Add account", systemImage: "plus")
             }
         } label: {
+            selectorLabel
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Account, \(accountStore.selectionTitle), \(selectionSubtitle)")
+                .accessibilityHint("Opens the account picker")
+        }
+        .tint(.primary)
+    }
+
+    @ViewBuilder
+    private var selectorLabel: some View {
+        if compact {
+            HStack(spacing: 7) {
+                Image(systemName: selectedIcon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(compactIconColor)
+
+                Text(accountStore.selectionTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Capsule())
+        } else {
             HStack(spacing: 9) {
                 Image(systemName: selectedIcon)
                     .font(.system(size: 15, weight: .semibold))
@@ -99,11 +128,7 @@ struct AccountSelector: View {
             .padding(.vertical, 5)
             .accountSelectorGlass()
             .contentShape(Capsule())
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Account, \(accountStore.selectionTitle), \(selectionSubtitle)")
-            .accessibilityHint("Opens the account picker")
         }
-        .tint(.primary)
     }
 
     private var selectedIcon: String {
@@ -112,6 +137,10 @@ struct AccountSelector: View {
 
     private var selectedColor: Color {
         accountStore.selectedAccount?.iconColor.color ?? .white
+    }
+
+    private var compactIconColor: Color {
+        accountStore.selectedAccount?.iconColor.color ?? .primary
     }
 
     private var selectionSubtitle: String {

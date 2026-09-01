@@ -148,6 +148,33 @@ struct APIClient: Sendable {
         )
     }
 
+    func monthlyBudget(month: String, accountID: UUID?) async throws -> MonthlyBudget? {
+        var components = URLComponents(
+            url: apiURL.appending(path: "budgets").appending(path: "monthly"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [URLQueryItem(name: "month", value: month)]
+        if let accountID {
+            queryItems.append(URLQueryItem(name: "accountId", value: accountID.uuidString))
+        }
+        components?.queryItems = queryItems
+
+        guard let url = components?.url else {
+            throw APIClientError.invalidResponse
+        }
+        return try await get(url: url)
+    }
+
+    func saveMonthlyBudget(_ budget: MonthlyBudgetRequest) async throws -> MonthlyBudget? {
+        var request = URLRequest(
+            url: apiURL.appending(path: "budgets").appending(path: "monthly")
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(budget)
+        return try await send(request)
+    }
+
     private var apiURL: URL {
         baseURL
             .appending(path: "api")

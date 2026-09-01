@@ -43,7 +43,7 @@ struct TransactionListView: View {
                     ForEach(transactionGroups, id: \.day) { group in
                         Section {
                             ForEach(group.transactions) { transaction in
-                                transactionButton(transaction, showsDate: false)
+                                transactionButton(transaction)
                             }
                         } header: {
                             Text(group.day, format: .dateTime.day().month(.wide).year())
@@ -76,11 +76,14 @@ struct TransactionListView: View {
         }
     }
 
-    private func transactionButton(_ transaction: FinanceTransaction, showsDate: Bool = true) -> some View {
+    private func transactionButton(_ transaction: FinanceTransaction) -> some View {
         Button {
             editingTransaction = transaction
         } label: {
-            TransactionRow(transaction: transaction, showsDate: showsDate)
+            TransactionRow(
+                transaction: transaction,
+                account: accountStore.accounts.first { $0.id == transaction.accountId }
+            )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -111,7 +114,7 @@ struct TransactionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let transaction: FinanceTransaction
-    var showsDate = true
+    let account: Account?
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -129,12 +132,12 @@ struct TransactionRow: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
                     details
-                    amount(alignment: .leading)
+                    amount
                 }
             } else {
                 details
                 Spacer(minLength: 12)
-                amount(alignment: .trailing)
+                amount
                     .layoutPriority(1)
             }
         }
@@ -152,57 +155,57 @@ struct TransactionRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
 
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            accountLabel
         }
     }
 
-    private func amount(alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 5) {
-            Text(amountText)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(transaction.kind == .income ? Color.green : .primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+    private var accountLabel: some View {
+        HStack(spacing: 5) {
+            Image(systemName: account?.icon ?? "creditcard")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(account?.iconColor.color ?? Color.secondary)
+                .accessibilityHidden(true)
 
-            Text(transaction.currency)
-                .font(.caption2.weight(.medium))
+            Text(account?.name ?? "Unknown account")
+                .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
         }
+    }
+
+    private var amount: some View {
+        Text(amountText)
+            .font(.subheadline.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(transaction.kind == .income ? Color.green : .primary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var title: String {
-        if let description = transaction.description, !description.isEmpty {
-            description
-        } else {
-            transaction.category?.name ?? transaction.kind.title
-        }
-    }
-
-    private var subtitle: String {
-        let date = showsDate
-            ? transaction.occurredAt.formatted(.dateTime.month(.abbreviated).day())
-            : transaction.occurredAt.formatted(date: .omitted, time: .shortened)
-
-        if transaction.description?.isEmpty == false, let category = transaction.category {
-            return "\(category.name) · \(date)"
-        }
-        return date
+        transaction.category?.name ?? "Uncategorized"
     }
 
     private var amountText: String {
-        let value = Decimal(string: transaction.amount)?.formatted(
-            .number.precision(.fractionLength(2...4))
-        ) ?? transaction.amount
-        return "\(transaction.kind == .income ? "+" : "−")\(value)"
+        let value = Decimal(string: transaction.amount).flatMap(formattedAmount) ?? transaction.amount
+        let sign = transaction.kind == .income ? "+" : "-"
+        return "\(sign) \(value) \(transaction.currency)"
+    }
+
+    private func formattedAmount(_ amount: Decimal) -> String? {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = " "
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 4
+        return formatter.string(from: amount as NSDecimalNumber)
     }
 
     private var accessibilityDescription: String {
         let date = transaction.occurredAt.formatted(date: .abbreviated, time: .shortened)
-        return "\(title), \(transaction.kind.title), \(transaction.amount) \(transaction.currency), \(transaction.category?.name ?? "Uncategorized"), \(date)"
+        return "\(title), \(account?.name ?? "Unknown account"), \(amountText), \(date)"
     }
 
     private var iconColor: Color {
@@ -225,7 +228,7 @@ struct TransactionRow: View {
     )
     let transaction = FinanceTransaction(
         id: UUID(),
-        accountId: UUID(),
+        accountId: TransactionListPreviewData.account.id,
         kind: .expense,
         amount: "6.50",
         currency: "USD",
@@ -240,7 +243,7 @@ struct TransactionRow: View {
     ZStack {
         Color(red: 0.06, green: 0.07, blue: 0.09)
 
-        TransactionRow(transaction: transaction)
+        TransactionRow(transaction: transaction, account: TransactionListPreviewData.account)
             .padding(16)
             .background(
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -265,6 +268,16 @@ struct TransactionRow: View {
 private enum TransactionListPreviewData {
     static let accountID = UUID()
     static let now = Date.now
+    static let account = Account(
+        id: accountID,
+        name: "Everyday card",
+        type: .checking,
+        currency: "USD",
+        icon: "creditcard.fill",
+        iconColor: .blue,
+        createdAt: "",
+        updatedAt: ""
+    )
 
     static let food = category(
         systemKey: "expense.food-drink",

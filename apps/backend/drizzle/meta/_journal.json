@@ -43,6 +43,13 @@
       "when": 1788260672658,
       "tag": "0005_late_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788284357337,
+      "tag": "0006_known_sabretooth",
+      "breakpoints": true
     }
   ]
 }

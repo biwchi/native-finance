@@ -345,7 +345,8 @@ struct AddTransactionView: View {
     }
 
     private var availableModes: [QuickTransactionMode] {
-        transaction == nil ? QuickTransactionMode.allCases : [.expense, .income]
+        guard transaction == nil else { return [.expense, .income] }
+        return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
     }
 
     private func transactionModeButton(_ option: QuickTransactionMode) -> some View {

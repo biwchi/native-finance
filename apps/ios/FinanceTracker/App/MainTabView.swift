@@ -3,11 +3,16 @@ import UIKit
 
 struct MainTabView: View {
     @EnvironmentObject private var accountStore: AccountStore
+    @EnvironmentObject private var budgetStore: BudgetStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @State private var isPresentingAddSheet = false
 
     var body: some View {
-        MainTabController(accountStore: accountStore, transactionStore: transactionStore) {
+        MainTabController(
+            accountStore: accountStore,
+            budgetStore: budgetStore,
+            transactionStore: transactionStore
+        ) {
             isPresentingAddSheet = true
         }
         .ignoresSafeArea()
@@ -68,6 +73,7 @@ private extension View {
 
 private struct MainTabController: UIViewControllerRepresentable {
     let accountStore: AccountStore
+    let budgetStore: BudgetStore
     let transactionStore: TransactionStore
     var onAdd: () -> Void
 
@@ -116,6 +122,7 @@ private struct MainTabController: UIViewControllerRepresentable {
         let controller = UIHostingController(
             rootView: content
                 .environmentObject(accountStore)
+                .environmentObject(budgetStore)
                 .environmentObject(transactionStore)
         )
         controller.tabBarItem = UITabBarItem(title: title, image: UIImage(systemName: systemImage), tag: 0)
@@ -153,5 +160,6 @@ private struct MainTabController: UIViewControllerRepresentable {
 #Preview {
     MainTabView()
         .environmentObject(AccountStore())
+        .environmentObject(BudgetStore())
         .environmentObject(TransactionStore())
 }

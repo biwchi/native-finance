@@ -9,9 +9,8 @@ const queryClient = postgres(config.databaseUrl, {
   prepare: false,
 });
 
-export const db = drizzle(queryClient, { schema });
+export const db = drizzle(queryClient, { schema, casing: "snake_case" });
 
 export function closeDatabase(): Promise<void> {
   return queryClient.end();
 }
-
