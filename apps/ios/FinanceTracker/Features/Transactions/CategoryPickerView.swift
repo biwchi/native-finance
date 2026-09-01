@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct CategoryPickerView: View {
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var transactionStore: TransactionStore
 
     @Binding var selection: UUID?
     let kind: TransactionKind
+    let onSelect: (UUID?) -> Void
 
     @State private var query = ""
     @State private var isPresentingNewCategory = false
@@ -59,22 +59,30 @@ struct CategoryPickerView: View {
                 }
 
                 ForEach(filteredCategories) { category in
-                    Button {
-                        select(category.id)
-                    } label: {
-                        HStack(spacing: 12) {
-                            CategoryIcon(category: category)
-                            Text(category.name)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 8)
-                            selectionIndicator(isSelected: selection == category.id)
+                    let children = transactionStore.subcategories(of: category)
+
+                    if searchText.isEmpty && !children.isEmpty {
+                        NavigationLink(value: category) {
+                            CategorySelectionRow(
+                                category: category,
+                                title: category.name,
+                                isSelected: selection == category.id ||
+                                    children.contains(where: { $0.id == selection })
+                            )
                         }
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
+                    } else {
+                        Button {
+                            select(category.id)
+                        } label: {
+                            CategorySelectionRow(
+                                category: category,
+                                title: transactionStore.categoryPath(category),
+                                isSelected: selection == category.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == category.id ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == category.id ? .isSelected : [])
                 }
 
                 if filteredCategories.isEmpty,
@@ -95,13 +103,21 @@ struct CategoryPickerView: View {
         .listStyle(.insetGrouped)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search categories")
+        .navigationDestination(for: TransactionCategory.self) { parent in
+            SubcategoryPickerView(
+                parent: parent,
+                subcategories: transactionStore.subcategories(of: parent),
+                selection: selection,
+                onSelect: select
+            )
+        }
         .task {
             guard !transactionStore.isLoadingCategories else { return }
             await transactionStore.loadCategories()
         }
         .sheet(isPresented: $isPresentingNewCategory, onDismiss: {
             if didCreateCategory {
-                dismiss()
+                onSelect(selection)
             }
         }) {
             NewTransactionCategoryView(kind: kind) { category in
@@ -109,13 +125,13 @@ struct CategoryPickerView: View {
                 didCreateCategory = true
             }
             .environmentObject(transactionStore)
-            .presentationDetents([.medium])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
     }
 
     private var categories: [TransactionCategory] {
-        transactionStore.categories(for: kind)
+        transactionStore.rootCategories(for: kind)
     }
 
     private var searchText: String {
@@ -124,12 +140,14 @@ struct CategoryPickerView: View {
 
     private var filteredCategories: [TransactionCategory] {
         guard !searchText.isEmpty else { return categories }
-        return categories.filter { $0.name.localizedStandardContains(searchText) }
+        return transactionStore.categories(for: kind).filter {
+            transactionStore.categoryPath($0).localizedStandardContains(searchText)
+        }
     }
 
     private func select(_ categoryID: UUID?) {
         selection = categoryID
-        dismiss()
+        onSelect(categoryID)
     }
 
     private func actionIcon(_ name: String, color: Color) -> some View {
@@ -152,6 +170,76 @@ struct CategoryPickerView: View {
     }
 }
 
+private struct SubcategoryPickerView: View {
+    let parent: TransactionCategory
+    let subcategories: [TransactionCategory]
+    let selection: UUID?
+    let onSelect: (UUID?) -> Void
+
+    var body: some View {
+        List {
+            Section {
+                Button {
+                    onSelect(parent.id)
+                } label: {
+                    CategorySelectionRow(
+                        category: parent,
+                        title: "Use \(parent.name)",
+                        isSelected: selection == parent.id
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == parent.id ? .isSelected : [])
+            } footer: {
+                Text("A subcategory is optional.")
+            }
+
+            Section("Subcategories") {
+                ForEach(subcategories) { category in
+                    Button {
+                        onSelect(category.id)
+                    } label: {
+                        CategorySelectionRow(
+                            category: category,
+                            title: category.name,
+                            isSelected: selection == category.id
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selection == category.id ? .isSelected : [])
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(parent.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct CategorySelectionRow: View {
+    let category: TransactionCategory
+    let title: String
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CategoryIcon(category: category)
+            Text(title)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
 private struct NewTransactionCategoryView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var transactionStore: TransactionStore
@@ -160,6 +248,9 @@ private struct NewTransactionCategoryView: View {
     let onCreated: (TransactionCategory) -> Void
 
     @State private var name = ""
+    @State private var parentID: UUID?
+    @State private var icon = "tag.fill"
+    @State private var color = CategoryColor.gray
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -169,6 +260,29 @@ private struct NewTransactionCategoryView: View {
                 Section("Category") {
                     TextField("Name", text: $name)
                     LabeledContent("Type", value: kind.title)
+
+                    Picker("Parent", selection: $parentID) {
+                        Text("None").tag(UUID?.none)
+
+                        ForEach(transactionStore.rootCategories(for: kind)) { category in
+                            Label {
+                                Text(category.name)
+                            } icon: {
+                                Image(systemName: category.displayIcon)
+                                    .foregroundStyle(category.displayColor)
+                            }
+                            .tag(Optional(category.id))
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                }
+
+                Section("Icon") {
+                    CategoryIconPicker(selection: $icon, color: color)
+                }
+
+                Section("Color") {
+                    CategoryColorPicker(selection: $color)
                 }
 
                 if let errorMessage {
@@ -206,7 +320,13 @@ private struct NewTransactionCategoryView: View {
         defer { isSaving = false }
 
         do {
-            let category = try await transactionStore.createCategory(name: name, kind: kind)
+            let category = try await transactionStore.createCategory(
+                name: name,
+                kind: kind,
+                parentID: parentID,
+                icon: icon,
+                color: color
+            )
             onCreated(category)
             dismiss()
         } catch {

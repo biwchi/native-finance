@@ -41,7 +41,7 @@ final class AccountStore: ObservableObject {
     }
 
     var selectionTitle: String {
-        selectedAccount?.name ?? "Total"
+        selectedAccount?.name ?? "All Accounts"
     }
 
     func loadAccounts(force: Bool = false) async {

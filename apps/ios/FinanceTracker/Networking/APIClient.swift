@@ -102,6 +102,24 @@ struct APIClient: Sendable {
         )
     }
 
+    func updateCategory(id: UUID, with category: UpdateCategoryRequest) async throws -> TransactionCategory {
+        var request = URLRequest(
+            url: apiURL.appending(path: "categories").appending(path: id.uuidString)
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(category)
+        return try await send(request)
+    }
+
+    func deleteCategory(id: UUID) async throws -> DeleteCategoryResponse {
+        var request = URLRequest(
+            url: apiURL.appending(path: "categories").appending(path: id.uuidString)
+        )
+        request.httpMethod = "DELETE"
+        return try await send(request)
+    }
+
     func categorySuggestions(
         description: String,
         kind: TransactionKind
@@ -120,6 +138,13 @@ struct APIClient: Sendable {
         try await post(
             transaction,
             to: apiURL.appending(path: "transactions")
+        )
+    }
+
+    func createTransfer(_ transfer: TransferRequest) async throws -> TransferResponse {
+        try await post(
+            transfer,
+            to: apiURL.appending(path: "transactions").appending(path: "transfer")
         )
     }
 

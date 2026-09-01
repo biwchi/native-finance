@@ -22,6 +22,27 @@
       "when": 1788183015126,
       "tag": "0002_careless_doctor_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788256691182,
+      "tag": "0003_colorful_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788257253612,
+      "tag": "0004_flaky_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788260672658,
+      "tag": "0005_late_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

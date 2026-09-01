@@ -21,6 +21,8 @@ struct FinanceTransaction: Codable, Identifiable, Hashable {
     let amount: String
     let currency: String
     let category: TransactionCategory?
+    var merchant: String? = nil
+    var payee: String? = nil
     let description: String?
     let note: String?
     let occurredAt: Date
@@ -33,7 +35,25 @@ struct TransactionRequest: Encodable {
     let kind: TransactionKind
     let amount: String
     let categoryId: UUID?
+    var merchant: String? = nil
+    var payee: String? = nil
     let description: String?
     let note: String?
     let occurredAt: Date
+}
+
+struct TransferRequest: Encodable {
+    let fromAccountId: UUID
+    let toAccountId: UUID
+    let amount: String
+    let merchant: String?
+    let payee: String?
+    let description: String?
+    let note: String?
+    let occurredAt: Date
+}
+
+struct TransferResponse: Decodable {
+    let source: FinanceTransaction
+    let destination: FinanceTransaction
 }

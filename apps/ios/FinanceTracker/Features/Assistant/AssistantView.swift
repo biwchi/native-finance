@@ -16,4 +16,5 @@ struct AssistantView: View {
 #Preview {
     AssistantView()
         .environmentObject(AccountStore())
+        .environmentObject(TransactionStore())
 }

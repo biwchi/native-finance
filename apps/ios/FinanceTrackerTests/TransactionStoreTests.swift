@@ -3,6 +3,94 @@ import XCTest
 
 @MainActor
 final class TransactionStoreTests: XCTestCase {
+    func testCategoryIconCatalogHasRichDistinctGroups() {
+        XCTAssertEqual(CategoryIconCatalog.groups.count, 11)
+        XCTAssertTrue(CategoryIconCatalog.groups.allSatisfy { $0.icons.count >= 16 })
+        XCTAssertEqual(Set(CategoryIconCatalog.choices).count, CategoryIconCatalog.choices.count)
+    }
+
+    func testExtendedCategoryColorsUseStableAPINames() throws {
+        let colors: [(CategoryColor, String)] = [
+            (.coral, "coral"),
+            (.amber, "amber"),
+            (.lime, "lime"),
+            (.turquoise, "turquoise"),
+            (.sky, "sky"),
+            (.navy, "navy"),
+            (.violet, "violet"),
+            (.lavender, "lavender"),
+            (.rose, "rose"),
+            (.slate, "slate"),
+        ]
+        let encoder = JSONEncoder()
+
+        for (color, expectedName) in colors {
+            let encoded = try encoder.encode(color)
+            XCTAssertEqual(String(decoding: encoded, as: UTF8.self), "\"\(expectedName)\"")
+        }
+    }
+
+    func testCategoryAppearanceIsSentWhenCreatingAndEditing() async throws {
+        let parentID = UUID()
+        let createdCategory = category(
+            parentID: parentID,
+            icon: "cup.and.saucer.fill",
+            color: .orange
+        )
+        let editedCategory = category(
+            id: createdCategory.id,
+            name: "Coffee runs",
+            icon: "mug.fill",
+            color: .brown
+        )
+        let session = makeSession { request in
+            let body = try XCTUnwrap(requestBody(request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+            switch request.httpMethod {
+            case "POST":
+                XCTAssertEqual(json["name"] as? String, "Coffee")
+                XCTAssertEqual(json["kind"] as? String, "expense")
+                XCTAssertEqual(json["parentId"] as? String, parentID.uuidString)
+                XCTAssertEqual(json["icon"] as? String, "cup.and.saucer.fill")
+                XCTAssertEqual(json["color"] as? String, "orange")
+                return (201, try self.encode(createdCategory))
+            case "PATCH":
+                XCTAssertEqual(request.url?.lastPathComponent, createdCategory.id.uuidString)
+                XCTAssertEqual(json["name"] as? String, "Coffee runs")
+                XCTAssertTrue(json["parentId"] is NSNull)
+                XCTAssertEqual(json["icon"] as? String, "mug.fill")
+                XCTAssertEqual(json["color"] as? String, "brown")
+                return (200, try self.encode(editedCategory))
+            default:
+                XCTFail("Unexpected request method")
+                return (405, Data())
+            }
+        }
+        defer { session.invalidateAndCancel() }
+
+        let store = TransactionStore(
+            apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
+        )
+        let created = try await store.createCategory(
+            name: "Coffee",
+            kind: .expense,
+            parentID: parentID,
+            icon: "cup.and.saucer.fill",
+            color: .orange
+        )
+        let edited = try await store.updateCategory(
+            created,
+            name: "Coffee runs",
+            parentID: nil,
+            icon: "mug.fill",
+            color: .brown
+        )
+
+        XCTAssertEqual(edited, editedCategory)
+        XCTAssertEqual(store.categories, [editedCategory])
+    }
+
     func testUpdateReplacesAndReordersTheExistingTransactionWithoutDuplicates() async throws {
         let accountID = UUID()
         let original = transaction(accountID: accountID, occurredAt: Date(timeIntervalSince1970: 1_700_000_000))
@@ -79,6 +167,29 @@ final class TransactionStoreTests: XCTestCase {
             id: id, accountId: accountID, kind: .expense, amount: "12.5000", currency: "USD",
             category: nil, description: nil, note: nil, occurredAt: occurredAt,
             createdAt: Date(timeIntervalSince1970: 1_700_000_000), updatedAt: Date(timeIntervalSince1970: 1_700_002_000)
+        )
+    }
+
+    private func category(
+        id: UUID = UUID(),
+        name: String = "Coffee",
+        parentID: UUID? = nil,
+        icon: String,
+        color: CategoryColor
+    ) -> TransactionCategory {
+        TransactionCategory(
+            id: id,
+            systemKey: nil,
+            name: name,
+            kind: .expense,
+            parentId: parentID,
+            icon: icon,
+            color: color,
+            isSystem: false,
+            examples: [],
+            sortOrder: 1_000,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
     }
 

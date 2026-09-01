@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import { db } from "../db/client.ts";
@@ -14,6 +14,19 @@ const transactionBody = t.Object({
   kind: transactionKindSchema,
   amount: t.String({ pattern: amountPattern }),
   categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+  merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+  payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+  description: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
+  note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
+  occurredAt: t.String({ format: "date-time" }),
+});
+
+const transferBody = t.Object({
+  fromAccountId: t.String({ format: "uuid" }),
+  toAccountId: t.String({ format: "uuid" }),
+  amount: t.String({ pattern: amountPattern }),
+  merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+  payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
   description: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   occurredAt: t.String({ format: "date-time" }),
@@ -26,6 +39,9 @@ const transactionSelection = {
     systemKey: categories.systemKey,
     name: categories.name,
     kind: categories.kind,
+    parentId: categories.parentId,
+    icon: categories.icon,
+    color: categories.color,
     isSystem: categories.isSystem,
   },
 };
@@ -75,6 +91,71 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
       return toTransactionResponse({ ...transaction, category: prepared.category });
     },
     { body: transactionBody },
+  )
+  .post(
+    "/transfer",
+    async ({ body, set }) => {
+      if (body.fromAccountId === body.toAccountId) {
+        set.status = 400;
+        return { message: "Transfer accounts must be different" };
+      }
+
+      const transferAccounts = await db
+        .select()
+        .from(accounts)
+        .where(inArray(accounts.id, [body.fromAccountId, body.toAccountId]));
+
+      const sourceAccount = transferAccounts.find((account) => account.id === body.fromAccountId);
+      const destinationAccount = transferAccounts.find((account) => account.id === body.toAccountId);
+      if (!sourceAccount || !destinationAccount) {
+        set.status = 404;
+        return { message: "Transfer account not found" };
+      }
+      if (sourceAccount.currency !== destinationAccount.currency) {
+        set.status = 400;
+        return { message: "Transfer accounts must use the same currency" };
+      }
+
+      const occurredAt = new Date(body.occurredAt);
+      if (Number.isNaN(occurredAt.getTime())) {
+        set.status = 400;
+        return { message: "occurredAt must be a valid date and time" };
+      }
+
+      const description = cleanOptionalText(body.description);
+      const sharedValues = {
+        amount: body.amount,
+        currency: sourceAccount.currency,
+        categoryId: null,
+        merchant: cleanOptionalText(body.merchant),
+        payee: cleanOptionalText(body.payee),
+        description,
+        normalizedDescription: description ? normalizeTransactionDescription(description) : null,
+        note: cleanOptionalText(body.note),
+        occurredAt,
+      };
+
+      const [source, destination] = await db.transaction(async (transaction) =>
+        transaction
+          .insert(transactions)
+          .values([
+            { ...sharedValues, accountId: sourceAccount.id, kind: "expense" },
+            { ...sharedValues, accountId: destinationAccount.id, kind: "income" },
+          ])
+          .returning(),
+      );
+
+      if (!source || !destination) {
+        throw new Error("Transfer insert did not return both rows");
+      }
+
+      set.status = 201;
+      return {
+        source: toTransactionResponse({ ...source, category: null }),
+        destination: toTransactionResponse({ ...destination, category: null }),
+      };
+    },
+    { body: transferBody },
   )
   .put(
     "/:id",
@@ -127,6 +208,9 @@ type CategorySummary = {
   systemKey: string | null;
   name: string;
   kind: "expense" | "income";
+  parentId: string | null;
+  icon: string | null;
+  color: string | null;
   isSystem: boolean;
 };
 
@@ -187,6 +271,8 @@ async function prepareTransaction(body: typeof transactionBody.static) {
       currency: account.currency,
       // PUT replaces all editable fields, so missing optionals clear their stored values.
       categoryId: category?.id ?? null,
+      merchant: cleanOptionalText(body.merchant),
+      payee: cleanOptionalText(body.payee),
       description,
       normalizedDescription: description ? normalizeTransactionDescription(description) : null,
       note: cleanOptionalText(body.note),

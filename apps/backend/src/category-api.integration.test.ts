@@ -93,6 +93,113 @@ databaseDescribe("category and transaction API integration", () => {
     expect(duplicateResponse.status).toBe(409);
   });
 
+  it("creates one-level subcategories and keeps names unique within each parent", async () => {
+    const firstParentResponse = await request("/api/v1/categories", {
+      method: "POST",
+      body: { name: `Meals ${suffix}`, kind: "expense" },
+    });
+    const firstParent = (await firstParentResponse.json()) as { id: string };
+    customCategoryIds.push(firstParent.id);
+
+    const secondParentResponse = await request("/api/v1/categories", {
+      method: "POST",
+      body: { name: `Travel food ${suffix}`, kind: "expense" },
+    });
+    const secondParent = (await secondParentResponse.json()) as { id: string };
+    customCategoryIds.push(secondParent.id);
+
+    const firstChildResponse = await request("/api/v1/categories", {
+      method: "POST",
+      body: {
+        name: "Fast food",
+        kind: "expense",
+        parentId: firstParent.id,
+        icon: "takeoutbag.and.cup.and.straw.fill",
+        color: "orange",
+      },
+    });
+    const firstChild = (await firstChildResponse.json()) as {
+      id: string;
+      parentId: string;
+      icon: string;
+      color: string;
+    };
+    customCategoryIds.push(firstChild.id);
+
+    const secondChildResponse = await request("/api/v1/categories", {
+      method: "POST",
+      body: {
+        name: "Fast food",
+        kind: "expense",
+        parentId: secondParent.id,
+      },
+    });
+    const secondChild = (await secondChildResponse.json()) as { id: string };
+    customCategoryIds.push(secondChild.id);
+
+    const nestedResponse = await request("/api/v1/categories", {
+      method: "POST",
+      body: {
+        name: "Burgers",
+        kind: "expense",
+        parentId: firstChild.id,
+      },
+    });
+
+    const moveParentResponse = await request(
+      `/api/v1/categories/${firstParent.id}`,
+      {
+        method: "PATCH",
+        body: {
+          name: `Meals ${suffix}`,
+          parentId: foodCategoryId,
+        },
+      },
+    );
+
+    const moveChildResponse = await request(
+      `/api/v1/categories/${firstChild.id}`,
+      {
+        method: "PATCH",
+        body: {
+          name: "Fast food",
+          parentId: foodCategoryId,
+        },
+      },
+    );
+    const movedChild = (await moveChildResponse.json()) as {
+      parentId: string;
+    };
+
+    const detachChildResponse = await request(
+      `/api/v1/categories/${firstChild.id}`,
+      {
+        method: "PATCH",
+        body: {
+          name: `Fast food ${suffix}`,
+          parentId: null,
+        },
+      },
+    );
+    const detachedChild = (await detachChildResponse.json()) as {
+      parentId: string | null;
+    };
+
+    expect(firstChildResponse.status).toBe(201);
+    expect(firstChild).toMatchObject({
+      parentId: firstParent.id,
+      icon: "takeoutbag.and.cup.and.straw.fill",
+      color: "orange",
+    });
+    expect(secondChildResponse.status).toBe(201);
+    expect(nestedResponse.status).toBe(400);
+    expect(moveParentResponse.status).toBe(400);
+    expect(moveChildResponse.status).toBe(200);
+    expect(movedChild.parentId).toBe(foodCategoryId);
+    expect(detachChildResponse.status).toBe(200);
+    expect(detachedChild.parentId).toBeNull();
+  });
+
   it("validates category kind and derives currency from the account", async () => {
     const mismatchResponse = await createTransaction({
       description: `mismatched ${suffix}`,

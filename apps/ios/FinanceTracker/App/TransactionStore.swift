@@ -24,6 +24,17 @@ final class TransactionStore: ObservableObject {
         self.apiClient = apiClient
     }
 
+#if DEBUG
+    static func preview(transactions: [FinanceTransaction]) -> TransactionStore {
+        let store = TransactionStore()
+        store.transactions = transactions
+        store.categories = Array(Set(transactions.compactMap(\.category)))
+        store.hasLoadedCategories = true
+        store.state = .loaded
+        return store
+    }
+#endif
+
     func loadTransactions(accountID: UUID?) async {
         currentAccountID = accountID
         state = .loading
@@ -71,18 +82,86 @@ final class TransactionStore: ObservableObject {
             }
     }
 
+    func rootCategories(for kind: TransactionKind) -> [TransactionCategory] {
+        categories(for: kind).filter { $0.parentId == nil }
+    }
+
+    func subcategories(of category: TransactionCategory) -> [TransactionCategory] {
+        categories(for: category.kind).filter { $0.parentId == category.id }
+    }
+
+    func categoryPath(_ category: TransactionCategory) -> String {
+        guard let parentID = category.parentId,
+              let parent = categories.first(where: { $0.id == parentID }) else {
+            return category.name
+        }
+        return "\(parent.name) › \(category.name)"
+    }
+
     @discardableResult
-    func createCategory(name: String, kind: TransactionKind) async throws -> TransactionCategory {
+    func createCategory(
+        name: String,
+        kind: TransactionKind,
+        parentID: UUID? = nil,
+        icon: String = "tag.fill",
+        color: CategoryColor = .gray
+    ) async throws -> TransactionCategory {
         let category = try await apiClient.createCategory(
             CreateCategoryRequest(
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                kind: kind
+                kind: kind,
+                parentId: parentID,
+                icon: icon,
+                color: color
             )
         )
 
         categories.append(category)
         hasLoadedCategories = true
         return category
+    }
+
+    @discardableResult
+    func updateCategory(
+        _ existingCategory: TransactionCategory,
+        name: String,
+        parentID: UUID?,
+        icon: String,
+        color: CategoryColor
+    ) async throws -> TransactionCategory {
+        let category = try await apiClient.updateCategory(
+            id: existingCategory.id,
+            with: UpdateCategoryRequest(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                parentId: parentID,
+                icon: icon,
+                color: color
+            )
+        )
+
+        if let index = categories.firstIndex(where: { $0.id == category.id }) {
+            categories[index] = category
+        }
+        transactions = transactions.map { transaction in
+            guard transaction.category?.id == category.id else { return transaction }
+            return transaction.replacingCategory(with: category)
+        }
+        return category
+    }
+
+    func deleteCategory(_ category: TransactionCategory) async throws {
+        let removedIDs = Set(
+            [category.id] + categories
+                .filter { $0.parentId == category.id }
+                .map(\.id)
+        )
+        _ = try await apiClient.deleteCategory(id: category.id)
+        categories.removeAll { removedIDs.contains($0.id) }
+        transactions = transactions.map { transaction in
+            guard let categoryID = transaction.category?.id,
+                  removedIDs.contains(categoryID) else { return transaction }
+            return transaction.replacingCategory(with: nil)
+        }
     }
 
     func categorySuggestions(
@@ -101,6 +180,14 @@ final class TransactionStore: ObservableObject {
         let transaction = try await apiClient.createTransaction(request)
         apply(transaction)
         return transaction
+    }
+
+    @discardableResult
+    func createTransfer(_ request: TransferRequest) async throws -> TransferResponse {
+        let transfer = try await apiClient.createTransfer(request)
+        apply(transfer.source)
+        apply(transfer.destination)
+        return transfer
     }
 
     @discardableResult
@@ -123,5 +210,25 @@ final class TransactionStore: ObservableObject {
             }
         }
         state = .loaded
+    }
+}
+
+private extension FinanceTransaction {
+    func replacingCategory(with category: TransactionCategory?) -> FinanceTransaction {
+        FinanceTransaction(
+            id: id,
+            accountId: accountId,
+            kind: kind,
+            amount: amount,
+            currency: currency,
+            category: category,
+            merchant: merchant,
+            payee: payee,
+            description: description,
+            note: note,
+            occurredAt: occurredAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 }

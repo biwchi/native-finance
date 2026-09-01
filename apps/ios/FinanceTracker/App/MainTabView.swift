@@ -16,6 +16,7 @@ struct MainTabView: View {
                 .environmentObject(accountStore)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+                .quickAddSheetBackground()
         }
         .sheet(item: $accountStore.editor) { editor in
             AccountEditorView(account: editor.account)
@@ -54,6 +55,17 @@ struct MainTabView: View {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func quickAddSheetBackground() -> some View {
+        if #available(iOS 26.0, *) {
+            presentationBackground(.ultraThinMaterial)
+        } else {
+            self
+        }
+    }
+}
+
 private struct MainTabController: UIViewControllerRepresentable {
     let accountStore: AccountStore
     let transactionStore: TransactionStore
@@ -74,6 +86,7 @@ private struct MainTabController: UIViewControllerRepresentable {
             TransactionsView(), title: "Transactions", systemImage: "list.bullet.rectangle"
         )
         let assistant = hostingController(AssistantView(), title: "Assistant", systemImage: "sparkles")
+        let settings = hostingController(SettingsView(), title: "Settings", systemImage: "gearshape")
         let add = context.coordinator.addViewController
         add.tabBarItem = UITabBarItem(title: "Add", image: UIImage(systemName: "plus"), tag: 0)
 
@@ -84,11 +97,11 @@ private struct MainTabController: UIViewControllerRepresentable {
             controller.tabs = [
                 UITab(title: "Home", image: home.tabBarItem.image, identifier: "home") { _ in home },
                 UITab(title: "Transactions", image: transactions.tabBarItem.image, identifier: "transactions") { _ in transactions },
-                UITab(title: "Assistant", image: assistant.tabBarItem.image, identifier: "assistant") { _ in assistant },
+                UITab(title: "Settings", image: settings.tabBarItem.image, identifier: "settings") { _ in settings },
                 addTab
             ]
         } else {
-            controller.viewControllers = [home, transactions, assistant, add]
+            controller.viewControllers = [home, transactions, assistant, settings, add]
         }
         return controller
     }

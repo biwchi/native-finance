@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -48,6 +49,11 @@ export const categories = pgTable(
     systemKey: varchar("system_key", { length: 80 }),
     name: varchar("name", { length: 80 }).notNull(),
     kind: transactionKind("kind").notNull(),
+    parentId: uuid("parent_id").references((): AnyPgColumn => categories.id, {
+      onDelete: "cascade",
+    }),
+    icon: varchar("icon", { length: 80 }),
+    color: varchar("color", { length: 20 }),
     isSystem: boolean("is_system").default(false).notNull(),
     examples: text("examples")
       .array()
@@ -63,10 +69,19 @@ export const categories = pgTable(
   },
   (table) => [
     uniqueIndex("categories_system_key_unique").on(table.systemKey),
-    uniqueIndex("categories_kind_name_unique").on(
-      table.kind,
-      sql`lower(${table.name})`,
-    ),
+    uniqueIndex("categories_root_kind_name_unique")
+      .on(
+        table.kind,
+        sql`lower(${table.name})`,
+      )
+      .where(sql`${table.parentId} is null`),
+    uniqueIndex("categories_parent_name_unique")
+      .on(
+        table.parentId,
+        sql`lower(${table.name})`,
+      )
+      .where(sql`${table.parentId} is not null`),
+    index("categories_parent_id_idx").on(table.parentId),
     index("categories_kind_sort_order_idx").on(table.kind, table.sortOrder),
   ],
 );
@@ -84,6 +99,8 @@ export const transactions = pgTable(
     categoryId: uuid("category_id").references(() => categories.id, {
       onDelete: "set null",
     }),
+    merchant: text("merchant"),
+    payee: text("payee"),
     description: text("description"),
     normalizedDescription: text("normalized_description"),
     note: text("note"),

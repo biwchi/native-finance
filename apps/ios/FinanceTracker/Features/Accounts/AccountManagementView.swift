@@ -22,6 +22,7 @@ extension AccountIconColor {
 
 struct AccountSelector: View {
     @EnvironmentObject private var accountStore: AccountStore
+    @EnvironmentObject private var transactionStore: TransactionStore
 
     var body: some View {
         Menu {
@@ -29,7 +30,7 @@ struct AccountSelector: View {
                 accountStore.selectedAccountID = nil
             } label: {
                 accountLabel(
-                    title: "Total",
+                    title: "All Accounts",
                     systemImage: "square.stack.3d.up.fill",
                     isSelected: accountStore.selectedAccountID == nil
                 )
@@ -68,24 +69,38 @@ struct AccountSelector: View {
                 Label("Add account", systemImage: "plus")
             }
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 Image(systemName: selectedIcon)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(selectedColor)
-                    .frame(width: 28, height: 28)
-                    .background(selectedColor.opacity(0.14), in: Circle())
+                    .frame(width: 38, height: 38)
+                    .background(.black, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.08), lineWidth: 1)
+                    }
 
-                Text(accountStore.selectionTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(accountStore.selectionTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
 
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    Text(selectionSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                .layoutPriority(1)
             }
+            .padding(.leading, 5)
+            .padding(.trailing, 14)
+            .padding(.vertical, 5)
+            .accountSelectorGlass()
+            .contentShape(Capsule())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Account, \(accountStore.selectionTitle)")
+            .accessibilityLabel("Account, \(accountStore.selectionTitle), \(selectionSubtitle)")
             .accessibilityHint("Opens the account picker")
         }
         .tint(.primary)
@@ -96,7 +111,56 @@ struct AccountSelector: View {
     }
 
     private var selectedColor: Color {
-        accountStore.selectedAccount?.iconColor.color ?? .primary
+        accountStore.selectedAccount?.iconColor.color ?? .white
+    }
+
+    private var selectionSubtitle: String {
+        switch transactionStore.state {
+        case .idle, .loading:
+            "Loading balance"
+        case .loaded:
+            balanceText
+        case .failed:
+            "Balance unavailable"
+        }
+    }
+
+    private var balanceText: String {
+        guard let currency = selectionCurrency else {
+            return accountCountText
+        }
+
+        let balance = transactionStore.transactions.reduce(into: Decimal.zero) { total, transaction in
+            guard let amount = Decimal(string: transaction.amount) else { return }
+            total += transaction.kind == .income ? amount : -amount
+        }
+
+        return balance.formatted(
+            .currency(code: currency)
+                .precision(.fractionLength(0...2))
+        )
+    }
+
+    private var selectionCurrency: String? {
+        if let account = accountStore.selectedAccount {
+            return account.currency
+        }
+
+        let transactionCurrencies = Set(transactionStore.transactions.map(\.currency))
+        if transactionCurrencies.count == 1 {
+            return transactionCurrencies.first
+        }
+
+        let accountCurrencies = Set(accountStore.accounts.map(\.currency))
+        return accountCurrencies.count == 1 ? accountCurrencies.first : nil
+    }
+
+    private var accountCountText: String {
+        switch accountStore.accounts.count {
+        case 0: "No accounts"
+        case 1: "1 account"
+        default: "\(accountStore.accounts.count) accounts"
+        }
     }
 
     private func accountLabel(
@@ -141,9 +205,7 @@ struct AccountSelector: View {
 }
 
 struct AccountEditorView: View {
-    private static let currencyCodes = Locale.Currency.isoCurrencies
-        .map(\.identifier)
-        .sorted()
+    private static let currencyCodes = AppPreferences.currencyCodes
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var accountStore: AccountStore
@@ -160,11 +222,12 @@ struct AccountEditorView: View {
 
     init(account: Account? = nil) {
         self.account = account
+        let defaultCurrency = UserDefaults.standard.string(
+            forKey: AppPreferences.defaultCurrencyKey
+        ) ?? AppPreferences.initialCurrency
         _name = State(initialValue: account?.name ?? "")
         _type = State(initialValue: account?.type ?? .checking)
-        _currency = State(
-            initialValue: account?.currency ?? Locale.current.currency?.identifier ?? "USD"
-        )
+        _currency = State(initialValue: account?.currency ?? defaultCurrency)
         _icon = State(initialValue: account?.icon ?? "creditcard.fill")
         _iconColor = State(initialValue: account?.iconColor ?? .blue)
     }
@@ -360,7 +423,7 @@ struct AccountEditorView: View {
     }
 }
 
-private struct CurrencyPickerView: View {
+struct CurrencyPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var selection: String
@@ -427,6 +490,19 @@ private struct CurrencyPickerView: View {
 }
 
 extension View {
+    @ViewBuilder
+    fileprivate func accountSelectorGlass() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            background(.thinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(.white.opacity(0.10), lineWidth: 1)
+                }
+        }
+    }
+
     func accountSelectorToolbar() -> some View {
         navigationBarTitleDisplayMode(.inline)
             .toolbar {

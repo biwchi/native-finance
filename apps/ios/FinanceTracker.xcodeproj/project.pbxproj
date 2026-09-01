@@ -27,6 +27,9 @@
 		A10000000000000000000019 /* AddTransactionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* AddTransactionView.swift */; };
 		A10000000000000000000020 /* CategoryPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* CategoryPickerView.swift */; };
 		A10000000000000000000021 /* CategoryIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* CategoryIcon.swift */; };
+		A10000000000000000000022 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* AppPreferences.swift */; };
+		A10000000000000000000023 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* SettingsView.swift */; };
+		A10000000000000000000024 /* CenteredSelectionCarousel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* CenteredSelectionCarousel.swift */; };
 		C10000000000000000000001 /* TransactionCommandParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* TransactionCommandParserTests.swift */; };
 		C10000000000000000000002 /* AddTransactionViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* AddTransactionViewModelTests.swift */; };
 		C10000000000000000000003 /* CategoryBenchmarkCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* CategoryBenchmarkCorpus.swift */; };
@@ -67,6 +70,9 @@
 		A20000000000000000000021 /* AddTransactionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionView.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* CategoryPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryPickerView.swift; sourceTree = "<group>"; };
 		A20000000000000000000023 /* CategoryIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryIcon.swift; sourceTree = "<group>"; };
+		A20000000000000000000024 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		A20000000000000000000025 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A20000000000000000000026 /* CenteredSelectionCarousel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CenteredSelectionCarousel.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* TransactionCommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionCommandParserTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000002 /* AddTransactionViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTransactionViewModelTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000003 /* CategoryBenchmarkCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryBenchmarkCorpus.swift; sourceTree = "<group>"; };
@@ -106,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000003 /* App */,
+				A40000000000000000000014 /* UI */,
 				A40000000000000000000004 /* Models */,
 				A40000000000000000000005 /* Networking */,
 				A40000000000000000000006 /* Features */,
@@ -121,6 +128,7 @@
 				A20000000000000000000009 /* MainTabView.swift */,
 				A20000000000000000000014 /* AccountStore.swift */,
 				A20000000000000000000016 /* TransactionStore.swift */,
+				A20000000000000000000024 /* AppPreferences.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -151,6 +159,7 @@
 				A40000000000000000000009 /* Dashboard */,
 				A40000000000000000000010 /* Transactions */,
 				A40000000000000000000011 /* Assistant */,
+				A40000000000000000000013 /* Settings */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -162,6 +171,14 @@
 				A20000000000000000000006 /* Info.plist */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000014 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000026 /* CenteredSelectionCarousel.swift */,
+			);
+			path = UI;
 			sourceTree = "<group>";
 		};
 		A40000000000000000000008 /* Products */ = {
@@ -209,6 +226,14 @@
 				A20000000000000000000015 /* AccountManagementView.swift */,
 			);
 			path = Accounts;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000013 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000025 /* SettingsView.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		C40000000000000000000001 /* FinanceTrackerTests */ = {
@@ -341,6 +366,9 @@
 				A10000000000000000000002 /* HealthResponse.swift in Sources */,
 				A10000000000000000000007 /* MainTabView.swift in Sources */,
 				A10000000000000000000008 /* TransactionsView.swift in Sources */,
+				A10000000000000000000022 /* AppPreferences.swift in Sources */,
+				A10000000000000000000023 /* SettingsView.swift in Sources */,
+				A10000000000000000000024 /* CenteredSelectionCarousel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -3,6 +3,36 @@ import XCTest
 
 @MainActor
 final class AddTransactionViewModelTests: XCTestCase {
+    func testAmountExpressionCalculatesAsKeysAreEntered() {
+        var expression = AmountExpression()
+        ["1", "2", "+", "4", "*", "3"].forEach { expression.enter($0) }
+
+        XCTAssertEqual(expression.rawValue, "12+4*3")
+        XCTAssertEqual(expression.result, 24)
+        XCTAssertEqual(expression.canonicalResult, "24")
+    }
+
+    func testAmountExpressionHandlesDecimalBackspaceAndTrailingOperator() {
+        var expression = AmountExpression()
+        ["1", ",", "5", "+", "2", "⌫", "4", "/"].forEach { expression.enter($0) }
+
+        XCTAssertEqual(expression.rawValue, "1.5+4/")
+        XCTAssertEqual(expression.result, 5.5)
+        XCTAssertEqual(expression.canonicalResult, "5.5")
+    }
+
+    func testAmountExpressionRejectsDivisionByZeroAndNonPositiveResults() {
+        var divisionByZero = AmountExpression()
+        ["8", "/", "0"].forEach { divisionByZero.enter($0) }
+        XCTAssertNil(divisionByZero.result)
+        XCTAssertNil(divisionByZero.canonicalResult)
+
+        var negative = AmountExpression()
+        ["2", "-", "5"].forEach { negative.enter($0) }
+        XCTAssertEqual(negative.result, -3)
+        XCTAssertNil(negative.canonicalResult)
+    }
+
     func testEditingPrefillsAndPreservesSavedFieldsWhileAccountsAndCategoriesLoad() {
         let account = Self.account(name: "Original account")
         let otherAccount = Self.account(name: "Selected account")
