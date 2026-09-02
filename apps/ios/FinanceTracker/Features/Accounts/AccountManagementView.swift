@@ -38,7 +38,7 @@ struct AccountSelector: View {
             } label: {
                 accountLabel(
                     title: "All Accounts",
-                    systemImage: "square.stack.3d.up.fill",
+                    iconName: "credit-cards",
                     isSelected: accountStore.selectedAccountID == nil
                 )
             }
@@ -52,7 +52,7 @@ struct AccountSelector: View {
                     } label: {
                         accountLabel(
                             title: account.name,
-                            systemImage: account.icon,
+                            iconName: account.icon,
                             color: account.iconColor.color,
                             isSelected: accountStore.selectedAccountID == account.id
                         )
@@ -65,7 +65,7 @@ struct AccountSelector: View {
             Button {
                 accountStore.isManagingAccounts = true
             } label: {
-                Label("Manage Accounts", systemImage: "gearshape")
+                Label("Manage Accounts", icon: "settings")
             }
         } label: {
             selectorLabel
@@ -86,8 +86,7 @@ struct AccountSelector: View {
     private var selectorLabel: some View {
         if compact {
             HStack(spacing: 7) {
-                Image(systemName: selectedIcon)
-                    .font(.subheadline.weight(.semibold))
+                AppIcon(selectedIcon, size: 15)
                     .foregroundStyle(compactIconColor)
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -104,15 +103,13 @@ struct AccountSelector: View {
                         .minimumScaleFactor(0.75)
                 }
 
-                Image(systemName: "chevron.down")
-                    .font(.caption2.bold())
+                AppIcon("nav-arrow-down", size: 11)
                     .foregroundStyle(.secondary)
             }
             .contentShape(Capsule())
         } else {
             HStack(spacing: 9) {
-                Image(systemName: selectedIcon)
-                    .font(.system(size: 15, weight: .semibold))
+                AppIcon(selectedIcon, size: 15)
                     .foregroundStyle(selectedColor)
                     .frame(width: 38, height: 38)
                     .background(.black, in: Circle())
@@ -144,7 +141,7 @@ struct AccountSelector: View {
     }
 
     private var selectedIcon: String {
-        accountStore.selectedAccount?.icon ?? "square.stack.3d.up.fill"
+        accountStore.selectedAccount?.icon ?? "credit-cards"
     }
 
     private var selectedColor: Color {
@@ -218,7 +215,7 @@ struct AccountSelector: View {
 
     private func accountLabel(
         title: String,
-        systemImage: String,
+        iconName: String,
         color: Color? = nil,
         isSelected: Bool
     ) -> some View {
@@ -226,19 +223,19 @@ struct AccountSelector: View {
             Label {
                 Text(title)
             } icon: {
-                menuIcon(systemImage: systemImage, color: color)
+                menuIcon(iconName: iconName, color: color)
             }
 
             if isSelected {
-                Image(systemName: "checkmark")
+                AppIcon("check")
             }
         }
     }
 
     @ViewBuilder
-    private func menuIcon(systemImage: String, color: Color?) -> some View {
+    private func menuIcon(iconName: String, color: Color?) -> some View {
 #if canImport(UIKit)
-        if let color, let image = UIImage(systemName: systemImage) {
+        if let color, let image = AppIcons.uiImage(named: iconName) {
             Image(
                 uiImage: image.withTintColor(
                     UIColor(color),
@@ -246,12 +243,11 @@ struct AccountSelector: View {
                 )
             )
         } else {
-            Image(systemName: systemImage)
-                .renderingMode(.template)
+            AppIcons.resolve(iconName).asImage
                 .foregroundStyle(.primary)
         }
 #else
-        Image(systemName: systemImage)
+        AppIcon(iconName)
             .foregroundStyle(color ?? .primary)
 #endif
     }
@@ -274,7 +270,7 @@ struct AccountManagementView: View {
                     if accountStore.accounts.isEmpty {
                         ContentUnavailableView(
                             "No accounts",
-                            systemImage: "creditcard",
+                            iconName: "credit-card",
                             description: Text("Add an account to start tracking transactions.")
                         )
                         .frame(maxWidth: .infinity)
@@ -325,7 +321,7 @@ struct AccountManagementView: View {
                     Button {
                         editor = .add
                     } label: {
-                        Label("Add Account", systemImage: "plus")
+                        Label("Add Account", icon: "plus")
                     }
                     .disabled(isBusy)
                 }
@@ -409,8 +405,7 @@ private struct AccountManagementRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: account.icon)
-                .font(.body.weight(.semibold))
+            AppIcon(account.icon, size: 17)
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(account.iconColor.color, in: Circle())
@@ -429,8 +424,7 @@ private struct AccountManagementRow: View {
             if isWorking {
                 ProgressView()
             } else {
-                Image(systemName: "chevron.forward")
-                    .font(.caption.weight(.semibold))
+                AppIcon("nav-arrow-right", size: 12)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -493,7 +487,7 @@ struct AccountEditorView: View {
         _name = State(initialValue: account?.name ?? "")
         _type = State(initialValue: account?.type ?? .checking)
         _currency = State(initialValue: account?.currency ?? defaultCurrency)
-        _icon = State(initialValue: account?.icon ?? "creditcard.fill")
+        _icon = State(initialValue: AppIcons.canonicalName(account?.icon ?? "credit-card"))
         _iconColor = State(initialValue: account?.iconColor ?? .blue)
     }
 
@@ -506,7 +500,7 @@ struct AccountEditorView: View {
 
                     Picker("Type", selection: $type) {
                         ForEach(AccountType.allCases) { type in
-                            Label(type.title, systemImage: type.systemImage)
+                            Label(type.title, icon: type.iconName)
                                 .tag(type)
                         }
                     }
@@ -539,8 +533,7 @@ struct AccountEditorView: View {
                             Button {
                                 icon = choice
                             } label: {
-                                Image(systemName: choice)
-                                    .font(.body.weight(.semibold))
+                                AppIcon(choice, size: 17)
                                     .foregroundStyle(icon == choice ? .white : iconColor.color)
                                     .frame(width: 40, height: 40)
                                     .background(
@@ -570,8 +563,7 @@ struct AccountEditorView: View {
                                     .frame(width: 34, height: 34)
                                     .overlay {
                                         if iconColor == choice {
-                                            Image(systemName: "checkmark")
-                                                .font(.caption.bold())
+                                            AppIcon("check", size: 12)
                                                 .foregroundStyle(.white)
                                         }
                                     }
@@ -586,7 +578,7 @@ struct AccountEditorView: View {
 
                 if let errorMessage {
                     Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(.red)
                     }
                 }
@@ -602,40 +594,25 @@ struct AccountEditorView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                Group {
-                    if #available(iOS 26.0, *) {
-                        submitButton
-                            .buttonStyle(.glassProminent)
-                    } else {
-                        submitButton
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-                .controlSize(.large)
-                .tint(.accentColor)
-                .disabled(isSubmitDisabled)
-                .opacity(isSubmitDisabled ? 0 : 1)
-                .padding(.horizontal)
-                .padding(.vertical, 12)
+                submitButton
+                    .controlSize(.large)
+                    .disabled(isSubmitDisabled)
+                    .opacity(isSubmitDisabled ? 0 : 1)
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
             }
         }
     }
 
     private var submitButton: some View {
-        Button {
+        PrimaryActionButton(
+            account == nil ? "Add account" : "Save changes",
+            isLoading: isSaving,
+            appearance: .glass
+        ) {
             Task {
                 await save()
             }
-        } label: {
-            HStack {
-                if isSaving {
-                    ProgressView()
-                        .tint(.white)
-                }
-
-                Text(account == nil ? "Add account" : "Save changes")
-            }
-            .frame(maxWidth: .infinity)
         }
     }
 
@@ -718,8 +695,7 @@ struct CurrencyPickerView: View {
                     Spacer()
 
                     if selection == code {
-                        Image(systemName: "checkmark")
-                            .font(.body.weight(.semibold))
+                        AppIcon("check", size: 17)
                             .foregroundStyle(.tint)
                     }
                 }
@@ -729,7 +705,11 @@ struct CurrencyPickerView: View {
         }
         .overlay {
             if filteredCurrencyCodes.isEmpty {
-                ContentUnavailableView.search(text: query)
+                ContentUnavailableView(
+                    "No currencies found",
+                    iconName: "search",
+                    description: Text("No results for “\(query)”.")
+                )
             }
         }
         .navigationBarTitleDisplayMode(.inline)

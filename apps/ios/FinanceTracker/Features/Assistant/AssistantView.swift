@@ -5,7 +5,7 @@ struct AssistantView: View {
         NavigationStack {
             ContentUnavailableView(
                 "Ask about your money",
-                systemImage: "sparkles",
+                iconName: "sparks",
                 description: Text("The assistant will help you understand your finances.")
             )
             .accountSelectorToolbar()

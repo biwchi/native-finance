@@ -27,10 +27,10 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
+    var iconName: String {
         switch self {
-        case .light: "sun.max.fill"
-        case .dark: "moon.fill"
+        case .light: "sun-light"
+        case .dark: "half-moon"
         }
     }
 

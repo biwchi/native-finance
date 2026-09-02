@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(\.locale) private var locale
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var budgetStore: BudgetStore
     @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
@@ -12,48 +13,58 @@ struct DashboardView: View {
     @State private var isShowingBudgetSettings = false
     @State private var isShowingMonthPicker = false
     @State private var editingTransaction: FinanceTransaction?
+    @State private var editingUpcomingTransaction: UpcomingTransaction?
 
     var body: some View {
         NavigationStack {
             List {
-
                 monthlyBudgetProgressSection
+                    .modifier(DashboardSectionMargins())
 
                 monthlyHighlightsSection
+                    .modifier(DashboardSectionMargins())
 
                 recentTransactionsSection
+                    .modifier(DashboardSectionMargins())
+
+                if transactionStore.upcomingState == .loaded,
+                   !transactionStore.upcomingTransactions.isEmpty {
+                    upcomingTransactionsSection
+                        .modifier(DashboardSectionMargins())
+                }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(.custom(10))
+            .listSectionSpacing(.custom(4))
+            .contentMargins(.top, 8, for: .scrollContent)
+            .environment(\.defaultMinListRowHeight, 0)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     AccountSelector(compact: true)
                 }
 
-                if #available(iOS 26.0, *) {
-                    ToolbarSpacer(.fixed, placement: .topBarLeading)
-                }
-
-                ToolbarItem(placement: .topBarLeading) {
-                    budgetSettingsButton
-                }
-
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isShowingMonthPicker = true
-                    } label: {
-                        Image(systemName: "calendar")
+                    HStack(spacing: 0) {
+                        budgetSettingsButton
+
+                        Button {
+                            isShowingMonthPicker = true
+                        } label: {
+                            AppIcon("calendar")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Choose month")
+                        .accessibilityValue(monthTitle)
+                        .popover(isPresented: $isShowingMonthPicker) {
+                            DashboardMonthPicker(
+                                selection: $selectedMonth,
+                                range: earliestMonth...latestMonth
+                            )
+                            .presentationCompactAdaptation(.popover)
+                        }
                     }
-                    .accessibilityLabel("Choose month")
-                    .accessibilityValue(monthTitle)
-                    .popover(isPresented: $isShowingMonthPicker) {
-                        DashboardMonthPicker(
-                            selection: $selectedMonth,
-                            range: earliestMonth...latestMonth
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
+                    .buttonStyle(.plain)
                 }
             }
             .refreshable { await reload() }
@@ -90,13 +101,22 @@ struct DashboardView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $editingUpcomingTransaction) { transaction in
+            AddTransactionView(upcomingTransaction: transaction)
+                .environmentObject(accountStore)
+                .environmentObject(transactionStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var budgetSettingsButton: some View {
         Button {
             isShowingBudgetSettings = true
         } label: {
-            Image(systemName: "chart.pie")
+            AppIcon("percentage-circle")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .disabled(!canOpenBudget)
         .accessibilityLabel("Budget settings")
@@ -111,7 +131,7 @@ struct DashboardView: View {
                     ProgressView("Loading monthly spending")
                         .frame(maxWidth: .infinity, alignment: .center)
                 case let .failed(message):
-                    Label(message, systemImage: "exclamationmark.triangle")
+                    Label(message, icon: "warning-triangle")
                         .foregroundStyle(.secondary)
                 case .loaded:
                     if budgetStore.state == .loading {
@@ -141,12 +161,11 @@ struct DashboardView: View {
                         case .idle, .loading:
                             ProgressView("Converting to \(dashboardCurrency)")
                         case let .failed(message):
-                            Label(message, systemImage: "arrow.triangle.2.circlepath")
+                            Label(message, icon: "refresh-double")
                                 .foregroundStyle(.secondary)
                         case .loaded:
                             Label(
-                                "Some currencies could not be converted",
-                                systemImage: "exclamationmark.triangle"
+                                "Some currencies could not be converted", icon: "warning-triangle"
                             )
                             .foregroundStyle(.secondary)
                         }
@@ -165,9 +184,11 @@ struct DashboardView: View {
         return "\(money(insights.spent, currency: dashboardCurrency)) spent \(monthTitle)"
     }
 
-    private func money(_ value: Decimal, currency: String) -> String {
+    private func money(_ value: Decimal, currency: String, spoken: Bool = false) -> String {
         value.formatted(
             .currency(code: currency)
+                .presentation(spoken ? .fullName : .narrow)
+                .locale(locale)
                 .precision(.fractionLength(0...2))
         )
     }
@@ -178,126 +199,33 @@ struct DashboardView: View {
            budgetStore.state == .loaded,
            let insights,
            let monthlyLimit = insights.monthlyLimit,
-           let progress = insights.budgetProgress {
+           !monthlyLimit.isNaN, monthlyLimit > 0,
+           let interval = Calendar.current.dateInterval(of: .month, for: selectedMonth) {
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    budgetProgressBar(progress: progress)
-                        .animation(.smooth, value: progress)
-                        .accessibilityLabel("Monthly budget used")
-                        .accessibilityValue(
-                            "\(money(insights.spent, currency: dashboardCurrency)) of \(money(monthlyLimit, currency: dashboardCurrency))"
-                        )
-
-                    HStack {
-                        Text("Monthly limit")
-                            .foregroundStyle(.secondary)
-                            .fontWeight(.bold)
-                            .font(.system(size: 14))
-
-                        Spacer()
-
-                        HStack(spacing: 0) {
-                            Text(money(insights.spent, currency: dashboardCurrency))
-                                .fontWeight(.semibold)
-                            Text(" / \(money(monthlyLimit, currency: dashboardCurrency))")
-                                .foregroundStyle(.secondary)
-                        }
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    }
-                    .font(.subheadline)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .padding(.horizontal, 6)
-                }
-                .padding(.vertical, 6)
-            }
-        }
-    }
-
-    private func clampedBudgetProgress(_ progress: Decimal) -> Double {
-        min(max(NSDecimalNumber(decimal: progress).doubleValue, 0), 1)
-    }
-
-    private func budgetProgressTint(for progress: Decimal) -> Color {
-        let value = clampedBudgetProgress(progress)
-        guard value < 1 else { return .red }
-        guard value >= 0.7 else { return .accentColor }
-
-        let proximityToLimit = (value - 0.7) / 0.3
-        return Color(
-            hue: 0.09 * (1 - proximityToLimit),
-            saturation: 0.88,
-            brightness: 0.92
-        )
-    }
-
-    private func budgetProgressBar(progress: Decimal) -> some View {
-        let value = clampedBudgetProgress(progress)
-        let tint = budgetProgressTint(for: progress)
-
-        return GeometryReader { geometry in
-            let horizontalInset: CGFloat = 4
-            let innerInset: CGFloat = 5
-            let markerDiameter: CGFloat = 22
-            let trackWidth = max(geometry.size.width - horizontalInset * 2, 0)
-            let availableWidth = max(trackWidth - markerDiameter, 0)
-            let markerCenter = markerDiameter / 2 + availableWidth * CGFloat(value)
-            let fillWidth = max(markerCenter - innerInset, 0)
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color(uiColor: .tertiarySystemFill))
-                    .overlay {
-                        Capsule()
-                            .stroke(.secondary.opacity(0.08), lineWidth: 1)
-                    }
-
-                Canvas { context, size in
-                    var stripes = Path()
-                    for startX in stride(
-                        from: -size.height,
-                        through: size.width + size.height,
-                        by: 6
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    if let summary = MonthlySummaryState(
+                        monthlyBudget: monthlyLimit,
+                        amountSpent: insights.spent,
+                        currentDate: context.date,
+                        startOfMonth: interval.start,
+                        endOfMonth: interval.end,
+                        currency: dashboardCurrency,
+                        locale: locale
                     ) {
-                        stripes.move(to: CGPoint(x: startX, y: size.height))
-                        stripes.addLine(to: CGPoint(x: startX + size.height, y: 0))
-                    }
-                    context.stroke(
-                        stripes,
-                        with: .color(tint.opacity(0.28)),
-                        lineWidth: 1.5
-                    )
-                }
-                .frame(height: 12)
-                .clipShape(Capsule())
-                .padding(.horizontal, innerInset)
-
-                Capsule()
-                    .fill(tint)
-                    .frame(width: value == 0 ? 0 : fillWidth, height: 12)
-                    .offset(x: innerInset)
-
-                if value > 0 {
-                    Circle()
-                        .fill(tint)
-                        .frame(width: markerDiameter, height: markerDiameter)
-                        .overlay {
-                            Circle()
-                                .stroke(
-                                    Color(uiColor: .secondarySystemGroupedBackground),
-                                    lineWidth: 3
-                                )
+                        Button {
+                            isShowingBudgetSettings = true
+                        } label: {
+                            MonthlySummaryCompactView(state: summary)
                         }
-                        .offset(x: markerCenter - markerDiameter / 2)
+                        .buttonStyle(MonthlySummaryButtonStyle())
+                        .accessibilityHint("Open budget settings")
+                    }
                 }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .frame(width: trackWidth, height: 24)
-            .clipShape(Capsule())
-            .offset(x: horizontalInset)
         }
-        .frame(height: 24)
-        .clipped()
     }
 
     @ViewBuilder
@@ -305,48 +233,54 @@ struct DashboardView: View {
         if transactionStore.state == .loaded,
            budgetStore.state == .loaded,
            let insights {
-            Section {
-                HStack(spacing: 10) {
-                    if insights.income > 0 { monthlyHighlight(
+            monthlyHighlights(for: insights)
+        }
+    }
+
+    private func monthlyHighlights(for insights: DashboardInsights) -> some View {
+        Section {
+            HStack(spacing: 8) {
+                if insights.income > 0 {
+                    monthlyHighlight(
                         title: "Income",
                         amount: insights.income,
-                        systemImage: "arrow.down.left",
+                        iconName: "arrow-down-left",
                         color: .green,
                         amountColor: .green
                     )
-                    }
+                }
 
-                    if insights.spent > 0 { monthlyHighlight(
+                if insights.spent > 0 {
+                    monthlyHighlight(
                         title: "Spent",
                         amount: insights.spent,
-                        systemImage: "arrow.up.right",
+                        iconName: "arrow-up-right",
                         color: .orange,
                         amountColor: .primary
                     )
-                    }
                 }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
             }
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
     }
 
     private func monthlyHighlight(
         title: String,
         amount: Decimal,
-        systemImage: String,
+        iconName: String,
         color: Color,
         amountColor: Color
     ) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .bold))
+        HStack(spacing: 6) {
+            AppIcon(iconName, size: 9)
                 .foregroundStyle(color)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .background(color.opacity(0.2), in: Circle())
 
             Text(money(amount, currency: dashboardCurrency))
-                .font(.body.weight(.semibold))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(amountColor)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -356,23 +290,20 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(money(amount, currency: dashboardCurrency))
+        .accessibilityValue(money(amount, currency: dashboardCurrency, spoken: true))
     }
 
-    @ViewBuilder
     private var recentTransactionsSection: some View {
-        switch transactionStore.state {
-        case .idle, .loading:
-            Section("Latest transactions") {
+        Section {
+            switch transactionStore.state {
+            case .idle, .loading:
                 ProgressView("Loading transactions")
                     .frame(maxWidth: .infinity)
-            }
-        case .loaded:
-            Section("Latest transactions") {
+            case .loaded:
                 if monthTransactions.isEmpty {
                     ContentUnavailableView(
                         "No transactions",
-                        systemImage: "calendar.badge.minus",
+                        iconName: "calendar-minus",
                         description: Text("Transactions for the selected month will appear here.")
                     )
                     .listRowBackground(Color.clear)
@@ -391,9 +322,54 @@ struct DashboardView: View {
                         .accessibilityHint("Edit transaction")
                     }
                 }
+            case .failed:
+                Label("Couldn’t load transactions", icon: "wifi-warning")
+                    .foregroundStyle(.secondary)
             }
-        case .failed:
-            EmptyView()
+        } header: {
+            HStack {
+                Text("Latest transactions")
+
+                Spacer()
+
+                NavigationLink {
+                    TransactionsView()
+                } label: {
+                    Text("See all")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.primary)
+                .accessibilityLabel("See all transactions")
+            }
+            .textCase(nil)
+        }
+    }
+
+    private var upcomingTransactionsSection: some View {
+        Section {
+            UpcomingTransactionsContent(limit: 4, onEdit: { editingUpcomingTransaction = $0 })
+        } header: {
+            HStack {
+                Text("Coming up")
+
+                Spacer()
+
+                NavigationLink {
+                    RecurringTransactionsView()
+                } label: {
+                    Text("See all")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.primary)
+                .accessibilityLabel("See all recurring transactions")
+            }
+            .textCase(nil)
         }
     }
 
@@ -513,6 +489,17 @@ struct DashboardView: View {
     }
 }
 
+private struct DashboardSectionMargins: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.listSectionMargins(.vertical, 0)
+        } else {
+            content
+        }
+    }
+}
+
 private struct DashboardMonthPicker: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -541,7 +528,7 @@ private struct DashboardMonthPicker: View {
                 Button {
                     displayedYear -= 1
                 } label: {
-                    Image(systemName: "chevron.left")
+                    AppIcon("nav-arrow-left")
                         .frame(width: 32, height: 32)
                 }
                 .disabled(displayedYear <= earliestYear)
@@ -557,7 +544,7 @@ private struct DashboardMonthPicker: View {
                 Button {
                     displayedYear += 1
                 } label: {
-                    Image(systemName: "chevron.right")
+                    AppIcon("nav-arrow-right")
                         .frame(width: 32, height: 32)
                 }
                 .disabled(displayedYear >= latestYear)
@@ -566,24 +553,15 @@ private struct DashboardMonthPicker: View {
 
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(months, id: \.self) { month in
-                    Button {
+                    AccentSelectionButton(
+                        month.formatted(.dateTime.month(.abbreviated)),
+                        isSelected: isSelected(month)
+                    ) {
                         selection = month
                         dismiss()
-                    } label: {
-                        Text(month.formatted(.dateTime.month(.abbreviated)))
-                            .font(.subheadline.weight(isSelected(month) ? .semibold : .regular))
-                            .frame(maxWidth: .infinity, minHeight: 40)
-                            .foregroundStyle(isSelected(month) ? .white : .primary)
-                            .background(
-                                isSelected(month) ? Color.accentColor : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .disabled(!isAvailable(month))
                     .accessibilityLabel(month.formatted(.dateTime.month(.wide).year()))
-                    .accessibilityAddTraits(isSelected(month) ? .isSelected : [])
                 }
             }
         }
@@ -735,7 +713,7 @@ private enum DashboardPreviewData {
         name: "Everyday card",
         type: .checking,
         currency: "KZT",
-        icon: "creditcard.fill",
+        icon: "credit-card",
         iconColor: .blue,
         createdAt: "",
         updatedAt: ""
@@ -756,19 +734,19 @@ private enum DashboardPreviewData {
     static let food = category(
         systemKey: "expense.food-drink",
         name: "Food & Drink",
-        icon: "fork.knife",
+        icon: "cutlery",
         color: .orange
     )
     static let housing = category(
         systemKey: "expense.housing",
         name: "Housing",
-        icon: "house.fill",
+        icon: "home-simple",
         color: .blue
     )
     static let shopping = category(
         systemKey: "expense.shopping",
         name: "Shopping",
-        icon: "bag.fill",
+        icon: "shopping-bag",
         color: .purple
     )
     static let salary = TransactionCategory(
@@ -776,7 +754,7 @@ private enum DashboardPreviewData {
         systemKey: "income.salary",
         name: "Salary",
         kind: .income,
-        icon: "banknote.fill",
+        icon: "cash",
         color: .green,
         isSystem: true,
         examples: nil,

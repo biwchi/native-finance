@@ -3,10 +3,9 @@ import SwiftUI
 
 struct TransactionsView: View {
     var body: some View {
-        NavigationStack {
-            TransactionListView()
-                .accountSelectorToolbar()
-        }
+        TransactionListView()
+            .navigationTitle("Transactions")
+            .accountSelectorToolbar()
     }
 }
 
@@ -31,7 +30,7 @@ struct TransactionListView: View {
                 if transactionStore.transactions.isEmpty {
                     ContentUnavailableView(
                         "No transactions yet",
-                        systemImage: "list.bullet.rectangle",
+                        iconName: "list",
                         description: Text(emptyDescription)
                     )
                     .listRowBackground(Color.clear)
@@ -55,14 +54,13 @@ struct TransactionListView: View {
 
             case let .failed(message):
                 ContentUnavailableView {
-                    Label("Couldn’t load transactions", systemImage: "wifi.exclamationmark")
+                    Label("Couldn’t load transactions", icon: "wifi-warning")
                 } description: {
                     Text(message)
                 } actions: {
-                    Button("Try Again") {
+                    PrimaryActionButton("Try Again", appearance: .prominent) {
                         Task { await reload() }
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .listRowBackground(Color.clear)
             }
@@ -76,23 +74,30 @@ struct TransactionListView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .alert(item: $presentedAlert) { alert in
+        .alert(presentedAlert?.title ?? "", isPresented: alertBinding, presenting: presentedAlert) { alert in
             switch alert {
             case let .confirmDeletion(transaction):
-                Alert(
-                    title: Text("Delete transaction?"),
-                    message: Text("This can't be undone."),
-                    primaryButton: .destructive(Text("Delete")) {
+                if transaction.recurrence != nil {
+                    RecurringDeletionActions { action in
+                        Task { await delete(transaction, action: action) }
+                    }
+                } else {
+                    Button("Delete", role: .destructive) {
                         Task { await delete(transaction) }
-                    },
-                    secondaryButton: .cancel()
-                )
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+            case .error:
+                Button("OK", role: .cancel) {}
+            }
+        } message: { alert in
+            switch alert {
+            case let .confirmDeletion(transaction):
+                Text(transaction.recurrence == nil
+                     ? "This can't be undone."
+                     : "This is a recurring transaction. What would you like to delete?")
             case let .error(message):
-                Alert(
-                    title: Text("Couldn't delete transaction"),
-                    message: Text(message),
-                    dismissButton: .default(Text("OK"))
-                )
+                Text(message)
             }
         }
     }
@@ -111,8 +116,10 @@ struct TransactionListView: View {
         .accessibilityHint("Edit transaction")
         .disabled(deletingTransactionID != nil)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("Delete", systemImage: "trash", role: .destructive) {
+            Button(role: .destructive) {
                 presentedAlert = .confirmDeletion(transaction)
+            } label: {
+                Label("Delete", icon: "trash")
             }
         }
     }
@@ -136,12 +143,16 @@ struct TransactionListView: View {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
     }
 
-    private func delete(_ transaction: FinanceTransaction) async {
+    private var alertBinding: Binding<Bool> {
+        Binding(get: { presentedAlert != nil }, set: { if !$0 { presentedAlert = nil } })
+    }
+
+    private func delete(_ transaction: FinanceTransaction, action: RecurringDeletionAction = .occurrence) async {
         deletingTransactionID = transaction.id
         defer { deletingTransactionID = nil }
 
         do {
-            try await transactionStore.deleteTransaction(transaction)
+            try await transactionStore.deleteTransaction(transaction, action: action)
         } catch {
             presentedAlert = .error(error.localizedDescription)
         }
@@ -158,13 +169,29 @@ private enum TransactionListAlert: Identifiable {
         case let .error(message): "error-\(message)"
         }
     }
+
+    var title: String {
+        switch self {
+        case let .confirmDeletion(transaction):
+            transaction.recurrence == nil ? "Delete transaction?" : "Choose an action"
+        case .error: "Couldn't delete transaction"
+        }
+    }
 }
 
 struct TransactionRow: View {
+    enum Style {
+        case transaction
+        case upcoming
+    }
+
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    let transaction: FinanceTransaction
+    let transaction: any EditableTransaction
     let account: Account?
+    var titleOverride: String? = nil
+    var recurrenceDetails: String? = nil
+    var style: Style = .transaction
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -195,17 +222,15 @@ struct TransactionRow: View {
                 if let category = transaction.category {
                     CategoryIcon(category: category, size: 42)
                 } else {
-                    Image(systemName: transaction.kind == .income ? "arrow.down.left" : "arrow.up.right")
-                        .font(.system(size: 18, weight: .medium))
+                    AppIcon(transaction.kind == .income ? "arrow-down-left" : "arrow-up-right", size: 18)
                         .foregroundStyle(iconColor)
                         .frame(width: 42, height: 42)
                         .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
 
-            if transaction.recurrence != nil {
-                Image(systemName: "repeat")
-                    .font(.system(size: 8, weight: .bold))
+            if style == .transaction, transaction.recurrence != nil {
+                AppIcon("repeat", size: 8)
                     .foregroundStyle(Color.primary)
                     .frame(width: 16, height: 16)
                     .background(.regularMaterial, in: Circle())
@@ -226,14 +251,21 @@ struct TransactionRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
 
-            accountLabel
+            if style == .transaction {
+                accountLabel
+            }
+
+            if let recurrenceDetails {
+                Text(recurrenceDetails)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var accountLabel: some View {
         HStack(spacing: 5) {
-            Image(systemName: account?.icon ?? "creditcard")
-                .font(.caption2.weight(.semibold))
+            AppIcon(account?.icon ?? "credit-card", size: 11)
                 .foregroundStyle(account?.iconColor.color ?? Color.secondary)
                 .accessibilityHidden(true)
 
@@ -254,13 +286,13 @@ struct TransactionRow: View {
     }
 
     private var title: String {
-        transaction.category?.name ?? "Uncategorized"
+        titleOverride ?? transaction.category?.name ?? "Uncategorized"
     }
 
     private var amountText: String {
         let value = Decimal(string: transaction.amount).flatMap(formattedAmount) ?? transaction.amount
-        let sign = transaction.kind == .income ? "+" : "-"
-        return "\(sign) \(value) \(transaction.currency)"
+        let sign = transaction.kind == .income ? "+ " : (style == .upcoming ? "" : "- ")
+        return "\(sign)\(value) \(transaction.currency)"
     }
 
     private func formattedAmount(_ amount: Decimal) -> String? {
@@ -279,7 +311,8 @@ struct TransactionRow: View {
         let recurrence = transaction.recurrence.map {
             ", recurring \($0.frequency.title.lowercased())"
         } ?? ""
-        return "\(title), \(account?.name ?? "Unknown account"), \(amountText), \(date)\(recurrence)"
+        let accountDetails = style == .transaction ? ", \(account?.name ?? "Unknown account")" : ""
+        return "\(title)\(accountDetails), \(amountText), \(date)\(recurrence)"
     }
 
     private var iconColor: Color {
@@ -353,7 +386,7 @@ private enum TransactionListPreviewData {
         name: "Everyday card",
         type: .checking,
         currency: "USD",
-        icon: "creditcard.fill",
+        icon: "credit-card",
         iconColor: .blue,
         createdAt: "",
         updatedAt: ""

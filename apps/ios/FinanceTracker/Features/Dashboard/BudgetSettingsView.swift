@@ -105,7 +105,7 @@ struct BudgetSettingsView: View {
     private var monthlyLimitSection: some View {
         Section("Monthly budget") {
             Toggle(isOn: $hasMonthlyLimit.animation(.snappy)) {
-                Label("Monthly limit", systemImage: "calendar")
+                Label("Monthly limit", icon: "calendar")
             }
 
             if hasMonthlyLimit {
@@ -135,7 +135,7 @@ struct BudgetSettingsView: View {
                     groups.append(group)
                 }
             } label: {
-                Label("Add pool", systemImage: "plus")
+                Label("Add pool", icon: "plus")
             }
         }
     }
@@ -156,8 +156,7 @@ struct BudgetSettingsView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "square.3.layers.3d")
-                    .font(.body.weight(.semibold))
+                AppIcon("credit-cards", size: 17)
                     .foregroundStyle(tint)
                     .frame(width: 38, height: 38)
                     .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
@@ -173,8 +172,10 @@ struct BudgetSettingsView: View {
             }
         }
         .swipeActions {
-            Button("Delete", systemImage: "trash", role: .destructive) {
+            Button(role: .destructive) {
                 removeGroup(group)
+            } label: {
+                Label("Delete", icon: "trash")
             }
         }
     }
@@ -199,7 +200,7 @@ struct BudgetSettingsView: View {
                         moveAssignment(assignment, to: groupID)
                     }
                 } label: {
-                    Label("Add category limit", systemImage: "plus")
+                    Label("Add category limit", icon: "plus")
                 }
             }
         }
@@ -242,28 +243,18 @@ struct BudgetSettingsView: View {
             }
         }
         .swipeActions {
-            Button("Delete", systemImage: "trash", role: .destructive) {
+            Button(role: .destructive) {
                 removeLimit(reference)
+            } label: {
+                Label("Delete", icon: "trash")
             }
         }
     }
 
     private var saveBar: some View {
-        Button {
+        PrimaryActionButton("Save budget", isLoading: isSaving) {
             Task { await save() }
-        } label: {
-            HStack(spacing: 8) {
-                if isSaving {
-                    ProgressView()
-                        .tint(Color(uiColor: .systemBackground))
-                }
-                Text("Save budget")
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .foregroundStyle(Color(uiColor: .systemBackground))
         }
-        .modifier(QuickSubmitButtonStyle())
         .disabled(isSaving)
         .padding(.top, 20)
         .padding(.bottom, 24)
@@ -524,7 +515,7 @@ private struct BudgetGroupEditorView: View {
                                 }
                             }
                             Spacer()
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            AppIcon(isSelected ? "check-circle" : "circle")
                                 .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                         }
                     }

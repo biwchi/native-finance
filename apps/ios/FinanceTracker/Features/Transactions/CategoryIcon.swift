@@ -5,8 +5,7 @@ struct CategoryIcon: View {
     var size: CGFloat = 36
 
     var body: some View {
-        Image(systemName: category.displayIcon)
-            .font(.system(size: size * 0.43, weight: .medium))
+        AppIcon(category.displayIcon, size: size * 0.43)
             .foregroundStyle(category.displayColor)
             .frame(width: size, height: size)
             .background(
@@ -34,203 +33,203 @@ struct CategoryIconGroup: Identifiable, Hashable {
 
 enum CategoryIconCatalog {
     static let groups: [CategoryIconGroup] = [
-        group("General", symbol: "square.grid.2x2.fill", icons: [
-            ("tag.fill", "Tag"),
-            ("star.fill", "Star"),
-            ("heart.fill", "Heart"),
-            ("bookmark.fill", "Bookmark"),
-            ("flag.fill", "Flag"),
-            ("bell.fill", "Bell"),
-            ("pin.fill", "Pin"),
-            ("paperclip", "Paperclip"),
-            ("folder.fill", "Folder"),
-            ("tray.fill", "Tray"),
-            ("archivebox.fill", "Archive"),
-            ("gift.fill", "Gift"),
+        group("General", symbol: "view-grid", icons: [
+            ("label", "Tag"),
+            ("star", "Star"),
+            ("heart", "Heart"),
+            ("bookmark", "Bookmark"),
+            ("white-flag", "Flag"),
+            ("bell", "Bell"),
+            ("pin", "Pin"),
+            ("attachment", "Attachment"),
+            ("folder", "Folder"),
+            ("archive", "Archive"),
+            ("gift", "Gift"),
             ("calendar", "Calendar"),
-            ("clock.fill", "Clock"),
-            ("person.fill", "Person"),
-            ("ellipsis.circle.fill", "Other"),
+            ("clock", "Clock"),
+            ("user", "Person"),
+            ("more-horiz-circle", "Other"),
+            ("view-grid", "Collection"),
         ]),
-        group("Food", symbol: "fork.knife", icons: [
-            ("fork.knife", "Meal"),
-            ("cup.and.saucer.fill", "Coffee"),
-            ("takeoutbag.and.cup.and.straw.fill", "Takeout"),
-            ("basket.fill", "Groceries"),
-            ("birthday.cake.fill", "Cake"),
-            ("wineglass.fill", "Drinks"),
-            ("mug.fill", "Hot drink"),
-            ("carrot.fill", "Produce"),
-            ("popcorn.fill", "Snacks"),
-            ("fish.fill", "Seafood"),
-            ("leaf.fill", "Organic food"),
-            ("frying.pan.fill", "Cooking"),
-            ("refrigerator.fill", "Refrigerator"),
-            ("oven.fill", "Oven"),
-            ("waterbottle.fill", "Water"),
-            ("flame.fill", "Grill"),
+        group("Food", symbol: "cutlery", icons: [
+            ("cutlery", "Meal"),
+            ("coffee-cup", "Coffee"),
+            ("pizza-slice", "Takeout"),
+            ("cart", "Groceries"),
+            ("birthday-cake", "Cake"),
+            ("glass-half", "Drinks"),
+            ("bread-slice", "Bread"),
+            ("organic-food", "Produce"),
+            ("cookie", "Snacks"),
+            ("fish", "Seafood"),
+            ("leaf", "Organic food"),
+            ("egg", "Eggs"),
+            ("fridge", "Refrigerator"),
+            ("chocolate", "Chocolate"),
+            ("droplet", "Water"),
+            ("fire-flame", "Grill"),
         ]),
-        group("Finance", symbol: "banknote.fill", icons: [
-            ("banknote.fill", "Cash"),
-            ("creditcard.fill", "Credit card"),
-            ("building.columns.fill", "Bank"),
-            ("dollarsign.circle.fill", "Dollars"),
-            ("centsign.circle.fill", "Coins"),
-            ("percent", "Interest"),
-            ("chart.line.uptrend.xyaxis", "Growth"),
-            ("chart.pie.fill", "Budget"),
-            ("wallet.pass.fill", "Wallet"),
-            ("receipt.fill", "Receipt"),
-            ("barcode", "Barcode"),
-            ("qrcode", "QR code"),
-            ("arrow.left.arrow.right", "Transfer"),
+        group("Finance", symbol: "cash", icons: [
+            ("cash", "Cash"),
+            ("credit-card", "Credit card"),
+            ("bank", "Bank"),
+            ("dollar-circle", "Dollars"),
+            ("coins", "Coins"),
+            ("percentage", "Interest"),
+            ("graph-up", "Growth"),
+            ("percentage-circle", "Budget"),
+            ("wallet", "Wallet"),
+            ("page", "Receipt"),
+            ("scan-barcode", "Barcode"),
+            ("qr-code", "QR code"),
+            ("coins-swap", "Transfer"),
             ("repeat", "Recurring payment"),
-            ("arrow.uturn.backward", "Refund"),
-            ("briefcase.fill", "Business"),
+            ("undo", "Refund"),
+            ("piggy-bank", "Savings"),
         ]),
         group("Travel", symbol: "airplane", icons: [
             ("airplane", "Flight"),
-            ("car.fill", "Car"),
-            ("bus.fill", "Bus"),
-            ("tram.fill", "Train"),
+            ("car", "Car"),
+            ("bus", "Bus"),
+            ("train", "Train"),
             ("bicycle", "Bicycle"),
-            ("scooter", "Scooter"),
-            ("fuelpump.fill", "Fuel"),
-            ("ev.charger.fill", "EV charging"),
-            ("ferry.fill", "Ferry"),
-            ("cablecar.fill", "Cable car"),
-            ("sailboat.fill", "Boat"),
-            ("map.fill", "Map"),
-            ("mappin.and.ellipse", "Place"),
-            ("suitcase.rolling.fill", "Luggage"),
-            ("bed.double.fill", "Hotel"),
-            ("tent.fill", "Camping"),
+            ("skateboard", "Skateboard"),
+            ("gas", "Fuel"),
+            ("ev-station", "EV charging"),
+            ("sea-waves", "Sea travel"),
+            ("tram", "Tram"),
+            ("delivery-truck", "Truck"),
+            ("map", "Map"),
+            ("map-pin", "Place"),
+            ("suitcase", "Luggage"),
+            ("bed", "Hotel"),
+            ("trekking", "Hiking"),
         ]),
-        group("Home", symbol: "house.fill", icons: [
-            ("house.fill", "Home"),
-            ("building.2.fill", "Building"),
-            ("sofa.fill", "Furniture"),
-            ("lamp.table.fill", "Lighting"),
-            ("key.fill", "Keys"),
-            ("lock.fill", "Security"),
-            ("lightbulb.fill", "Electricity"),
-            ("bolt.fill", "Power"),
-            ("drop.fill", "Water"),
+        group("Home", symbol: "home-simple", icons: [
+            ("home-simple", "Home"),
+            ("building", "Building"),
+            ("sofa", "Furniture"),
+            ("lamp", "Lighting"),
+            ("key", "Keys"),
+            ("lock", "Security"),
+            ("light-bulb", "Electricity"),
+            ("flash", "Power"),
+            ("droplet", "Water"),
             ("wifi", "Internet"),
-            ("phone.fill", "Phone"),
-            ("tv.fill", "Television"),
-            ("washer.fill", "Laundry"),
-            ("wrench.and.screwdriver.fill", "Repairs"),
-            ("hammer.fill", "Renovation"),
-            ("shield.fill", "Insurance"),
+            ("phone", "Phone"),
+            ("tv", "Television"),
+            ("washing-machine", "Laundry"),
+            ("tools", "Repairs"),
+            ("hammer", "Renovation"),
+            ("shield", "Insurance"),
         ]),
-        group("Shopping", symbol: "bag.fill", icons: [
-            ("bag.fill", "Shopping bag"),
-            ("cart.fill", "Shopping cart"),
-            ("storefront.fill", "Store"),
-            ("tshirt.fill", "Clothing"),
-            ("shoe.fill", "Shoes"),
-            ("handbag.fill", "Handbag"),
-            ("sunglasses", "Accessories"),
-            ("watch.analog", "Watch"),
-            ("diamond.fill", "Jewelry"),
-            ("camera.fill", "Camera"),
-            ("headphones", "Audio"),
-            ("desktopcomputer", "Computer"),
-            ("laptopcomputer", "Laptop"),
-            ("smartphone", "Phone"),
-            ("shippingbox.fill", "Delivery"),
-            ("scissors", "Personal care"),
+        group("Shopping", symbol: "shopping-bag", icons: [
+            ("shopping-bag", "Shopping bag"),
+            ("cart", "Shopping cart"),
+            ("shop", "Store"),
+            ("shirt", "Clothing"),
+            ("sandals", "Footwear"),
+            ("handbag", "Handbag"),
+            ("glasses", "Glasses"),
+            ("wristwatch", "Watch"),
+            ("bright-star", "Accessories"),
+            ("camera", "Camera"),
+            ("headset", "Audio"),
+            ("computer", "Computer"),
+            ("laptop", "Laptop"),
+            ("smartphone-device", "Phone"),
+            ("package", "Delivery"),
+            ("scissor", "Personal care"),
         ]),
-        group("Health", symbol: "cross.case.fill", icons: [
-            ("cross.case.fill", "Medical care"),
-            ("heart.text.square.fill", "Health record"),
-            ("pill.fill", "Medicine"),
-            ("pills.fill", "Prescriptions"),
-            ("stethoscope", "Doctor"),
-            ("bandage.fill", "First aid"),
-            ("syringe.fill", "Vaccination"),
-            ("facemask.fill", "Mask"),
-            ("eye.fill", "Eye care"),
-            ("ear.fill", "Hearing"),
-            ("brain.head.profile", "Mental health"),
-            ("waveform.path.ecg", "Heart care"),
-            ("figure.walk", "Walking"),
-            ("figure.run", "Running"),
-            ("dumbbell.fill", "Fitness"),
-            ("figure.mind.and.body", "Wellness"),
+        group("Health", symbol: "healthcare", icons: [
+            ("healthcare", "Medical care"),
+            ("health-shield", "Health insurance"),
+            ("pharmacy-cross-circle", "Pharmacy"),
+            ("pharmacy-cross-tag", "Prescriptions"),
+            ("home-hospital", "Hospital"),
+            ("cube-bandage", "First aid"),
+            ("mask-square", "Mask"),
+            ("eye", "Eye care"),
+            ("voice", "Voice care"),
+            ("brain", "Mental health"),
+            ("activity", "Heart care"),
+            ("walking", "Walking"),
+            ("running", "Running"),
+            ("gym", "Fitness"),
+            ("yoga", "Wellness"),
+            ("heart", "Heart"),
         ]),
-        group("Leisure", symbol: "ticket.fill", icons: [
-            ("ticket.fill", "Event"),
-            ("film.fill", "Movies"),
-            ("music.note.list", "Music"),
-            ("radio.fill", "Radio"),
-            ("gamecontroller.fill", "Video games"),
-            ("dice.fill", "Games"),
-            ("paintpalette.fill", "Art"),
-            ("paintbrush.fill", "Painting"),
-            ("photo.fill", "Photos"),
-            ("book.fill", "Reading"),
-            ("puzzlepiece.fill", "Puzzles"),
-            ("theatermasks.fill", "Theater"),
-            ("mic.fill", "Karaoke"),
-            ("sportscourt.fill", "Sports"),
-            ("trophy.fill", "Competition"),
-            ("party.popper.fill", "Celebration"),
+        group("Leisure", symbol: "gamepad", icons: [
+            ("bookmark-book", "Event"),
+            ("movie", "Movies"),
+            ("music-double-note", "Music"),
+            ("antenna", "Radio"),
+            ("gamepad", "Video games"),
+            ("dice-five", "Games"),
+            ("palette", "Art"),
+            ("color-filter", "Color"),
+            ("media-image", "Photos"),
+            ("book", "Reading"),
+            ("puzzle", "Puzzles"),
+            ("cinema-old", "Cinema"),
+            ("microphone", "Karaoke"),
+            ("basketball", "Sports"),
+            ("trophy", "Competition"),
+            ("birthday-cake", "Celebration"),
         ]),
-        group("Work", symbol: "graduationcap.fill", icons: [
-            ("graduationcap.fill", "Education"),
-            ("books.vertical.fill", "Books"),
-            ("backpack.fill", "School"),
-            ("pencil", "Writing"),
+        group("Work", symbol: "graduation-cap", icons: [
+            ("graduation-cap", "Education"),
+            ("book-stack", "Books"),
+            ("bag", "School bag"),
+            ("edit-pencil", "Writing"),
             ("ruler", "Design"),
-            ("function", "Mathematics"),
-            ("doc.fill", "Document"),
-            ("printer.fill", "Printing"),
-            ("envelope.fill", "Email"),
-            ("paperplane.fill", "Message"),
-            ("person.2.fill", "Team"),
-            ("chart.bar.fill", "Reports"),
-            ("calendar.badge.clock", "Schedule"),
-            ("keyboard.fill", "Keyboard"),
-            ("display", "Office computer"),
-            ("building.fill", "Office"),
+            ("sigma-function", "Mathematics"),
+            ("page", "Document"),
+            ("printer", "Printing"),
+            ("mail", "Email"),
+            ("send", "Message"),
+            ("group", "Team"),
+            ("stats-report", "Reports"),
+            ("calendar", "Schedule"),
+            ("input-field", "Typing"),
+            ("computer", "Office computer"),
+            ("building", "Office"),
         ]),
-        group("Nature", symbol: "pawprint.fill", icons: [
-            ("pawprint.fill", "Pets"),
-            ("dog.fill", "Dog"),
-            ("cat.fill", "Cat"),
-            ("bird.fill", "Bird"),
-            ("hare.fill", "Small pet"),
-            ("tortoise.fill", "Tortoise"),
-            ("ladybug.fill", "Insects"),
-            ("ant.fill", "Ant"),
-            ("tree.fill", "Trees"),
-            ("camera.macro", "Flowers"),
-            ("sun.max.fill", "Sun"),
-            ("moon.stars.fill", "Night"),
-            ("cloud.rain.fill", "Rain"),
-            ("snowflake", "Snow"),
-            ("mountain.2.fill", "Outdoors"),
-            ("globe.americas.fill", "World"),
+        group("Nature", symbol: "wolf", icons: [
+            ("wolf", "Pets"),
+            ("fish", "Fish"),
+            ("jellyfish", "Marine life"),
+            ("leaf", "Leaf"),
+            ("tree", "Trees"),
+            ("pine-tree", "Forest"),
+            ("flower", "Flowers"),
+            ("sun-light", "Sun"),
+            ("half-moon", "Night"),
+            ("rain", "Rain"),
+            ("snow-flake", "Snow"),
+            ("trekking", "Outdoors"),
+            ("globe", "World"),
+            ("sea-waves", "Sea"),
+            ("sea-and-sun", "Beach"),
+            ("cloud", "Cloud"),
         ]),
-        group("Services", symbol: "gearshape.fill", icons: [
-            ("gearshape.fill", "Service"),
-            ("wrench.fill", "Mechanic"),
-            ("screwdriver.fill", "Maintenance"),
-            ("hammer.circle.fill", "Construction"),
-            ("paintbrush.pointed.fill", "Decorating"),
-            ("trash.fill", "Waste"),
-            ("arrow.3.trianglepath", "Recycling"),
+        group("Services", symbol: "settings", icons: [
+            ("settings", "Service"),
+            ("wrench", "Mechanic"),
+            ("tools", "Maintenance"),
+            ("hammer", "Construction"),
+            ("color-filter", "Decorating"),
+            ("trash", "Waste"),
+            ("refresh", "Recycling"),
             ("network", "Network"),
-            ("antenna.radiowaves.left.and.right", "Mobile service"),
-            ("bolt.circle.fill", "Energy"),
-            ("shield.checkered", "Protection"),
-            ("lock.shield.fill", "Secure service"),
-            ("checkmark.seal.fill", "Verified service"),
-            ("exclamationmark.triangle.fill", "Urgent"),
-            ("questionmark.circle.fill", "Support"),
-            ("lifepreserver.fill", "Help"),
+            ("antenna", "Mobile service"),
+            ("flash", "Energy"),
+            ("shield-check", "Protection"),
+            ("home-secure", "Secure service"),
+            ("badge-check", "Verified service"),
+            ("warning-triangle", "Urgent"),
+            ("help-circle", "Support"),
+            ("lifebelt", "Help"),
         ]),
     ]
 
@@ -238,7 +237,7 @@ enum CategoryIconCatalog {
 
     static func group(containing symbol: String) -> CategoryIconGroup? {
         groups.first { group in
-            group.icons.contains { $0.symbol == symbol }
+            group.icons.contains { $0.symbol == AppIcons.canonicalName(symbol) }
         }
     }
 
@@ -314,7 +313,7 @@ struct CategoryIconPicker: View {
                 selectedGroupID = group.id
             }
         } label: {
-            Label(group.title, systemImage: group.symbol)
+            Label(group.title, icon: group.symbol)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(isSelected ? color.selectionForegroundColor : .primary)
                 .padding(.horizontal, 12)
@@ -329,13 +328,12 @@ struct CategoryIconPicker: View {
     }
 
     private func iconButton(_ option: CategoryIconOption) -> some View {
-        let isSelected = selection == option.symbol
+        let isSelected = AppIcons.canonicalName(selection) == option.symbol
 
         return Button {
             selection = option.symbol
         } label: {
-            Image(systemName: option.symbol)
-                .font(.body.weight(.semibold))
+            AppIcon(option.symbol, size: 17)
                 .foregroundStyle(isSelected ? color.selectionForegroundColor : color.swiftUIColor)
                 .frame(width: 40, height: 40)
                 .background(
@@ -366,8 +364,7 @@ struct CategoryColorPicker: View {
                         .frame(width: 34, height: 34)
                         .overlay {
                             if selection == choice {
-                                Image(systemName: "checkmark")
-                                    .font(.caption.bold())
+                                AppIcon("check", size: 12)
                                     .foregroundStyle(choice.selectionForegroundColor)
                             }
                         }
@@ -422,7 +419,7 @@ extension CategoryColor {
 
 extension TransactionCategory {
     var displayIcon: String {
-        icon ?? legacyAppearance.symbol
+        AppIcons.canonicalName(icon ?? legacyAppearance.symbol)
     }
 
     var displayColor: Color {
@@ -435,27 +432,27 @@ extension TransactionCategory {
 
     private var legacyAppearance: (symbol: String, color: CategoryColor) {
         switch systemKey {
-        case "expense.food-drink": ("fork.knife", .orange)
-        case "expense.groceries": ("basket.fill", .green)
-        case "expense.fuel": ("fuelpump.fill", .orange)
-        case "expense.transport": ("car.fill", .blue)
-        case "expense.housing": ("house.fill", .indigo)
-        case "expense.utilities": ("bolt.fill", .orange)
-        case "expense.shopping": ("bag.fill", .pink)
-        case "expense.health": ("cross.case.fill", .red)
-        case "expense.insurance": ("shield.fill", .teal)
-        case "expense.entertainment": ("ticket.fill", .purple)
-        case "expense.education": ("book.fill", .indigo)
+        case "expense.food-drink": ("cutlery", .orange)
+        case "expense.groceries": ("cart", .green)
+        case "expense.fuel": ("gas", .orange)
+        case "expense.transport": ("car", .blue)
+        case "expense.housing": ("home-simple", .indigo)
+        case "expense.utilities": ("flash", .orange)
+        case "expense.shopping": ("shopping-bag", .pink)
+        case "expense.health": ("healthcare", .red)
+        case "expense.insurance": ("shield", .teal)
+        case "expense.entertainment": ("bookmark-book", .purple)
+        case "expense.education": ("book", .indigo)
         case "expense.travel": ("airplane", .cyan)
         case "expense.subscriptions": ("repeat", .purple)
-        case "expense.fees-charges": ("percent", .gray)
-        case "expense.gifts-donations": ("gift.fill", .pink)
-        case "income.salary": ("banknote.fill", .green)
-        case "income.business-freelance": ("briefcase.fill", .blue)
-        case "income.investments": ("chart.line.uptrend.xyaxis", .teal)
-        case "income.refunds": ("arrow.uturn.backward", .orange)
-        case "income.gifts-received": ("gift.fill", .pink)
-        default: ("tag.fill", kind == .income ? .green : .gray)
+        case "expense.fees-charges": ("percentage", .gray)
+        case "expense.gifts-donations": ("gift", .pink)
+        case "income.salary": ("cash", .green)
+        case "income.business-freelance": ("suitcase", .blue)
+        case "income.investments": ("graph-up", .teal)
+        case "income.refunds": ("undo", .orange)
+        case "income.gifts-received": ("gift", .pink)
+        default: ("label", kind == .income ? .green : .gray)
         }
     }
 }

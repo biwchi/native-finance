@@ -5,6 +5,7 @@
 
 # JavaScript and Bun
 node_modules/
+node_modules */
 *.tsbuildinfo
 coverage/
 
@@ -18,4 +19,3 @@ xcuserdata/
 # Local tooling
 .idea/
 .vscode/
-

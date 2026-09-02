@@ -1,0 +1,14 @@
+{
+  "originHash" : "e8647849d27dbe948a9628064f85757081a5dc08c6e6772793f025cbaef8beba",
+  "pins" : [
+    {
+      "identity" : "iconoir-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/iconoir-icons/iconoir-swift.git",
+      "state" : {
+        "revision" : "66391f61281c4c203ae2003ebf66627dc849f233"
+      }
+    }
+  ],
+  "version" : 3
+}

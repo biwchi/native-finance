@@ -7,7 +7,7 @@ private enum QuickTransactionMode: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    init(_ transaction: FinanceTransaction) {
+    init(_ transaction: any EditableTransaction) {
         self = transaction.kind == .income ? .income : .expense
     }
 
@@ -15,11 +15,11 @@ private enum QuickTransactionMode: String, CaseIterable, Identifiable {
         rawValue.capitalized
     }
 
-    var systemImage: String {
+    var iconName: String {
         switch self {
-        case .expense: "arrow.up.right.circle.fill"
-        case .income: "arrow.down.left.circle.fill"
-        case .transfer: "arrow.left.arrow.right.circle.fill"
+        case .expense: "arrow-up-right-circle"
+        case .income: "arrow-down-left-circle"
+        case .transfer: "coins-swap"
         }
     }
 
@@ -45,6 +45,7 @@ struct AddTransactionView: View {
     @AppStorage("lastTransactionAccountID") private var lastAccountID = ""
 
     let transaction: FinanceTransaction?
+    let upcomingTransaction: UpcomingTransaction?
     let initialCommand: String?
     let initialAccountID: UUID?
 
@@ -68,19 +69,24 @@ struct AddTransactionView: View {
 
     init(
         transaction: FinanceTransaction? = nil,
+        upcomingTransaction: UpcomingTransaction? = nil,
         initialCommand: String? = nil,
         initialAccountID: UUID? = nil
     ) {
         self.transaction = transaction
+        self.upcomingTransaction = upcomingTransaction
         self.initialCommand = initialCommand
         self.initialAccountID = initialAccountID
-        _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: transaction))
-        _mode = State(initialValue: transaction.map(QuickTransactionMode.init) ?? .expense)
+        let original: (any EditableTransaction)?
+        if let upcomingTransaction {
+            original = upcomingTransaction
+        } else {
+            original = transaction
+        }
+        _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: original))
+        _mode = State(initialValue: original.map(QuickTransactionMode.init) ?? .expense)
         _amountExpression = State(
-            initialValue: AmountExpression(
-                rawValue: transaction?.amount ?? "",
-                replacesInitialValue: transaction != nil
-            )
+            initialValue: AmountExpression(rawValue: original?.amount ?? "")
         )
     }
 
@@ -131,7 +137,7 @@ struct AddTransactionView: View {
             await transactionStore.loadCategories()
             applyInitialCommandIfNeeded()
         }
-        .alert(transaction == nil ? "Couldn’t add transaction" : "Couldn’t save transaction", isPresented: errorAlertBinding) {
+        .alert(isEditing ? "Couldn’t save transaction" : "Couldn’t add transaction", isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Try again.")
@@ -154,6 +160,7 @@ struct AddTransactionView: View {
     }
 
     private var navigationTitle: String {
+        if upcomingTransaction != nil { return "Edit recurring transaction" }
         if transaction != nil { return "Edit transaction" }
         return initialCommand == nil ? "New transaction" : "Review transaction"
     }
@@ -161,7 +168,7 @@ struct AddTransactionView: View {
     private func applyInitialCommandIfNeeded() {
         guard
             !didApplyInitialCommand,
-            transaction == nil,
+            !isEditing,
             let initialCommand,
             !initialCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
@@ -202,7 +209,7 @@ struct AddTransactionView: View {
     }
 
     private var availableModes: [QuickTransactionMode] {
-        guard transaction == nil else { return [.expense, .income] }
+        guard !isEditing else { return [.expense, .income] }
         return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
     }
 
@@ -213,8 +220,7 @@ struct AddTransactionView: View {
             mode = option
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: option.systemImage)
-                    .font(.system(size: 14, weight: .semibold))
+                AppIcon(option.iconName, size: 14)
                     .foregroundStyle(isSelected ? option.color : .primary)
                     .accessibilityHidden(true)
 
@@ -296,8 +302,7 @@ struct AddTransactionView: View {
             .fixedSize()
 
             NavigationLink(value: AddTransactionRoute.details) {
-                Image(systemName: hasExtraDetails ? "text.badge.checkmark" : "text.badge.plus")
-                    .font(.system(size: 17, weight: .semibold))
+                AppIcon(hasExtraDetails ? "clipboard-check" : "page-plus", size: 17)
                     .frame(width: 38, height: 38)
                     .modifier(QuickCapsuleControlBackground())
             }
@@ -354,7 +359,7 @@ struct AddTransactionView: View {
                 } label: {
                     Group {
                         if key == "⌫" {
-                            Image(systemName: "delete.left")
+                            AppIcon("erase")
                         } else {
                             Text(key == "*" ? "×" : key == "/" ? "÷" : key)
                         }
@@ -370,21 +375,9 @@ struct AddTransactionView: View {
     }
 
     private var submitButton: some View {
-        Button {
+        PrimaryActionButton(submitButtonTitle, isLoading: isSaving) {
             Task { await save() }
-        } label: {
-            HStack(spacing: 8) {
-                if isSaving {
-                    ProgressView()
-                        .tint(Color(uiColor: .systemBackground))
-                }
-                Text(submitButtonTitle)
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .foregroundStyle(Color(uiColor: .systemBackground))
         }
-        .modifier(QuickSubmitButtonStyle())
         .disabled(isSubmitDisabled)
         .padding(.top, 20)
         .padding(.bottom, 24)
@@ -392,14 +385,21 @@ struct AddTransactionView: View {
     }
 
     private var submitButtonTitle: String {
-        if transaction != nil {
+        if isEditing {
             return "Save changes"
         }
         return mode == .transfer ? "Transfer" : "Add transaction"
     }
 
     private var isSubmitDisabled: Bool {
-        isSaving || transaction.map { !viewModel.hasChanges(from: $0) } == true
+        isSaving || originalTransaction.map { !viewModel.hasChanges(from: $0) } == true
+    }
+
+    private var isEditing: Bool { originalTransaction != nil }
+
+    private var originalTransaction: (any EditableTransaction)? {
+        if let upcomingTransaction { return upcomingTransaction }
+        return transaction
     }
 
     private var selectedAccount: Account? {
@@ -419,7 +419,7 @@ struct AddTransactionView: View {
             CenteredSelectionCarouselItem(
                 id: account.id,
                 title: account.name,
-                systemImage: account.icon,
+                iconName: account.icon,
                 color: account.iconColor.color,
                 accessibilityLabel: "Transfer to \(account.name)"
             )
@@ -449,7 +449,7 @@ struct AddTransactionView: View {
         let all = CenteredSelectionCarouselItem(
             id: QuickCategoryCarouselID.all,
             title: "All",
-            systemImage: "square.grid.2x2",
+            iconName: "view-grid",
             color: Color.primary,
             accessibilityLabel: "All categories",
             action: {
@@ -459,7 +459,7 @@ struct AddTransactionView: View {
         let uncategorized = CenteredSelectionCarouselItem(
             id: QuickCategoryCarouselID.uncategorized,
             title: "Uncategorized",
-            systemImage: "circle.slash",
+            iconName: "prohibition",
             color: Color.gray
         )
         let categories = visibleCategories.map { category in
@@ -468,12 +468,12 @@ struct AddTransactionView: View {
             return CenteredSelectionCarouselItem(
                 id: QuickCategoryCarouselID.category(category.id),
                 title: category.name,
-                systemImage: category.displayIcon,
+                iconName: category.displayIcon,
                 color: category.displayColor,
                 accessibilityLabel: hasSubcategories
                     ? "\(category.name), has subcategories. Select again to show them."
                     : category.name,
-                selectedAccessorySystemImage: hasSubcategories ? "chevron.down" : nil,
+                selectedAccessoryIcon: hasSubcategories ? "nav-arrow-down" : nil,
                 selectedAction: hasSubcategories ? {
                     expandSubcategories(for: category)
                 } : nil
@@ -488,7 +488,7 @@ struct AddTransactionView: View {
         let collapse = CenteredSelectionCarouselItem(
             id: QuickCategoryCarouselID.category(parent.id),
             title: parent.name,
-            systemImage: "chevron.down",
+            iconName: "nav-arrow-down",
             color: parent.displayColor,
             accessibilityLabel: "Use \(parent.name) and close subcategories",
             tapAction: {
@@ -499,7 +499,7 @@ struct AddTransactionView: View {
             CenteredSelectionCarouselItem(
                 id: QuickCategoryCarouselID.category(category.id),
                 title: category.name,
-                systemImage: category.displayIcon,
+                iconName: category.displayIcon,
                 color: category.displayColor,
                 accessibilityLabel: "\(parent.name), \(category.name)"
             )
@@ -716,7 +716,9 @@ struct AddTransactionView: View {
                     amount: amount,
                     categoryID: viewModel.categoryID
                 )
-                if let transaction {
+                if let upcomingTransaction {
+                    try await transactionStore.updateRecurringTransaction(upcomingTransaction, with: request)
+                } else if let transaction {
                     try await transactionStore.updateTransaction(id: transaction.id, with: request)
                 } else {
                     try await transactionStore.createTransaction(request)
@@ -788,16 +790,15 @@ struct QuickAccountMenu: View {
                 Button {
                     onSelect(account.id)
                 } label: {
-                    Label(account.name, systemImage: account.icon)
+                    Label(account.name, icon: account.icon)
                 }
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "creditcard.fill")
+                AppIcon("credit-card")
                 Text(title)
                     .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
+                AppIcon("nav-arrow-down", size: 11)
             }
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 10)
@@ -822,15 +823,6 @@ private struct QuickKeyBackground: ViewModifier {
             Color(uiColor: .tertiarySystemFill),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
-    }
-}
-
-struct QuickSubmitButtonStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .buttonStyle(.plain)
-            .background(Color.primary, in: Capsule())
-            .contentShape(Capsule())
     }
 }
 

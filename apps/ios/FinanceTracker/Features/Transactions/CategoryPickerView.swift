@@ -49,7 +49,7 @@ struct CategoryPickerView: View {
                         .frame(maxWidth: .infinity)
                 } else if let message = transactionStore.categoryErrorMessage {
                     VStack(alignment: .leading, spacing: 12) {
-                        Label(message, systemImage: "wifi.exclamationmark")
+                        Label(message, icon: "wifi-warning")
                             .foregroundStyle(.secondary)
                         Button("Try Again") {
                             Task { await transactionStore.loadCategories(force: true) }
@@ -91,11 +91,15 @@ struct CategoryPickerView: View {
                     if searchText.isEmpty {
                         ContentUnavailableView(
                             "No categories yet",
-                            systemImage: "tag",
+                            iconName: "label",
                             description: Text("Create a category to organize your transactions.")
                         )
                     } else {
-                        ContentUnavailableView.search(text: searchText)
+                        ContentUnavailableView(
+                            "No categories found",
+                            iconName: "search",
+                            description: Text("No results for “\(searchText)”.")
+                        )
                     }
                 }
             }
@@ -151,8 +155,7 @@ struct CategoryPickerView: View {
     }
 
     private func actionIcon(_ name: String, color: Color) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 16, weight: .medium))
+        AppIcon(name, size: 16)
             .foregroundStyle(color)
             .frame(width: 36, height: 36)
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
@@ -162,8 +165,7 @@ struct CategoryPickerView: View {
     @ViewBuilder
     private func selectionIndicator(isSelected: Bool) -> some View {
         if isSelected {
-            Image(systemName: "checkmark")
-                .font(.body.weight(.semibold))
+            AppIcon("check", size: 17)
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true)
         }
@@ -229,8 +231,7 @@ private struct CategorySelectionRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                AppIcon("check", size: 17)
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
             }
@@ -249,7 +250,7 @@ private struct NewTransactionCategoryView: View {
 
     @State private var name = ""
     @State private var parentID: UUID?
-    @State private var icon = "tag.fill"
+    @State private var icon = "label"
     @State private var color = CategoryColor.gray
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -268,7 +269,7 @@ private struct NewTransactionCategoryView: View {
                             Label {
                                 Text(category.name)
                             } icon: {
-                                Image(systemName: category.displayIcon)
+                                AppIcon(category.displayIcon)
                                     .foregroundStyle(category.displayColor)
                             }
                             .tag(Optional(category.id))
@@ -287,7 +288,7 @@ private struct NewTransactionCategoryView: View {
 
                 if let errorMessage {
                     Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(.red)
                     }
                 }

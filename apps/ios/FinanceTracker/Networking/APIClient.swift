@@ -20,7 +20,7 @@ struct APIClient: Sendable {
 
     init(
         baseURL: URL = APIClient.configuredBaseURL,
-        session: URLSession = .shared
+        session: URLSession = APIClient.defaultSession
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -98,6 +98,22 @@ struct APIClient: Sendable {
             throw APIClientError.invalidResponse
         }
 
+        return try await get(url: url)
+    }
+
+    func upcomingTransactions(accountID: UUID?) async throws -> [UpcomingTransaction] {
+        var components = URLComponents(
+            url: apiURL.appending(path: "transactions").appending(path: "upcoming"),
+            resolvingAgainstBaseURL: false
+        )
+        if let accountID {
+            components?.queryItems = [
+                URLQueryItem(name: "accountId", value: accountID.uuidString),
+            ]
+        }
+        guard let url = components?.url else {
+            throw APIClientError.invalidResponse
+        }
         return try await get(url: url)
     }
 
@@ -200,11 +216,44 @@ struct APIClient: Sendable {
         )
     }
 
-    func deleteTransaction(id: UUID) async throws -> DeleteTransactionResponse {
-        var request = URLRequest(
-            url: apiURL.appending(path: "transactions").appending(path: id.uuidString)
-        )
+    func deleteTransaction(
+        id: UUID,
+        action: RecurringDeletionAction = .occurrence
+    ) async throws -> DeleteTransactionResponse {
+        let url = apiURL.appending(path: "transactions").appending(path: id.uuidString)
+        var request = URLRequest(url: action == .occurrence ? url : url.appending(queryItems: [
+            URLQueryItem(name: "action", value: action.rawValue),
+        ]))
         request.httpMethod = "DELETE"
+        return try await send(request)
+    }
+
+    func deleteUpcomingTransaction(
+        _ transaction: UpcomingTransaction,
+        action: RecurringDeletionAction
+    ) async throws -> DeleteTransactionResponse {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let url = apiURL.appending(path: "transactions/recurring").appending(path: transaction.id.uuidString)
+            .appending(queryItems: [
+                URLQueryItem(name: "action", value: action.rawValue),
+                URLQueryItem(name: "occurredAt", value: formatter.string(from: transaction.occurredAt)),
+            ])
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        return try await send(request)
+    }
+
+    func updateRecurringTransaction(
+        _ transaction: UpcomingTransaction,
+        with values: TransactionRequest
+    ) async throws -> RecurringTransactionUpdateResponse {
+        var request = URLRequest(url: apiURL.appending(path: "transactions/recurring").appending(path: transaction.id.uuidString))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(RecurringTransactionUpdateRequest(
+            transaction: values, expectedOccurredAt: transaction.occurredAt
+        ))
         return try await send(request)
     }
 
@@ -326,6 +375,18 @@ struct APIClient: Sendable {
         }
         return decoder
     }
+
+    private static let defaultSession: URLSession = {
+        #if DEBUG && !targetEnvironment(simulator)
+        let configuration = URLSessionConfiguration.default
+        // Give the user time to approve local-network access on first launch.
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(configuration: configuration)
+        #else
+        return .shared
+        #endif
+    }()
 
     private static var configuredBaseURL: URL {
         guard

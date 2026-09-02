@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import { db } from "../db/client.ts";
@@ -14,6 +14,11 @@ import {
   nextRecurrenceDate,
 } from "../services/recurring-transactions.ts";
 import { transactionKindSchema } from "./categories.ts";
+import {
+  deleteRecurringOccurrence,
+  RecurringMutationError,
+  updateRecurringTemplate,
+} from "../services/recurring-transaction-mutations.ts";
 
 const amountPattern =
   "^(?=.{1,20}$)(?!0+(?:\\.0{1,4})?$)(?:0|[1-9]\\d{0,14})(?:\\.\\d{1,4})?$";
@@ -29,6 +34,12 @@ const recurrenceBody = t.Object({
   frequency: recurrenceFrequencySchema,
   endAt: t.Optional(t.Nullable(t.String({ format: "date-time" }))),
 });
+
+const recurringDeletionActionSchema = t.Union([
+  t.Literal("occurrence"),
+  t.Literal("stopRepeating"),
+  t.Literal("occurrenceAndFuture"),
+]);
 
 const transactionBody = t.Object({
   accountId: t.String({ format: "uuid" }),
@@ -97,6 +108,121 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
     {
       query: t.Object({
         accountId: t.Optional(t.String({ format: "uuid" })),
+      }),
+    },
+  )
+  .get(
+    "/upcoming",
+    async ({ query }) => {
+      const now = new Date();
+      await materializeRecurringTransactions(now);
+
+      const schedules = await db
+        .select({
+          ...getTableColumns(recurringSchedules),
+          category: transactionSelection.category,
+        })
+        .from(recurringSchedules)
+        .leftJoin(categories, eq(recurringSchedules.categoryId, categories.id))
+        .where(query.accountId ? eq(recurringSchedules.accountId, query.accountId) : undefined);
+
+      // A schedule's first occurrence can already be recorded with a future date.
+      const recorded = await db
+        .select({ scheduleId: transactions.recurringScheduleId, occurredAt: transactions.occurredAt })
+        .from(transactions)
+        .where(and(
+          isNotNull(transactions.recurringScheduleId),
+          gt(transactions.occurredAt, now),
+          query.accountId ? eq(transactions.accountId, query.accountId) : undefined,
+        ))
+        .orderBy(asc(transactions.occurredAt));
+      const firstRecorded = new Map<string, Date>();
+      for (const occurrence of recorded) {
+        if (occurrence.scheduleId && !firstRecorded.has(occurrence.scheduleId)) {
+          firstRecorded.set(occurrence.scheduleId, occurrence.occurredAt);
+        }
+      }
+
+      return schedules.flatMap((schedule) => {
+        const dates = [schedule.nextOccurrenceAt, firstRecorded.get(schedule.id)]
+          .filter((date): date is Date => date != null && date > now &&
+            (!schedule.endAt || date <= schedule.endAt));
+        const occurredAt = dates.sort((left, right) => left.getTime() - right.getTime())[0];
+        if (!occurredAt) return [];
+
+        return [{
+          id: schedule.id,
+          accountId: schedule.accountId,
+          kind: schedule.kind,
+          amount: schedule.amount,
+          currency: schedule.currency,
+          category: schedule.category,
+          merchant: schedule.merchant,
+          payee: schedule.payee,
+          note: schedule.note,
+          frequency: schedule.frequency,
+          endAt: schedule.endAt,
+          occurredAt,
+        }];
+      }).sort((left, right) =>
+        left.occurredAt.getTime() - right.occurredAt.getTime() || left.id.localeCompare(right.id),
+      );
+    },
+    {
+      query: t.Object({
+        accountId: t.Optional(t.String({ format: "uuid" })),
+      }),
+    },
+  )
+  .put(
+    "/recurring/:id",
+    async ({ params, body, set }) => {
+      const prepared = await prepareTransaction(body.transaction);
+      if ("error" in prepared) {
+        set.status = prepared.status;
+        return { message: prepared.error };
+      }
+      const recurrence = parseRecurrence(body.transaction.recurrence, prepared.values.occurredAt);
+      if ("error" in recurrence) {
+        set.status = 400;
+        return { message: recurrence.error };
+      }
+      try {
+        await updateRecurringTemplate(
+          params.id, new Date(body.expectedOccurredAt), prepared.values, recurrence.value,
+        );
+        return { updated: true };
+      } catch (error) {
+        if (!(error instanceof RecurringMutationError)) throw error;
+        set.status = error.status;
+        return { message: error.message };
+      }
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      body: t.Object({
+        transaction: transactionBody,
+        expectedOccurredAt: t.String({ format: "date-time" }),
+      }),
+    },
+  )
+  .delete(
+    "/recurring/:id",
+    async ({ params, query, set }) => {
+      try {
+        await deleteRecurringOccurrence(params.id, new Date(query.occurredAt), query.action);
+        return { deleted: query.action !== "stopRepeating", stopped: query.action !== "occurrence" };
+      } catch (error) {
+        if (!(error instanceof RecurringMutationError)) throw error;
+        set.status = error.status;
+        return { message: error.message };
+      }
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      query: t.Object({
+        occurredAt: t.String({ format: "date-time" }),
+        action: recurringDeletionActionSchema,
       }),
     },
   )
@@ -290,7 +416,8 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
             .select()
             .from(recurringSchedules)
             .where(eq(recurringSchedules.id, existing.recurringScheduleId))
-            .limit(1);
+            .limit(1)
+            .for("update");
 
           if (!schedule) {
             throw new Error("Recurring schedule not found");
@@ -372,7 +499,29 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
   )
   .delete(
     "/:id",
-    async ({ params, set }) => {
+    async ({ params, query, set }) => {
+      const [existing] = await db.select().from(transactions).where(eq(transactions.id, params.id)).limit(1);
+      if (!existing) {
+        set.status = 404;
+        return { message: "Transaction not found" };
+      }
+      const action = query.action ?? "occurrence";
+      if (existing.recurringScheduleId) {
+        try {
+          await deleteRecurringOccurrence(existing.recurringScheduleId, existing.occurredAt, action);
+          return action === "occurrence"
+            ? { deleted: true }
+            : { deleted: action !== "stopRepeating", stopped: true };
+        } catch (error) {
+          if (!(error instanceof RecurringMutationError)) throw error;
+          set.status = error.status;
+          return { message: error.message };
+        }
+      }
+      if (action !== "occurrence") {
+        set.status = 409;
+        return { message: "This transaction is no longer repeating. Refresh the list." };
+      }
       const [deletedTransaction] = await db
         .delete(transactions)
         .where(eq(transactions.id, params.id))
@@ -387,6 +536,7 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
     },
     {
       params: t.Object({ id: t.String({ format: "uuid" }) }),
+      query: t.Object({ action: t.Optional(recurringDeletionActionSchema) }),
     },
   );
 

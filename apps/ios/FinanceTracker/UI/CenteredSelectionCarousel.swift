@@ -3,51 +3,51 @@ import SwiftUI
 struct CenteredSelectionCarouselItem<ID: Hashable>: Identifiable {
     let id: ID
     let title: String
-    let systemImage: String
+    let iconName: String
     let color: Color
     let accessibilityLabel: String
     let action: (() -> Void)?
     let tapAction: (() -> Void)?
-    let selectedAccessorySystemImage: String?
+    let selectedAccessoryIcon: String?
     let selectedAction: (() -> Void)?
 
     init(
         id: ID,
         title: String,
-        systemImage: String,
+        iconName: String,
         color: Color,
         accessibilityLabel: String? = nil,
-        selectedAccessorySystemImage: String? = nil,
+        selectedAccessoryIcon: String? = nil,
         tapAction: (() -> Void)? = nil,
         selectedAction: (() -> Void)? = nil
     ) {
         self.id = id
         self.title = title
-        self.systemImage = systemImage
+        self.iconName = iconName
         self.color = color
         self.accessibilityLabel = accessibilityLabel ?? title
         self.action = nil
         self.tapAction = tapAction
-        self.selectedAccessorySystemImage = selectedAccessorySystemImage
+        self.selectedAccessoryIcon = selectedAccessoryIcon
         self.selectedAction = selectedAction
     }
 
     init(
         id: ID,
         title: String,
-        systemImage: String,
+        iconName: String,
         color: Color,
         accessibilityLabel: String? = nil,
         action: @escaping () -> Void
     ) {
         self.id = id
         self.title = title
-        self.systemImage = systemImage
+        self.iconName = iconName
         self.color = color
         self.accessibilityLabel = accessibilityLabel ?? title
         self.action = action
         self.tapAction = nil
-        self.selectedAccessorySystemImage = nil
+        self.selectedAccessoryIcon = nil
         self.selectedAction = nil
     }
 }
@@ -143,8 +143,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
             }
         } label: {
             VStack(spacing: 5) {
-                Image(systemName: item.systemImage)
-                    .font(.system(size: 21, weight: .medium))
+                AppIcon(item.iconName, size: 21)
                     .foregroundStyle(item.color)
                     .frame(width: 48, height: 48)
                     .background(
@@ -153,9 +152,8 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
                     )
                     .overlay(alignment: .bottomTrailing) {
                         if isSelected,
-                           let accessorySystemImage = item.selectedAccessorySystemImage {
-                            Image(systemName: accessorySystemImage)
-                                .font(.system(size: 9, weight: .bold))
+                           let accessoryIcon = item.selectedAccessoryIcon {
+                            AppIcon(accessoryIcon, size: 9)
                                 .foregroundStyle(Color(uiColor: .systemBackground))
                                 .frame(width: 18, height: 18)
                                 .background(item.color, in: Circle())

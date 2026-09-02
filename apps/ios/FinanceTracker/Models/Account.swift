@@ -19,13 +19,13 @@ enum AccountType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
+    var iconName: String {
         switch self {
-        case .cash: "banknote"
-        case .checking: "building.columns"
-        case .savings: "dollarsign.circle"
-        case .credit: "creditcard"
-        case .investment: "chart.line.uptrend.xyaxis"
+        case .cash: "cash"
+        case .checking: "bank"
+        case .savings: "dollar-circle"
+        case .credit: "credit-card"
+        case .investment: "graph-up"
         }
     }
 }
@@ -50,18 +50,18 @@ enum AccountIconColor: String, Codable, CaseIterable, Identifiable {
 
 enum AccountIcon {
     static let choices = [
-        "creditcard.fill",
-        "building.columns.fill",
-        "banknote.fill",
-        "dollarsign.circle.fill",
-        "chart.line.uptrend.xyaxis",
-        "house.fill",
-        "car.fill",
-        "cart.fill",
-        "briefcase.fill",
-        "gift.fill",
+        "credit-card",
+        "bank",
+        "cash",
+        "dollar-circle",
+        "graph-up",
+        "home-simple",
+        "car",
+        "cart",
+        "suitcase",
+        "gift",
         "airplane",
-        "heart.fill",
+        "heart",
     ]
 }
 

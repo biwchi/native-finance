@@ -5,6 +5,8 @@ import { closeDatabase } from "./db/client.ts";
 app.listen({
   hostname: config.host,
   port: config.port,
+  // A second dev server must not share traffic with a suspended or stale process.
+  reusePort: false,
 });
 
 console.log(
@@ -18,4 +20,3 @@ async function shutdown(): Promise<void> {
 
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
-

@@ -4,7 +4,6 @@ import { db } from "../db/client.ts";
 import {
   recurringSchedules,
   transactions,
-  type RecurringSchedule,
 } from "../db/schema.ts";
 
 export type RecurrenceFrequency =
@@ -72,7 +71,7 @@ export async function materializeRecurringTransactions(
     );
 
   for (const schedule of dueSchedules) {
-    await materializeSchedule(schedule, through);
+    await materializeRecurringSchedule(schedule.id, through);
   }
 }
 
@@ -80,34 +79,15 @@ export async function materializeRecurringSchedule(
   scheduleId: string,
   through = new Date(),
 ): Promise<void> {
-  const [schedule] = await db
-    .select()
-    .from(recurringSchedules)
-    .where(eq(recurringSchedules.id, scheduleId))
-    .limit(1);
-
-  if (schedule) {
-    await materializeSchedule(schedule, through);
-  }
-}
-
-async function materializeSchedule(
-  schedule: RecurringSchedule,
-  through: Date,
-): Promise<void> {
-  if (!schedule.nextOccurrenceAt) {
-    return;
-  }
-
-  const plan = recurrencePlan(
-    schedule.nextOccurrenceAt,
-    schedule.startAt,
-    schedule.frequency,
-    schedule.endAt,
-    through,
-  );
-
   await db.transaction(async (transaction) => {
+    // Read after taking the lock so edits, skips, and cancellation cannot race a stale schedule.
+    const [schedule] = await transaction.select().from(recurringSchedules)
+      .where(eq(recurringSchedules.id, scheduleId)).for("update");
+    if (!schedule?.nextOccurrenceAt) return;
+
+    const plan = recurrencePlan(
+      schedule.nextOccurrenceAt, schedule.startAt, schedule.frequency, schedule.endAt, through,
+    );
     if (plan.dates.length > 0) {
       await transaction
         .insert(transactions)

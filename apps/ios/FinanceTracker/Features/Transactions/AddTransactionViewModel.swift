@@ -3,11 +3,9 @@ import Foundation
 
 struct AmountExpression: Equatable {
     private(set) var rawValue = ""
-    private var replacesInitialValue: Bool
 
-    init(rawValue: String = "", replacesInitialValue: Bool = false) {
+    init(rawValue: String = "") {
         self.rawValue = Self.normalizedInitialValue(rawValue)
-        self.replacesInitialValue = replacesInitialValue && !rawValue.isEmpty
     }
 
     var displayValue: String {
@@ -29,28 +27,18 @@ struct AmountExpression: Equatable {
     mutating func enter(_ key: String) {
         switch key {
         case "⌫":
-            replacesInitialValue = false
             if !rawValue.isEmpty {
                 rawValue.removeLast()
             }
         case "+", "-", "*", "/":
-            replacesInitialValue = false
             enterOperator(Character(key))
         case ".", ",":
-            replaceInitialValueIfNeeded()
             enterDecimalSeparator()
         default:
             guard key.count == 1, key.first?.isNumber == true else { return }
-            replaceInitialValueIfNeeded()
             guard rawValue.count < 32 else { return }
             rawValue.append(key)
         }
-    }
-
-    private mutating func replaceInitialValueIfNeeded() {
-        guard replacesInitialValue else { return }
-        rawValue = ""
-        replacesInitialValue = false
     }
 
     private mutating func enterOperator(_ value: Character) {
@@ -180,7 +168,7 @@ final class AddTransactionViewModel: ObservableObject {
     private var categoryQuery = ""
 
     init(
-        transaction: FinanceTransaction? = nil,
+        transaction: (any EditableTransaction)? = nil,
         parser: TransactionCommandParser = TransactionCommandParser(),
         resolver: any CategoryResolving = AdaptiveCategoryResolver(),
         now: @escaping () -> Date = Date.init
@@ -366,7 +354,7 @@ final class AddTransactionViewModel: ObservableObject {
             !dateConflict
     }
 
-    func hasChanges(from transaction: FinanceTransaction) -> Bool {
+    func hasChanges(from transaction: any EditableTransaction) -> Bool {
         accountID != transaction.accountId ||
             canonicalAmount().flatMap { Decimal(string: $0) } != Decimal(string: transaction.amount) ||
             kind != transaction.kind ||

@@ -33,27 +33,56 @@ final class AddTransactionViewModelTests: XCTestCase {
         XCTAssertNil(negative.canonicalResult)
     }
 
-    func testEditingAmountNormalizesStoredZerosAndFirstDigitReplacesIt() {
-        var expression = AmountExpression(
-            rawValue: "2000.0000",
-            replacesInitialValue: true
-        )
+    func testEditingAmountAppendsDigitsToTheNormalizedStoredValue() {
+        var expression = AmountExpression(rawValue: "2000.0000")
 
         XCTAssertEqual(expression.rawValue, "2000")
 
-        ["2", "4"].forEach { expression.enter($0) }
+        expression.enter("0")
 
-        XCTAssertEqual(expression.rawValue, "24")
-        XCTAssertEqual(expression.canonicalResult, "24")
+        XCTAssertEqual(expression.rawValue, "20000")
+        XCTAssertEqual(expression.canonicalResult, "20000")
+
+        expression.enter("4")
+
+        XCTAssertEqual(expression.rawValue, "200004")
+        XCTAssertEqual(expression.canonicalResult, "200004")
+    }
+
+    func testEditingAmountAddsDecimalPlacesToTheStoredValue() {
+        for separator in [".", ","] {
+            var expression = AmountExpression(rawValue: "2000.0000")
+
+            expression.enter(separator)
+
+            XCTAssertEqual(expression.rawValue, "2000.")
+            XCTAssertEqual(expression.canonicalResult, "2000")
+
+            expression.enter("5")
+
+            XCTAssertEqual(expression.rawValue, "2000.5")
+            XCTAssertEqual(expression.canonicalResult, "2000.5")
+        }
+    }
+
+    func testEditingFractionalAmountPreservesExistingDecimalPlaces() {
+        var expression = AmountExpression(rawValue: "12.5000")
+
+        expression.enter(",")
+        XCTAssertEqual(expression.rawValue, "12.5")
+
+        expression.enter("9")
+        XCTAssertEqual(expression.rawValue, "12.59")
+        XCTAssertEqual(expression.canonicalResult, "12.59")
     }
 
     func testEditingAmountCanDeleteOrCalculateFromInitialValue() {
-        var edited = AmountExpression(rawValue: "12.5000", replacesInitialValue: true)
+        var edited = AmountExpression(rawValue: "12.5000")
         edited.enter("⌫")
         edited.enter("9")
         XCTAssertEqual(edited.rawValue, "12.9")
 
-        var calculated = AmountExpression(rawValue: "12.5000", replacesInitialValue: true)
+        var calculated = AmountExpression(rawValue: "12.5000")
         calculated.enter("+")
         calculated.enter("2")
         XCTAssertEqual(calculated.rawValue, "12.5+2")

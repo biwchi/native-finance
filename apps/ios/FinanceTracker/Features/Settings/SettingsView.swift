@@ -13,7 +13,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Preferences") {
+                Section {
                     NavigationLink {
                         CurrencyPickerView(
                             selection: $defaultCurrency,
@@ -25,24 +25,24 @@ struct SettingsView: View {
                             Text(currencyLabel)
                                 .foregroundStyle(.secondary)
                         } label: {
-                            Label("Default currency", systemImage: "banknote")
+                            Label("Default currency", icon: "cash")
                         }
                     }
 
                     Picker(selection: $theme) {
                         ForEach(AppTheme.allCases) { theme in
-                            Label(theme.title, systemImage: theme.systemImage)
+                            Label(theme.title, icon: theme.iconName)
                                 .tag(theme.rawValue)
                         }
                     } label: {
-                        Label("Theme", systemImage: "circle.lefthalf.filled")
+                        Label("Theme", icon: "brightness")
                     }
                     .pickerStyle(.navigationLink)
                 }
 
                 Section {
                     Toggle(isOn: $preferSimpleTransactionEntry) {
-                        Label("Use quick entry", systemImage: "text.cursor")
+                        Label("Use quick entry", icon: "input-field")
                     }
                 } header: {
                     Text("Add transactions")
@@ -54,12 +54,9 @@ struct SettingsView: View {
                     NavigationLink {
                         CategorySettingsView()
                     } label: {
-                        Label("Categories", systemImage: "tag")
+                        Label("Categories", icon: "label")
                     }
-                } footer: {
-                    Text("Add categories and optional subcategories, change their appearance, or remove custom ones you no longer use.")
-                }
-            }
+                }            }
             .navigationTitle("Settings")
         }
     }
@@ -111,7 +108,7 @@ private struct CategorySettingsView: View {
                    transactionStore.categoryErrorMessage == nil {
                     ContentUnavailableView(
                         "No categories",
-                        systemImage: "tag",
+                        iconName: "label",
                         description: Text("Tap + to add one.")
                     )
                 }
@@ -119,7 +116,7 @@ private struct CategorySettingsView: View {
 
             if let message = transactionStore.categoryErrorMessage ?? errorMessage {
                 Section {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                    Label(message, icon: "warning-triangle")
                         .foregroundStyle(.red)
                 }
             }
@@ -128,8 +125,10 @@ private struct CategorySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Add category", systemImage: "plus") {
+                Button {
                     editor = CategoryEditor(category: nil, kind: kind)
+                } label: {
+                    Label("Add category", icon: "plus")
                 }
             }
         }
@@ -179,8 +178,7 @@ private struct CategorySettingsView: View {
         } label: {
             HStack(spacing: 12) {
                 if isSubcategory {
-                    Image(systemName: "arrow.turn.down.right")
-                        .font(.caption)
+                    AppIcon("arrow-right", size: 12)
                         .foregroundStyle(.tertiary)
                         .frame(width: 16)
                         .accessibilityHidden(true)
@@ -190,8 +188,7 @@ private struct CategorySettingsView: View {
                 Text(category.name)
                     .foregroundStyle(.primary)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                AppIcon("nav-arrow-right", size: 12)
                     .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
@@ -263,7 +260,7 @@ private struct CategoryEditorView: View {
         _name = State(initialValue: editor.category?.name ?? "")
         _kind = State(initialValue: editor.kind)
         _parentID = State(initialValue: editor.category?.parentId)
-        _icon = State(initialValue: editor.category?.displayIcon ?? "tag.fill")
+        _icon = State(initialValue: editor.category?.displayIcon ?? "label")
         _color = State(initialValue: editor.category?.displayCategoryColor ?? .gray)
     }
 
@@ -291,7 +288,7 @@ private struct CategoryEditorView: View {
                             Label {
                                 Text(category.name)
                             } icon: {
-                                Image(systemName: category.displayIcon)
+                                AppIcon(category.displayIcon)
                                     .foregroundStyle(category.displayColor)
                             }
                             .tag(Optional(category.id))
@@ -317,7 +314,7 @@ private struct CategoryEditorView: View {
 
                 if let errorMessage {
                     Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(.red)
                     }
                 }

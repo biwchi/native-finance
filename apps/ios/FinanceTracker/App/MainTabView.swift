@@ -126,15 +126,12 @@ struct MainTabView: View {
                 )
 
                 if !trimmedQuickEntryText.isEmpty {
-                    Button(action: submitQuickEntry) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 17, weight: .bold))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.circle)
+                    PrimaryIconButton(
+                        "Review transaction",
+                        iconName: "arrow-up",
+                        action: submitQuickEntry
+                    )
                     .disabled(quickEntryAccountID == nil)
-                    .accessibilityLabel("Review transaction")
                     .transition(
                         .scale(scale: 0.72, anchor: .trailing)
                             .combined(with: .opacity)
@@ -242,27 +239,23 @@ private struct MainTabController: UIViewControllerRepresentable {
         controller.view.tintColor = UIColor(Color.accentColor)
 
         // Keep the same hosting controllers (and navigation/scroll state) when the sheet opens.
-        let home = hostingController(DashboardView(), title: "Home", systemImage: "house")
-        let transactions = hostingController(
-            TransactionsView(), title: "Transactions", systemImage: "list.bullet.rectangle"
-        )
-        let assistant = hostingController(AssistantView(), title: "Assistant", systemImage: "sparkles")
-        let settings = hostingController(SettingsView(), title: "Settings", systemImage: "gearshape")
+        let home = hostingController(DashboardView(), title: "Home", iconName: "home-simple")
+        let assistant = hostingController(AssistantView(), title: "Assistant", iconName: "sparks")
+        let settings = hostingController(SettingsView(), title: "Settings", iconName: "settings")
         let add = context.coordinator.addViewController
-        add.tabBarItem = UITabBarItem(title: "Add", image: UIImage(systemName: "plus"), tag: 0)
+        add.tabBarItem = UITabBarItem(title: "Add", image: AppIcons.uiImage(named: "plus"), tag: 0)
 
         if #available(iOS 18.0, *) {
             let addTab = UISearchTab { _ in add }
             addTab.title = "Add"
-            addTab.image = UIImage(systemName: "plus")
+            addTab.image = AppIcons.uiImage(named: "plus")
             controller.tabs = [
                 UITab(title: "Home", image: home.tabBarItem.image, identifier: "home") { _ in home },
-                UITab(title: "Transactions", image: transactions.tabBarItem.image, identifier: "transactions") { _ in transactions },
                 UITab(title: "Settings", image: settings.tabBarItem.image, identifier: "settings") { _ in settings },
                 addTab
             ]
         } else {
-            controller.viewControllers = [home, transactions, assistant, settings, add]
+            controller.viewControllers = [home, assistant, settings, add]
         }
         return controller
     }
@@ -272,7 +265,7 @@ private struct MainTabController: UIViewControllerRepresentable {
     }
 
     private func hostingController<Content: View>(
-        _ content: Content, title: String, systemImage: String
+        _ content: Content, title: String, iconName: String
     ) -> UIViewController {
         let controller = UIHostingController(
             rootView: content
@@ -281,7 +274,7 @@ private struct MainTabController: UIViewControllerRepresentable {
                 .environmentObject(exchangeRateStore)
                 .environmentObject(transactionStore)
         )
-        controller.tabBarItem = UITabBarItem(title: title, image: UIImage(systemName: systemImage), tag: 0)
+        controller.tabBarItem = UITabBarItem(title: title, image: AppIcons.uiImage(named: iconName), tag: 0)
         return controller
     }
 

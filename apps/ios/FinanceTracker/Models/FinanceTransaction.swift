@@ -38,7 +38,20 @@ struct RecurrenceRequest: Encodable, Equatable {
     let endAt: Date?
 }
 
-struct FinanceTransaction: Codable, Identifiable, Hashable {
+protocol EditableTransaction {
+    var accountId: UUID { get }
+    var kind: TransactionKind { get }
+    var amount: String { get }
+    var currency: String { get }
+    var category: TransactionCategory? { get }
+    var merchant: String? { get }
+    var payee: String? { get }
+    var note: String? { get }
+    var occurredAt: Date { get }
+    var recurrence: TransactionRecurrence? { get }
+}
+
+struct FinanceTransaction: Codable, Identifiable, Hashable, EditableTransaction {
     let id: UUID
     let accountId: UUID
     let kind: TransactionKind
@@ -54,6 +67,38 @@ struct FinanceTransaction: Codable, Identifiable, Hashable {
     var recurrence: TransactionRecurrence? = nil
 }
 
+struct UpcomingTransaction: Codable, Identifiable, Hashable, EditableTransaction {
+    let id: UUID
+    let accountId: UUID
+    let kind: TransactionKind
+    let amount: String
+    let currency: String
+    var category: TransactionCategory?
+    let merchant: String?
+    let payee: String?
+    let note: String?
+    let frequency: RecurrenceFrequency
+    let occurredAt: Date
+    var endAt: Date? = nil
+
+    var recurrence: TransactionRecurrence? {
+        TransactionRecurrence(id: id, frequency: frequency, endAt: endAt)
+    }
+
+    var title: String {
+        let counterparty = kind == .income ? payee : merchant
+        return [counterparty, note, category?.name]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Recurring \(kind.title.lowercased())"
+    }
+
+    var amountText: String {
+        let value = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX"))
+        let formatted = value?.formatted(.currency(code: currency)) ?? "\(amount) \(currency)"
+        return kind == .income ? "+\(formatted)" : formatted
+    }
+}
+
 struct TransactionRequest: Encodable {
     let accountId: UUID
     let kind: TransactionKind
@@ -64,6 +109,29 @@ struct TransactionRequest: Encodable {
     let note: String?
     let occurredAt: Date
     var recurrence: RecurrenceRequest? = nil
+}
+
+struct RecurringTransactionUpdateRequest: Encodable {
+    let transaction: TransactionRequest
+    let expectedOccurredAt: Date
+}
+
+struct RecurringTransactionUpdateResponse: Decodable {
+    let updated: Bool
+}
+
+enum RecurringDeletionAction: String, CaseIterable {
+    case occurrence
+    case stopRepeating
+    case occurrenceAndFuture
+
+    var title: String {
+        switch self {
+        case .occurrence: "Delete only this transaction"
+        case .stopRepeating: "Stop repeating"
+        case .occurrenceAndFuture: "Delete this and all future"
+        }
+    }
 }
 
 struct TransferRequest: Encodable {

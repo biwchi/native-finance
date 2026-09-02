@@ -12,12 +12,15 @@ final class TransactionStore: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var transactions: [FinanceTransaction] = []
+    @Published private(set) var upcomingState: State = .idle
+    @Published private(set) var upcomingTransactions: [UpcomingTransaction] = []
     @Published private(set) var categories: [TransactionCategory] = []
     @Published private(set) var isLoadingCategories = false
     @Published private(set) var categoryErrorMessage: String?
 
     private let apiClient: APIClient
     private var currentAccountID: UUID?
+    private var upcomingRequestID = UUID()
     private var hasLoadedCategories = false
 
     init(apiClient: APIClient = APIClient()) {
@@ -25,17 +28,27 @@ final class TransactionStore: ObservableObject {
     }
 
 #if DEBUG
-    static func preview(transactions: [FinanceTransaction]) -> TransactionStore {
+    static func preview(
+        transactions: [FinanceTransaction],
+        upcomingTransactions: [UpcomingTransaction] = []
+    ) -> TransactionStore {
         let store = TransactionStore()
         store.transactions = transactions
         store.categories = Array(Set(transactions.compactMap(\.category)))
         store.hasLoadedCategories = true
         store.state = .loaded
+        store.upcomingTransactions = upcomingTransactions
+        store.upcomingState = .loaded
         return store
     }
 #endif
 
     func loadTransactions(accountID: UUID?) async {
+        upcomingRequestID = UUID()
+        upcomingState = .loading
+        if currentAccountID != accountID {
+            upcomingTransactions = []
+        }
         currentAccountID = accountID
         state = .loading
 
@@ -50,6 +63,26 @@ final class TransactionStore: ObservableObject {
         } catch {
             guard !Task.isCancelled, currentAccountID == accountID else { return }
             state = .failed(error.localizedDescription)
+        }
+
+        await loadUpcomingTransactions(accountID: accountID)
+    }
+
+    func loadUpcomingTransactions(accountID: UUID?) async {
+        let requestID = UUID()
+        upcomingRequestID = requestID
+        upcomingState = .loading
+
+        do {
+            let upcoming = try await apiClient.upcomingTransactions(accountID: accountID)
+            guard !Task.isCancelled, upcomingRequestID == requestID else { return }
+            upcomingTransactions = upcoming
+            upcomingState = .loaded
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, upcomingRequestID == requestID else { return }
+            upcomingState = .failed(error.localizedDescription)
         }
     }
 
@@ -103,7 +136,7 @@ final class TransactionStore: ObservableObject {
         name: String,
         kind: TransactionKind,
         parentID: UUID? = nil,
-        icon: String = "tag.fill",
+        icon: String = "label",
         color: CategoryColor = .gray
     ) async throws -> TransactionCategory {
         let category = try await apiClient.createCategory(
@@ -146,6 +179,9 @@ final class TransactionStore: ObservableObject {
             guard transaction.category?.id == category.id else { return transaction }
             return transaction.replacingCategory(with: category)
         }
+        for index in upcomingTransactions.indices where upcomingTransactions[index].category?.id == category.id {
+            upcomingTransactions[index].category = category
+        }
         return category
     }
 
@@ -161,6 +197,11 @@ final class TransactionStore: ObservableObject {
             guard let categoryID = transaction.category?.id,
                   removedIDs.contains(categoryID) else { return transaction }
             return transaction.replacingCategory(with: nil)
+        }
+        for index in upcomingTransactions.indices {
+            if let categoryID = upcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
+                upcomingTransactions[index].category = nil
+            }
         }
     }
 
@@ -206,10 +247,24 @@ final class TransactionStore: ObservableObject {
         return transaction
     }
 
-    func deleteTransaction(_ transaction: FinanceTransaction) async throws {
-        _ = try await apiClient.deleteTransaction(id: transaction.id)
-        transactions.removeAll { $0.id == transaction.id }
-        state = .loaded
+    func updateRecurringTransaction(_ transaction: UpcomingTransaction, with request: TransactionRequest) async throws {
+        _ = try await apiClient.updateRecurringTransaction(transaction, with: request)
+        await loadTransactions(accountID: currentAccountID)
+    }
+
+    func deleteUpcomingTransaction(_ transaction: UpcomingTransaction, action: RecurringDeletionAction) async throws {
+        _ = try await apiClient.deleteUpcomingTransaction(transaction, action: action)
+        await loadTransactions(accountID: currentAccountID)
+    }
+
+    func deleteTransaction(_ transaction: FinanceTransaction, action: RecurringDeletionAction = .occurrence) async throws {
+        _ = try await apiClient.deleteTransaction(id: transaction.id, action: action)
+        if transaction.recurrence != nil {
+            await loadTransactions(accountID: currentAccountID)
+        } else {
+            transactions.removeAll { $0.id == transaction.id }
+            state = .loaded
+        }
     }
 
     private func apply(_ transaction: FinanceTransaction) {
