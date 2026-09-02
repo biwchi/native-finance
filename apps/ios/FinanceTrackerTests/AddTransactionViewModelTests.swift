@@ -33,6 +33,33 @@ final class AddTransactionViewModelTests: XCTestCase {
         XCTAssertNil(negative.canonicalResult)
     }
 
+    func testEditingAmountNormalizesStoredZerosAndFirstDigitReplacesIt() {
+        var expression = AmountExpression(
+            rawValue: "2000.0000",
+            replacesInitialValue: true
+        )
+
+        XCTAssertEqual(expression.rawValue, "2000")
+
+        ["2", "4"].forEach { expression.enter($0) }
+
+        XCTAssertEqual(expression.rawValue, "24")
+        XCTAssertEqual(expression.canonicalResult, "24")
+    }
+
+    func testEditingAmountCanDeleteOrCalculateFromInitialValue() {
+        var edited = AmountExpression(rawValue: "12.5000", replacesInitialValue: true)
+        edited.enter("⌫")
+        edited.enter("9")
+        XCTAssertEqual(edited.rawValue, "12.9")
+
+        var calculated = AmountExpression(rawValue: "12.5000", replacesInitialValue: true)
+        calculated.enter("+")
+        calculated.enter("2")
+        XCTAssertEqual(calculated.rawValue, "12.5+2")
+        XCTAssertEqual(calculated.canonicalResult, "14.5")
+    }
+
     func testEditingPrefillsAndPreservesSavedFieldsWhileAccountsAndCategoriesLoad() {
         let account = Self.account(name: "Original account")
         let otherAccount = Self.account(name: "Selected account")
@@ -51,9 +78,11 @@ final class AddTransactionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.canonicalAmount(), "12.5")
         XCTAssertEqual(viewModel.kind, transaction.kind)
         XCTAssertEqual(viewModel.categoryID, category.id)
-        XCTAssertEqual(viewModel.description, transaction.description)
         XCTAssertEqual(viewModel.note, transaction.note)
         XCTAssertEqual(viewModel.occurredAt, transaction.occurredAt)
+        XCTAssertTrue(viewModel.isRecurring)
+        XCTAssertEqual(viewModel.recurrenceFrequency, .weekly)
+        XCTAssertNil(viewModel.recurrenceEndAt)
         XCTAssertFalse(viewModel.isResolvingCategory)
         XCTAssertTrue(viewModel.canSave)
         XCTAssertFalse(viewModel.hasChanges(from: transaction))
@@ -78,12 +107,27 @@ final class AddTransactionViewModelTests: XCTestCase {
             }
         )
         viewModel.refreshCategoryResolution(categories: [category])
-        viewModel.setDescription("Coffee", categories: [category])
         try await Task.sleep(nanoseconds: 400_000_000)
 
         XCTAssertNil(viewModel.categoryID)
         XCTAssertEqual(viewModel.categorySource, .manual)
         XCTAssertFalse(viewModel.isResolvingCategory)
+    }
+
+    func testRecurringSettingsAreTrackedAsEdits() {
+        let transaction = Self.transaction(accountID: UUID(), category: nil)
+        let viewModel = AddTransactionViewModel(transaction: transaction)
+
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+
+        viewModel.setRecurrenceFrequency(.daily)
+        XCTAssertTrue(viewModel.hasChanges(from: transaction))
+
+        viewModel.setRecurrenceFrequency(.weekly)
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+
+        viewModel.setRecurring(false)
+        XCTAssertTrue(viewModel.hasChanges(from: transaction))
     }
 
     func testManualFieldsAreNotOverwrittenByLaterCommands() {
@@ -94,18 +138,17 @@ final class AddTransactionViewModelTests: XCTestCase {
 
         viewModel.setCommand("12 coffee", categories: [], currencyCode: "USD")
         viewModel.setAmountText("99.25")
-        viewModel.setDescription("team lunch", categories: [])
+        viewModel.setNote("team lunch")
         viewModel.setOccurredAt(Self.manualDate)
         viewModel.setKind(.income, categories: [])
 
         viewModel.setCommand("40 gas yesterday", categories: [], currencyCode: "USD")
 
         XCTAssertEqual(viewModel.amountText, "99.25")
-        XCTAssertEqual(viewModel.description, "team lunch")
+        XCTAssertEqual(viewModel.note, "team lunch")
         XCTAssertEqual(viewModel.occurredAt, Self.manualDate)
         XCTAssertEqual(viewModel.kind, .income)
         XCTAssertEqual(viewModel.amountSource, .manual)
-        XCTAssertEqual(viewModel.descriptionSource, .manual)
         XCTAssertEqual(viewModel.dateSource, .manual)
         XCTAssertEqual(viewModel.kindSource, .manual)
     }
@@ -210,8 +253,9 @@ final class AddTransactionViewModelTests: XCTestCase {
     private static func transaction(accountID: UUID, category: TransactionCategory?) -> FinanceTransaction {
         FinanceTransaction(
             id: UUID(), accountId: accountID, kind: .expense, amount: "12.5000", currency: "USD",
-            category: category, description: "Coffee", note: "Saved note",
-            occurredAt: manualDate, createdAt: fixedDate, updatedAt: fixedDate
+            category: category, note: "Saved note",
+            occurredAt: manualDate, createdAt: fixedDate, updatedAt: fixedDate,
+            recurrence: TransactionRecurrence(id: UUID(), frequency: .weekly, endAt: nil)
         )
     }
 

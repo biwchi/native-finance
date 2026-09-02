@@ -83,3 +83,11 @@ struct AccountRequest: Encodable {
     let icon: String
     let iconColor: AccountIconColor
 }
+
+struct AccountOrderRequest: Encodable {
+    let accountIds: [UUID]
+}
+
+struct DeleteAccountResponse: Decodable {
+    let deleted: Bool
+}

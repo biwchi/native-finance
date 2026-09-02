@@ -3,29 +3,9 @@ import Foundation
 
 @MainActor
 final class AccountStore: ObservableObject {
-    enum Editor: Identifiable {
-        case add
-        case edit(Account)
-
-        var id: String {
-            switch self {
-            case .add: "add"
-            case let .edit(account): account.id.uuidString
-            }
-        }
-
-        var account: Account? {
-            if case let .edit(account) = self {
-                account
-            } else {
-                nil
-            }
-        }
-    }
-
     @Published private(set) var accounts: [Account] = []
     @Published var selectedAccountID: UUID?
-    @Published var editor: Editor?
+    @Published var isManagingAccounts = false
     @Published var alertMessage: String?
     @Published private(set) var isLoading = false
 
@@ -35,6 +15,19 @@ final class AccountStore: ObservableObject {
     init(apiClient: APIClient = APIClient()) {
         self.apiClient = apiClient
     }
+
+#if DEBUG
+    static func preview(
+        accounts: [Account],
+        selectedAccountID: UUID? = nil
+    ) -> AccountStore {
+        let store = AccountStore()
+        store.accounts = accounts
+        store.selectedAccountID = selectedAccountID
+        store.hasLoaded = true
+        return store
+    }
+#endif
 
     var selectedAccount: Account? {
         accounts.first { $0.id == selectedAccountID }
@@ -82,9 +75,6 @@ final class AccountStore: ObservableObject {
         )
 
         accounts.append(account)
-        accounts.sort {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
         selectedAccountID = account.id
         hasLoaded = true
 
@@ -114,10 +104,35 @@ final class AccountStore: ObservableObject {
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
             accounts[index] = account
         }
-        accounts.sort {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
 
         return account
+    }
+
+    func reorderAccounts(_ reorderedAccounts: [Account]) async throws {
+        let currentIDs = Set(accounts.map(\.id))
+        let reorderedIDs = reorderedAccounts.map(\.id)
+        guard reorderedAccounts.count == accounts.count,
+              Set(reorderedIDs) == currentIDs else {
+            return
+        }
+
+        let previousAccounts = accounts
+        accounts = reorderedAccounts
+
+        do {
+            accounts = try await apiClient.reorderAccounts(reorderedIDs)
+        } catch {
+            accounts = previousAccounts
+            throw error
+        }
+    }
+
+    func deleteAccount(_ account: Account) async throws {
+        _ = try await apiClient.deleteAccount(id: account.id)
+        accounts.removeAll { $0.id == account.id }
+
+        if selectedAccountID == account.id {
+            selectedAccountID = nil
+        }
     }
 }

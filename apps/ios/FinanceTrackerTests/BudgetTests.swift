@@ -2,6 +2,66 @@ import XCTest
 @testable import FinanceTracker
 
 final class BudgetTests: XCTestCase {
+    func testExchangeRateSnapshotConvertsThroughCanonicalBase() throws {
+        let snapshot = ExchangeRateSnapshot(
+            baseCurrency: "USD",
+            reportingCurrency: "KZT",
+            quotes: [
+                ExchangeRateQuote(currency: "EUR", rate: "0.86", effectiveDate: "2026-09-02"),
+                ExchangeRateQuote(currency: "KZT", rate: "540.12", effectiveDate: "2026-09-02"),
+                ExchangeRateQuote(currency: "USD", rate: "1", effectiveDate: "2026-09-02"),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_788_350_400),
+            stale: false
+        )
+
+        let converted = try XCTUnwrap(snapshot.convert(100, from: "EUR", to: "KZT"))
+
+        XCTAssertEqual(
+            NSDecimalNumber(decimal: converted).doubleValue,
+            62_804.6511,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(snapshot.convert(100, from: "KZT", to: "KZT"), 100)
+    }
+
+    @MainActor
+    func testExchangeRateStoreRequestsReportingAndAccountCurrencies() async throws {
+        let response = ExchangeRateSnapshot(
+            baseCurrency: "USD",
+            reportingCurrency: "KZT",
+            quotes: [
+                ExchangeRateQuote(currency: "EUR", rate: "0.86", effectiveDate: "2026-09-02"),
+                ExchangeRateQuote(currency: "KZT", rate: "540.12", effectiveDate: "2026-09-02"),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_788_350_400),
+            stale: false
+        )
+        let session = makeSession { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/exchange-rates/latest")
+            let items = URLComponents(
+                url: try XCTUnwrap(request.url),
+                resolvingAgainstBaseURL: false
+            )?.queryItems
+            XCTAssertEqual(items?.first { $0.name == "reportingCurrency" }?.value, "KZT")
+            XCTAssertEqual(items?.first { $0.name == "currencies" }?.value, "EUR,KZT")
+            return (200, try self.encode(response))
+        }
+        defer { session.invalidateAndCancel() }
+
+        let store = ExchangeRateStore(
+            apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
+        )
+        await store.load(currencies: ["EUR"], reportingCurrency: "KZT")
+
+        XCTAssertEqual(store.state, .loaded)
+        XCTAssertTrue(store.supports(["EUR", "KZT"], reportingCurrency: "KZT"))
+        XCTAssertEqual(
+            store.convert(100, from: "EUR", to: "KZT"),
+            response.convert(100, from: "EUR", to: "KZT")
+        )
+    }
+
     func testInsightsCompareCurrentMonthThroughSameDayLastMonth() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -121,7 +181,6 @@ final class BudgetTests: XCTestCase {
             amount: amount,
             currency: "USD",
             category: nil,
-            description: nil,
             note: nil,
             occurredAt: date,
             createdAt: date,

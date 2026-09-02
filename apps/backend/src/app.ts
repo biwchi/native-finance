@@ -5,6 +5,7 @@ import { config } from "./config.ts";
 import { accountsRoutes } from "./routes/accounts.ts";
 import { budgetsRoutes } from "./routes/budgets.ts";
 import { categoriesRoutes } from "./routes/categories.ts";
+import { exchangeRatesRoutes } from "./routes/exchange-rates.ts";
 import { transactionsRoutes } from "./routes/transactions.ts";
 
 export const app = new Elysia({ name: "finance-tracker-api" })
@@ -22,6 +23,7 @@ export const app = new Elysia({ name: "finance-tracker-api" })
       .use(accountsRoutes)
       .use(budgetsRoutes)
       .use(categoriesRoutes)
+      .use(exchangeRatesRoutes)
       .use(transactionsRoutes),
   );
 

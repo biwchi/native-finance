@@ -22,7 +22,12 @@ extension AccountIconColor {
 
 struct AccountSelector: View {
     @EnvironmentObject private var accountStore: AccountStore
+    @EnvironmentObject private var budgetStore: BudgetStore
+    @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
     @EnvironmentObject private var transactionStore: TransactionStore
+
+    @AppStorage(AppPreferences.defaultCurrencyKey)
+    private var reportingCurrency = AppPreferences.initialCurrency
 
     var compact = false
 
@@ -57,18 +62,10 @@ struct AccountSelector: View {
 
             Divider()
 
-            if let account = accountStore.selectedAccount {
-                Button {
-                    accountStore.editor = .edit(account)
-                } label: {
-                    Label("Edit account", systemImage: "pencil")
-                }
-            }
-
             Button {
-                accountStore.editor = .add
+                accountStore.isManagingAccounts = true
             } label: {
-                Label("Add account", systemImage: "plus")
+                Label("Manage Accounts", systemImage: "gearshape")
             }
         } label: {
             selectorLabel
@@ -77,6 +74,12 @@ struct AccountSelector: View {
                 .accessibilityHint("Opens the account picker")
         }
         .tint(.primary)
+        .task(id: exchangeRateScopeKey) {
+            await exchangeRateStore.load(
+                currencies: exchangeCurrencies,
+                reportingCurrency: selectionCurrency
+            )
+        }
     }
 
     @ViewBuilder
@@ -87,10 +90,19 @@ struct AccountSelector: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(compactIconColor)
 
-                Text(accountStore.selectionTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(accountStore.selectionTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(selectionSubtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
 
                 Image(systemName: "chevron.down")
                     .font(.caption2.bold())
@@ -148,48 +160,60 @@ struct AccountSelector: View {
         case .idle, .loading:
             "Loading balance"
         case .loaded:
-            balanceText
+            if let balanceText {
+                balanceText
+            } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
+                "Converting balance"
+            } else {
+                "Balance unavailable"
+            }
         case .failed:
             "Balance unavailable"
         }
     }
 
-    private var balanceText: String {
-        guard let currency = selectionCurrency else {
-            return accountCountText
-        }
-
-        let balance = transactionStore.transactions.reduce(into: Decimal.zero) { total, transaction in
-            guard let amount = Decimal(string: transaction.amount) else { return }
-            total += transaction.kind == .income ? amount : -amount
+    private var balanceText: String? {
+        var balance = Decimal.zero
+        for transaction in transactionStore.transactions {
+            guard let amount = Decimal(
+                string: transaction.amount,
+                locale: Locale(identifier: "en_US_POSIX")
+            ), let converted = exchangeRateStore.convert(
+                amount,
+                from: transaction.currency,
+                to: selectionCurrency
+            ) else {
+                return nil
+            }
+            balance += transaction.kind == .income ? converted : -converted
         }
 
         return balance.formatted(
-            .currency(code: currency)
+            .currency(code: selectionCurrency)
                 .precision(.fractionLength(0...2))
         )
     }
 
-    private var selectionCurrency: String? {
-        if let account = accountStore.selectedAccount {
-            return account.currency
-        }
-
-        let transactionCurrencies = Set(transactionStore.transactions.map(\.currency))
-        if transactionCurrencies.count == 1 {
-            return transactionCurrencies.first
-        }
-
-        let accountCurrencies = Set(accountStore.accounts.map(\.currency))
-        return accountCurrencies.count == 1 ? accountCurrencies.first : nil
+    private var selectionCurrency: String {
+        accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased()
     }
 
-    private var accountCountText: String {
-        switch accountStore.accounts.count {
-        case 0: "No accounts"
-        case 1: "1 account"
-        default: "\(accountStore.accounts.count) accounts"
+    private var exchangeCurrencies: Set<String> {
+        let accountCurrencies: [String]
+        if let account = accountStore.selectedAccount {
+            accountCurrencies = [account.currency]
+        } else {
+            accountCurrencies = accountStore.accounts.map(\.currency)
         }
+        return Set(
+            accountCurrencies +
+            transactionStore.transactions.map(\.currency) +
+            [budgetStore.budget?.currency].compactMap { $0 }
+        )
+    }
+
+    private var exchangeRateScopeKey: String {
+        "\(selectionCurrency):\(exchangeCurrencies.sorted().joined(separator: ","))"
     }
 
     private func accountLabel(
@@ -230,6 +254,218 @@ struct AccountSelector: View {
         Image(systemName: systemImage)
             .foregroundStyle(color ?? .primary)
 #endif
+    }
+}
+
+struct AccountManagementView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var accountStore: AccountStore
+    @EnvironmentObject private var transactionStore: TransactionStore
+
+    @State private var editor: AccountEditorDestination?
+    @State private var presentedAlert: AccountManagementAlert?
+    @State private var isUpdatingOrder = false
+    @State private var deletingAccountID: UUID?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if accountStore.accounts.isEmpty {
+                        ContentUnavailableView(
+                            "No accounts",
+                            systemImage: "creditcard",
+                            description: Text("Add an account to start tracking transactions.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(accountStore.accounts) { account in
+                            Button {
+                                editor = .edit(account)
+                            } label: {
+                                AccountManagementRow(
+                                    account: account,
+                                    isWorking: deletingAccountID == account.id
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isUpdatingOrder || deletingAccountID != nil)
+                        }
+                        .onMove(perform: moveAccounts)
+                        .onDelete(perform: requestDeletion)
+                        .moveDisabled(isUpdatingOrder || deletingAccountID != nil)
+                        .deleteDisabled(isUpdatingOrder || deletingAccountID != nil)
+                    }
+                } footer: {
+                    if !accountStore.accounts.isEmpty {
+                        Text("Tap an account to edit it. Use Edit to reorder or remove accounts.")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Accounts")
+            .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isBusy)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton()
+                        .disabled(accountStore.accounts.isEmpty || isBusy)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .disabled(isBusy)
+                }
+
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        editor = .add
+                    } label: {
+                        Label("Add Account", systemImage: "plus")
+                    }
+                    .disabled(isBusy)
+                }
+            }
+        }
+        .sheet(item: $editor) { destination in
+            AccountEditorView(account: destination.account)
+                .environmentObject(accountStore)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .alert(item: $presentedAlert) { alert in
+            switch alert {
+            case let .confirmDeletion(account):
+                Alert(
+                    title: Text("Delete \(account.name)?"),
+                    message: Text(
+                        "This also deletes its transactions and account budget data. This can't be undone."
+                    ),
+                    primaryButton: .destructive(Text("Delete")) {
+                        Task {
+                            await deleteAccount(account)
+                        }
+                    },
+                    secondaryButton: .cancel()
+                )
+            case let .error(message):
+                Alert(
+                    title: Text("Couldn't update accounts"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+        }
+    }
+
+    private var isBusy: Bool {
+        isUpdatingOrder || deletingAccountID != nil
+    }
+
+    private func moveAccounts(from source: IndexSet, to destination: Int) {
+        var reorderedAccounts = accountStore.accounts
+        reorderedAccounts.move(fromOffsets: source, toOffset: destination)
+        isUpdatingOrder = true
+
+        Task {
+            defer { isUpdatingOrder = false }
+
+            do {
+                try await accountStore.reorderAccounts(reorderedAccounts)
+            } catch {
+                presentedAlert = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func requestDeletion(at offsets: IndexSet) {
+        guard let index = offsets.first,
+              accountStore.accounts.indices.contains(index) else {
+            return
+        }
+        presentedAlert = .confirmDeletion(accountStore.accounts[index])
+    }
+
+    private func deleteAccount(_ account: Account) async {
+        deletingAccountID = account.id
+        defer { deletingAccountID = nil }
+
+        do {
+            try await accountStore.deleteAccount(account)
+            await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
+        } catch {
+            presentedAlert = .error(error.localizedDescription)
+        }
+    }
+}
+
+private struct AccountManagementRow: View {
+    let account: Account
+    let isWorking: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: account.icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(account.iconColor.color, in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.name)
+                    .foregroundStyle(.primary)
+
+                Text("\(account.type.title) · \(account.currency)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if isWorking {
+                ProgressView()
+            } else {
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+private enum AccountEditorDestination: Identifiable {
+    case add
+    case edit(Account)
+
+    var id: String {
+        switch self {
+        case .add: "add"
+        case let .edit(account): account.id.uuidString
+        }
+    }
+
+    var account: Account? {
+        if case let .edit(account) = self {
+            account
+        } else {
+            nil
+        }
+    }
+}
+
+private enum AccountManagementAlert: Identifiable {
+    case confirmDeletion(Account)
+    case error(String)
+
+    var id: String {
+        switch self {
+        case let .confirmDeletion(account): "delete-\(account.id.uuidString)"
+        case let .error(message): "error-\(message)"
+        }
     }
 }
 

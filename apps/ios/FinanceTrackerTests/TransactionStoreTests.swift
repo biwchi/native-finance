@@ -30,6 +30,28 @@ final class TransactionStoreTests: XCTestCase {
         }
     }
 
+    func testTransactionRequestEncodesRecurrenceWithoutDescription() throws {
+        let endAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let request = TransactionRequest(
+            accountId: UUID(),
+            kind: .expense,
+            amount: "12.5",
+            categoryId: nil,
+            note: "Rent",
+            occurredAt: Date(timeIntervalSince1970: 1_700_000_000),
+            recurrence: RecurrenceRequest(frequency: .monthly, endAt: endAt)
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let recurrence = try XCTUnwrap(json["recurrence"] as? [String: Any])
+
+        XCTAssertNil(json["description"])
+        XCTAssertEqual(json["note"] as? String, "Rent")
+        XCTAssertEqual(recurrence["frequency"] as? String, "monthly")
+        XCTAssertNotNil(recurrence["endAt"])
+    }
+
     func testCategoryAppearanceIsSentWhenCreatingAndEditing() async throws {
         let parentID = UUID()
         let createdCategory = category(
@@ -160,12 +182,53 @@ final class TransactionStoreTests: XCTestCase {
         XCTAssertEqual(store.transactions, [original])
     }
 
+    func testDeleteRemovesTransactionAfterServerSuccess() async throws {
+        let transaction = transaction(accountID: UUID())
+        let session = makeSession { request in
+            if request.httpMethod == "GET" {
+                return (200, try self.encode([transaction]))
+            }
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/v1/transactions/\(transaction.id.uuidString)")
+            return (200, Data(#"{"deleted":true}"#.utf8))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: nil)
+
+        try await store.deleteTransaction(transaction)
+
+        XCTAssertTrue(store.transactions.isEmpty)
+        XCTAssertEqual(store.state, .loaded)
+    }
+
+    func testFailedDeleteLeavesTransactionUntouched() async throws {
+        let transaction = transaction(accountID: UUID())
+        let session = makeSession { request in
+            if request.httpMethod == "GET" {
+                return (200, try self.encode([transaction]))
+            }
+            return (500, Data(#"{"message":"Could not delete transaction"}"#.utf8))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: nil)
+
+        do {
+            try await store.deleteTransaction(transaction)
+            XCTFail("Expected deletion to fail")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Could not delete transaction")
+        }
+        XCTAssertEqual(store.transactions, [transaction])
+    }
+
     private func transaction(
         id: UUID = UUID(), accountID: UUID, occurredAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
     ) -> FinanceTransaction {
         FinanceTransaction(
             id: id, accountId: accountID, kind: .expense, amount: "12.5000", currency: "USD",
-            category: nil, description: nil, note: nil, occurredAt: occurredAt,
+            category: nil, note: nil, occurredAt: occurredAt,
             createdAt: Date(timeIntervalSince1970: 1_700_000_000), updatedAt: Date(timeIntervalSince1970: 1_700_002_000)
         )
     }
@@ -196,7 +259,7 @@ final class TransactionStoreTests: XCTestCase {
     private func draft(_ transaction: FinanceTransaction) -> TransactionRequest {
         TransactionRequest(
             accountId: transaction.accountId, kind: transaction.kind, amount: transaction.amount,
-            categoryId: nil, description: nil, note: nil, occurredAt: transaction.occurredAt
+            categoryId: nil, note: nil, occurredAt: transaction.occurredAt
         )
     }
 

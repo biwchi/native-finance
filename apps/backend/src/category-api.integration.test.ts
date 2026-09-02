@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { app } from "./app.ts";
 import { db } from "./db/client.ts";
 import { accounts, categories, transactions } from "./db/schema.ts";
-import { normalizeTransactionDescription } from "./services/category-resolution.ts";
 
 const databaseDescribe =
   Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
@@ -202,27 +201,27 @@ databaseDescribe("category and transaction API integration", () => {
 
   it("validates category kind and derives currency from the account", async () => {
     const mismatchResponse = await createTransaction({
-      description: `mismatched ${suffix}`,
+      note: `mismatched ${suffix}`,
       categoryId: salaryCategoryId,
       kind: "expense",
     });
     expect(mismatchResponse.status).toBe(400);
 
     const response = await createTransaction({
-      description: `fuel purchase ${suffix}`,
+      note: `fuel purchase ${suffix}`,
       categoryId: fuelCategoryId,
       kind: "expense",
     });
     const transaction = (await response.json()) as {
       currency: string;
-      description: string;
+      note: string;
       category: { id: string; name: string; kind: string };
       occurredAt: string;
     };
 
     expect(response.status).toBe(201);
     expect(transaction.currency).toBe("KZT");
-    expect(transaction.description).toBe(`fuel purchase ${suffix}`);
+    expect(transaction.note).toBe(`fuel purchase ${suffix}`);
     expect(transaction.category).toMatchObject({
       id: fuelCategoryId,
       name: "Fuel",
@@ -234,8 +233,7 @@ databaseDescribe("category and transaction API integration", () => {
   });
 
   it("uses the most recent exact normalized history match", async () => {
-    const description = `Exact Merchant ${suffix}`;
-    const normalizedDescription = normalizeTransactionDescription(description);
+    const note = `Exact Merchant ${suffix}`;
     await db.insert(transactions).values([
       {
         accountId,
@@ -243,8 +241,7 @@ databaseDescribe("category and transaction API integration", () => {
         amount: "10",
         currency: "KZT",
         categoryId: foodCategoryId,
-        description,
-        normalizedDescription,
+        note,
         occurredAt: new Date("2026-08-01T12:00:00.000Z"),
         createdAt: new Date("2026-08-01T12:00:00.000Z"),
       },
@@ -254,8 +251,7 @@ databaseDescribe("category and transaction API integration", () => {
         amount: "11",
         currency: "KZT",
         categoryId: fuelCategoryId,
-        description,
-        normalizedDescription,
+        note,
         occurredAt: new Date("2026-08-02T12:00:00.000Z"),
         createdAt: new Date("2026-08-02T12:00:00.000Z"),
       },
@@ -273,10 +269,10 @@ databaseDescribe("category and transaction API integration", () => {
     ]);
   });
 
-  it("learns from a misspelled historical description", async () => {
+  it("learns from a misspelled historical note", async () => {
     const token = `nfs${suffix}`;
     await createTransaction({
-      description: `north fuel station ${token}`,
+      note: `north fuel station ${token}`,
       categoryId: fuelCategoryId,
       kind: "expense",
     });
@@ -293,18 +289,18 @@ databaseDescribe("category and transaction API integration", () => {
 
   it("does not guess when equally similar history conflicts", async () => {
     const token = `conflict${suffix}`;
-    const descriptions = [
+    const notes = [
       {
-        description: `quasar alpha portal ${token}`,
+        note: `quasar alpha portal ${token}`,
         categoryId: foodCategoryId,
       },
       {
-        description: `quasar alpha portal ${token}`,
+        note: `quasar alpha portal ${token}`,
         categoryId: fuelCategoryId,
       },
     ];
 
-    for (const item of descriptions) {
+    for (const item of notes) {
       await createTransaction({
         ...item,
         kind: "expense",
@@ -331,7 +327,7 @@ databaseDescribe("category and transaction API integration", () => {
   });
 
   function createTransaction(input: {
-    description: string;
+    note: string;
     categoryId: string;
     kind: "expense" | "income";
   }): Promise<Response> {
@@ -342,7 +338,7 @@ databaseDescribe("category and transaction API integration", () => {
         kind: input.kind,
         amount: "12.5000",
         categoryId: input.categoryId,
-        description: input.description,
+        note: input.note,
         occurredAt: "2026-08-31T12:30:00.000Z",
       },
     });

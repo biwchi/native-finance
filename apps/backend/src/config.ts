@@ -14,7 +14,7 @@ function readPort(value: string | undefined): number {
 export const config = {
   corsOrigin: Bun.env.CORS_ORIGIN ?? "http://localhost:3001",
   databaseUrl: Bun.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
+  frankfurterBaseUrl: Bun.env.FRANKFURTER_BASE_URL ?? "https://api.frankfurter.dev",
   host: Bun.env.HOST ?? "0.0.0.0",
   port: readPort(Bun.env.PORT),
 } as const;
-

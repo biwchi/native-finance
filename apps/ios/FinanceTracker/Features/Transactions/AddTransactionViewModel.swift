@@ -3,9 +3,11 @@ import Foundation
 
 struct AmountExpression: Equatable {
     private(set) var rawValue = ""
+    private var replacesInitialValue: Bool
 
-    init(rawValue: String = "") {
-        self.rawValue = rawValue
+    init(rawValue: String = "", replacesInitialValue: Bool = false) {
+        self.rawValue = Self.normalizedInitialValue(rawValue)
+        self.replacesInitialValue = replacesInitialValue && !rawValue.isEmpty
     }
 
     var displayValue: String {
@@ -27,17 +29,28 @@ struct AmountExpression: Equatable {
     mutating func enter(_ key: String) {
         switch key {
         case "⌫":
+            replacesInitialValue = false
             if !rawValue.isEmpty {
                 rawValue.removeLast()
             }
         case "+", "-", "*", "/":
+            replacesInitialValue = false
             enterOperator(Character(key))
         case ".", ",":
+            replaceInitialValueIfNeeded()
             enterDecimalSeparator()
         default:
-            guard key.count == 1, key.first?.isNumber == true, rawValue.count < 32 else { return }
+            guard key.count == 1, key.first?.isNumber == true else { return }
+            replaceInitialValueIfNeeded()
+            guard rawValue.count < 32 else { return }
             rawValue.append(key)
         }
+    }
+
+    private mutating func replaceInitialValueIfNeeded() {
+        guard replacesInitialValue else { return }
+        rawValue = ""
+        replacesInitialValue = false
     }
 
     private mutating func enterOperator(_ value: Character) {
@@ -58,6 +71,17 @@ struct AmountExpression: Equatable {
     }
 
     private static let operators = Set<Character>(["+", "-", "*", "/"])
+
+    private static func normalizedInitialValue(_ value: String) -> String {
+        guard
+            !value.isEmpty,
+            !value.contains(where: operators.contains),
+            let amount = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX"))
+        else {
+            return value
+        }
+        return NSDecimalNumber(decimal: amount).stringValue
+    }
 
     private static func evaluate(_ expression: String) -> Decimal? {
         var completed = expression
@@ -132,9 +156,11 @@ final class AddTransactionViewModel: ObservableObject {
     @Published private(set) var categoryID: UUID?
     @Published private(set) var merchant = ""
     @Published private(set) var payee = ""
-    @Published private(set) var description = ""
     @Published private(set) var note = ""
     @Published private(set) var occurredAt: Date
+    @Published private(set) var isRecurring = false
+    @Published private(set) var recurrenceFrequency: RecurrenceFrequency = .monthly
+    @Published private(set) var recurrenceEndAt: Date?
     @Published private(set) var amountConflict = false
     @Published private(set) var dateConflict = false
     @Published private(set) var isResolvingCategory = false
@@ -143,7 +169,6 @@ final class AddTransactionViewModel: ObservableObject {
     @Published private(set) var amountSource: DraftFieldSource = .defaultValue
     @Published private(set) var kindSource: DraftFieldSource = .defaultValue
     @Published private(set) var categorySource: DraftFieldSource = .defaultValue
-    @Published private(set) var descriptionSource: DraftFieldSource = .defaultValue
     @Published private(set) var dateSource: DraftFieldSource = .defaultValue
 
     private let parser: TransactionCommandParser
@@ -152,6 +177,7 @@ final class AddTransactionViewModel: ObservableObject {
     private var categoryTask: Task<Void, Never>?
     private var commandRevision = 0
     private var hasConfiguredAccount = false
+    private var categoryQuery = ""
 
     init(
         transaction: FinanceTransaction? = nil,
@@ -173,13 +199,14 @@ final class AddTransactionViewModel: ObservableObject {
             categoryID = transaction.category?.id
             merchant = transaction.merchant ?? ""
             payee = transaction.payee ?? ""
-            description = transaction.description ?? ""
             note = transaction.note ?? ""
+            isRecurring = transaction.recurrence != nil
+            recurrenceFrequency = transaction.recurrence?.frequency ?? .monthly
+            recurrenceEndAt = transaction.recurrence?.endAt
             hasConfiguredAccount = true
             amountSource = .manual
             kindSource = .manual
             categorySource = .manual
-            descriptionSource = .manual
             dateSource = .manual
         }
     }
@@ -239,10 +266,7 @@ final class AddTransactionViewModel: ObservableObject {
             kindSource = result.amount == nil ? .defaultValue : .inferred
         }
 
-        if descriptionSource != .manual {
-            description = result.description
-            descriptionSource = result.description.isEmpty ? .defaultValue : .inferred
-        }
+        categoryQuery = result.description
 
         if dateSource != .manual {
             if let parsedDate = result.occurredAt {
@@ -293,17 +317,6 @@ final class AddTransactionViewModel: ObservableObject {
         categoryResolutionSource = nil
     }
 
-    func setDescription(_ value: String, categories: [TransactionCategory]) {
-        description = value
-        descriptionSource = .manual
-        if categorySource != .manual {
-            categoryID = nil
-            categorySource = .defaultValue
-            categoryResolutionSource = nil
-        }
-        scheduleCategoryResolution(categories: categories)
-    }
-
     func setMerchant(_ value: String) {
         merchant = value
     }
@@ -320,6 +333,21 @@ final class AddTransactionViewModel: ObservableObject {
         occurredAt = value
         dateSource = .manual
         dateConflict = false
+    }
+
+    func setRecurring(_ value: Bool) {
+        isRecurring = value
+        if !value {
+            recurrenceEndAt = nil
+        }
+    }
+
+    func setRecurrenceFrequency(_ value: RecurrenceFrequency) {
+        recurrenceFrequency = value
+    }
+
+    func setRecurrenceEndAt(_ value: Date?) {
+        recurrenceEndAt = value
     }
 
     func refreshCategoryResolution(categories: [TransactionCategory]) {
@@ -345,9 +373,13 @@ final class AddTransactionViewModel: ObservableObject {
             categoryID != transaction.category?.id ||
             merchant.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.merchant ?? "") ||
             payee.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.payee ?? "") ||
-            description.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.description ?? "") ||
             note.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.note ?? "") ||
-            occurredAt != transaction.occurredAt
+            occurredAt != transaction.occurredAt ||
+            isRecurring != (transaction.recurrence != nil) ||
+            isRecurring && (
+                recurrenceFrequency != transaction.recurrence?.frequency ||
+                    recurrenceEndAt != transaction.recurrence?.endAt
+            )
     }
 
     private func scheduleCategoryResolution(categories: [TransactionCategory]) {
@@ -356,14 +388,14 @@ final class AddTransactionViewModel: ObservableObject {
 
         guard
             categorySource != .manual,
-            description.contains(where: \.isLetter),
-            description.filter(\.isLetter).count >= 2
+            categoryQuery.contains(where: \.isLetter),
+            categoryQuery.filter(\.isLetter).count >= 2
         else {
             return
         }
 
         let revision = commandRevision
-        let description = description
+        let description = categoryQuery
         let kind = kind
         let availableCategories = categories.filter { $0.kind == kind }
         guard !availableCategories.isEmpty else { return }
@@ -384,7 +416,7 @@ final class AddTransactionViewModel: ObservableObject {
             guard
                 commandRevision == revision,
                 categorySource != .manual,
-                self.description == description,
+                categoryQuery == description,
                 self.kind == kind
             else {
                 return

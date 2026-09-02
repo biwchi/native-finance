@@ -24,6 +24,9 @@ final class BudgetStore: ObservableObject {
     static func preview(_ budget: MonthlyBudget? = nil) -> BudgetStore {
         let store = BudgetStore()
         store.budget = budget
+        if let budget {
+            store.currentScope = "\(budget.accountId?.uuidString ?? "all"):\(budget.month)"
+        }
         store.state = .loaded
         return store
     }

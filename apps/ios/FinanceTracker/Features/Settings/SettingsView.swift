@@ -42,12 +42,12 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $preferSimpleTransactionEntry) {
-                        Label("Start with Simple Add", systemImage: "wand.and.stars")
+                        Label("Use quick entry", systemImage: "text.cursor")
                     }
                 } header: {
                     Text("Add transactions")
                 } footer: {
-                    Text("The Add button opens a single description field. You can switch to the manual form at any time.")
+                    Text("The Add button opens a multiline entry above the keyboard, then shows the transaction form for review.")
                 }
 
                 Section {

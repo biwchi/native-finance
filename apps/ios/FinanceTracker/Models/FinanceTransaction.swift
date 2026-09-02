@@ -14,6 +14,30 @@ enum TransactionKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum RecurrenceFrequency: String, Codable, CaseIterable, Identifiable {
+    case daily
+    case weekly
+    case monthly
+    case yearly
+
+    var id: Self { self }
+
+    var title: String {
+        rawValue.capitalized
+    }
+}
+
+struct TransactionRecurrence: Codable, Hashable {
+    let id: UUID
+    let frequency: RecurrenceFrequency
+    let endAt: Date?
+}
+
+struct RecurrenceRequest: Encodable, Equatable {
+    let frequency: RecurrenceFrequency
+    let endAt: Date?
+}
+
 struct FinanceTransaction: Codable, Identifiable, Hashable {
     let id: UUID
     let accountId: UUID
@@ -23,11 +47,11 @@ struct FinanceTransaction: Codable, Identifiable, Hashable {
     let category: TransactionCategory?
     var merchant: String? = nil
     var payee: String? = nil
-    let description: String?
     let note: String?
     let occurredAt: Date
     let createdAt: Date
     let updatedAt: Date
+    var recurrence: TransactionRecurrence? = nil
 }
 
 struct TransactionRequest: Encodable {
@@ -37,9 +61,9 @@ struct TransactionRequest: Encodable {
     let categoryId: UUID?
     var merchant: String? = nil
     var payee: String? = nil
-    let description: String?
     let note: String?
     let occurredAt: Date
+    var recurrence: RecurrenceRequest? = nil
 }
 
 struct TransferRequest: Encodable {
@@ -48,7 +72,6 @@ struct TransferRequest: Encodable {
     let amount: String
     let merchant: String?
     let payee: String?
-    let description: String?
     let note: String?
     let occurredAt: Date
 }
@@ -56,4 +79,8 @@ struct TransferRequest: Encodable {
 struct TransferResponse: Decodable {
     let source: FinanceTransaction
     let destination: FinanceTransaction
+}
+
+struct DeleteTransactionResponse: Decodable {
+    let deleted: Bool
 }

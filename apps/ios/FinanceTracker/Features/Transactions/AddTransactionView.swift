@@ -38,11 +38,6 @@ private enum QuickCategoryCarouselID: Hashable {
     case category(UUID)
 }
 
-private enum TransactionEntryMode: Equatable {
-    case manual
-    case simple
-}
-
 struct AddTransactionView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var accountStore: AccountStore
@@ -50,6 +45,8 @@ struct AddTransactionView: View {
     @AppStorage("lastTransactionAccountID") private var lastAccountID = ""
 
     let transaction: FinanceTransaction?
+    let initialCommand: String?
+    let initialAccountID: UUID?
 
     @StateObject private var viewModel: AddTransactionViewModel
     @State private var navigationPath = NavigationPath()
@@ -59,10 +56,7 @@ struct AddTransactionView: View {
     @State private var expandedCategoryID: UUID?
     @State private var isSaving = false
     @State private var errorMessage: String?
-    @State private var entryMode: TransactionEntryMode
-    @State private var simpleTransactionText = ""
-    @State private var isShowingAIPlaceholder = false
-    @FocusState private var isSimpleInputFocused: Bool
+    @State private var didApplyInitialCommand = false
 
     private let keypadColumns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
     private let keypadRows = [
@@ -71,28 +65,28 @@ struct AddTransactionView: View {
         ["7", "8", "9", "*"],
         [",", "0", "⌫", "/"],
     ]
-    private let simplePromptExamples = [
-        "$12 at a restaurant yesterday",
-        "Coffee with Maya, $8.50 this morning",
-        "Salary payment of $2,400 today",
-    ]
 
-    init(transaction: FinanceTransaction? = nil) {
+    init(
+        transaction: FinanceTransaction? = nil,
+        initialCommand: String? = nil,
+        initialAccountID: UUID? = nil
+    ) {
         self.transaction = transaction
-        let startsInSimpleMode = transaction == nil && UserDefaults.standard.bool(
-            forKey: AppPreferences.preferSimpleTransactionEntryKey
-        )
+        self.initialCommand = initialCommand
+        self.initialAccountID = initialAccountID
         _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: transaction))
         _mode = State(initialValue: transaction.map(QuickTransactionMode.init) ?? .expense)
         _amountExpression = State(
-            initialValue: AmountExpression(rawValue: transaction?.amount ?? "")
+            initialValue: AmountExpression(
+                rawValue: transaction?.amount ?? "",
+                replacesInitialValue: transaction != nil
+            )
         )
-        _entryMode = State(initialValue: startsInSimpleMode ? .simple : .manual)
     }
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            entryContent
+            manualEntryContent
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -101,12 +95,6 @@ struct AddTransactionView: View {
                             dismiss()
                         }
                         .disabled(isSaving)
-                    }
-
-                    if transaction == nil {
-                        ToolbarItem(placement: .primaryAction) {
-                            entryModeButton
-                        }
                     }
                 }
                 .interactiveDismissDisabled(isSaving)
@@ -122,8 +110,12 @@ struct AddTransactionView: View {
                         QuickTransactionDetailsView(
                             merchant: merchantBinding,
                             payee: payeeBinding,
-                            description: descriptionBinding,
-                            note: noteBinding
+                            note: noteBinding,
+                            supportsRecurrence: mode != .transfer,
+                            isRecurring: recurringBinding,
+                            frequency: recurrenceFrequencyBinding,
+                            hasEndDate: hasRecurrenceEndDateBinding,
+                            endDate: recurrenceEndDateBinding
                         )
                     }
                 }
@@ -131,192 +123,57 @@ struct AddTransactionView: View {
         .task {
             await accountStore.loadAccounts()
             viewModel.configureAccount(
-                selectedAccountID: accountStore.selectedAccountID,
+                selectedAccountID: initialAccountID ?? accountStore.selectedAccountID,
                 lastUsedAccountID: UUID(uuidString: lastAccountID),
                 accounts: accountStore.accounts
             )
             chooseDestinationIfNeeded()
             await transactionStore.loadCategories()
-        }
-        .task(id: entryMode) {
-            guard entryMode == .simple else { return }
-            try? await Task.sleep(for: .milliseconds(300))
-            isSimpleInputFocused = true
+            applyInitialCommandIfNeeded()
         }
         .alert(transaction == nil ? "Couldn’t add transaction" : "Couldn’t save transaction", isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Try again.")
         }
-        .alert("AI connection comes next", isPresented: $isShowingAIPlaceholder) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The Simple Add interface is ready. Connect the AI parser to turn this description into transaction details.")
-        }
     }
 
-    @ViewBuilder
-    private var entryContent: some View {
-        if entryMode == .simple, transaction == nil {
-            simpleEntryContent
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-        } else {
-            VStack(spacing: 0) {
-                typeSelector
-                amountPanel
-                metadataRow
-                categorySelector
-                keypad
-                submitButton
-            }
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(.clear)
-            .ignoresSafeArea(.container, edges: .bottom)
-            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+    private var manualEntryContent: some View {
+        VStack(spacing: 0) {
+            typeSelector
+            amountPanel
+            metadataRow
+            categorySelector
+            keypad
+            submitButton
         }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(.clear)
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 
     private var navigationTitle: String {
         if transaction != nil { return "Edit transaction" }
-        return entryMode == .simple ? "Simple Add" : "New transaction"
+        return initialCommand == nil ? "New transaction" : "Review transaction"
     }
 
-    private var entryModeButton: some View {
-        Button {
-            isSimpleInputFocused = false
-            withAnimation(.snappy(duration: 0.25)) {
-                entryMode = entryMode == .simple ? .manual : .simple
-            }
-        } label: {
-            Image(systemName: entryMode == .simple ? "square.and.pencil" : "wand.and.stars")
-        }
-        .accessibilityLabel(entryMode == .simple ? "Use manual entry" : "Use Simple Add")
-        .accessibilityHint("Switches the transaction entry form")
-    }
+    private func applyInitialCommandIfNeeded() {
+        guard
+            !didApplyInitialCommand,
+            transaction == nil,
+            let initialCommand,
+            !initialCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
 
-    private var simpleEntryContent: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                VStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.accentColor.opacity(0.24), Color.purple.opacity(0.12)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 72, height: 72)
-
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .symbolEffect(.bounce, value: entryMode)
-                    }
-                    .accessibilityHidden(true)
-
-                    VStack(spacing: 7) {
-                        Text("What happened?")
-                            .font(.title2.bold())
-
-                        Text("Write it like you'd say it. We'll fill in the amount, category, and date.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 330)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Describe the transaction")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    TextField(
-                        "$12 at a restaurant yesterday",
-                        text: $simpleTransactionText,
-                        axis: .vertical
-                    )
-                    .font(.title3)
-                    .lineLimit(4...7)
-                    .focused($isSimpleInputFocused)
-                    .submitLabel(.continue)
-                    .onSubmit(fillTransactionDetails)
-                    .padding(18)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(
-                                Color.accentColor.opacity(isSimpleInputFocused ? 0.7 : 0.18),
-                                lineWidth: isSimpleInputFocused ? 2 : 1
-                            )
-                    }
-                    .shadow(color: Color.accentColor.opacity(isSimpleInputFocused ? 0.12 : 0), radius: 18)
-                    .animation(.easeOut(duration: 0.2), value: isSimpleInputFocused)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Try an example")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(simplePromptExamples, id: \.self) { example in
-                                Button {
-                                    simpleTransactionText = example
-                                    isSimpleInputFocused = true
-                                } label: {
-                                    Text(example)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 14)
-                                        .frame(height: 38)
-                                        .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .contentMargins(.horizontal, 0, for: .scrollContent)
-                }
-
-                Label("You'll review the details before anything is saved.", systemImage: "checkmark.shield")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 28)
-            .padding(.bottom, 24)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .bottom) {
-            Button(action: fillTransactionDetails) {
-                Label("Fill transaction details", systemImage: "sparkles")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .foregroundStyle(Color(uiColor: .systemBackground))
-            }
-            .modifier(QuickSubmitButtonStyle())
-            .disabled(trimmedSimpleTransactionText.isEmpty)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial)
-        }
-    }
-
-    private var trimmedSimpleTransactionText: String {
-        simpleTransactionText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func fillTransactionDetails() {
-        guard !trimmedSimpleTransactionText.isEmpty else { return }
-        isSimpleInputFocused = false
-        isShowingAIPlaceholder = true
+        didApplyInitialCommand = true
+        viewModel.setCommand(
+            initialCommand,
+            categories: transactionStore.categories,
+            currencyCode: selectedAccount?.currency
+        )
+        mode = viewModel.kind == .income ? .income : .expense
+        amountExpression = AmountExpression(rawValue: viewModel.amountText)
     }
 
     private var typeSelector: some View {
@@ -420,7 +277,15 @@ struct AddTransactionView: View {
 
     private var metadataRow: some View {
         HStack(spacing: 8) {
-            accountMenu(title: selectedAccount?.name ?? "Account", selection: accountBinding)
+            QuickAccountMenu(
+                accounts: accountStore.accounts,
+                selectedAccountID: viewModel.accountID
+            ) { accountID in
+                accountBinding.wrappedValue = accountID
+                if mode == .transfer {
+                    chooseDestinationIfNeeded()
+                }
+            }
 
             DatePicker(
                 "Date and time",
@@ -440,34 +305,6 @@ struct AddTransactionView: View {
             .accessibilityLabel("Transaction details")
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func accountMenu(title: String, selection: Binding<UUID?>) -> some View {
-        Menu {
-            ForEach(accountStore.accounts) { account in
-                Button {
-                    selection.wrappedValue = account.id
-                    if mode == .transfer {
-                        chooseDestinationIfNeeded()
-                    }
-                } label: {
-                    Label(account.name, systemImage: account.icon)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "creditcard.fill")
-                Text(title)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-            }
-            .font(.subheadline.weight(.medium))
-            .padding(.horizontal, 10)
-            .frame(height: 38)
-            .modifier(QuickCapsuleControlBackground())
-        }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -691,8 +528,8 @@ struct AddTransactionView: View {
     private var hasExtraDetails: Bool {
         !viewModel.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             !viewModel.payee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !viewModel.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !viewModel.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !viewModel.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            viewModel.isRecurring
     }
 
     private var categoryBinding: Binding<UUID?> {
@@ -744,15 +581,45 @@ struct AddTransactionView: View {
         Binding(get: { viewModel.payee }, set: viewModel.setPayee)
     }
 
-    private var descriptionBinding: Binding<String> {
+    private var noteBinding: Binding<String> {
+        Binding(get: { viewModel.note }, set: viewModel.setNote)
+    }
+
+    private var recurringBinding: Binding<Bool> {
+        Binding(get: { viewModel.isRecurring }, set: viewModel.setRecurring)
+    }
+
+    private var recurrenceFrequencyBinding: Binding<RecurrenceFrequency> {
         Binding(
-            get: { viewModel.description },
-            set: { viewModel.setDescription($0, categories: transactionStore.categories) }
+            get: { viewModel.recurrenceFrequency },
+            set: viewModel.setRecurrenceFrequency
         )
     }
 
-    private var noteBinding: Binding<String> {
-        Binding(get: { viewModel.note }, set: viewModel.setNote)
+    private var hasRecurrenceEndDateBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.recurrenceEndAt != nil },
+            set: { hasEndDate in
+                viewModel.setRecurrenceEndAt(
+                    hasEndDate ? defaultRecurrenceEndDate : nil
+                )
+            }
+        )
+    }
+
+    private var recurrenceEndDateBinding: Binding<Date> {
+        Binding(
+            get: { viewModel.recurrenceEndAt ?? defaultRecurrenceEndDate },
+            set: { viewModel.setRecurrenceEndAt($0) }
+        )
+    }
+
+    private var defaultRecurrenceEndDate: Date {
+        Calendar.current.date(
+            byAdding: .month,
+            value: 1,
+            to: max(viewModel.occurredAt, Date.now)
+        ) ?? viewModel.occurredAt
     }
 
     private var errorAlertBinding: Binding<Bool> {
@@ -824,6 +691,11 @@ struct AddTransactionView: View {
                 errorMessage = "Transfers currently require accounts with the same currency."
                 return
             }
+        } else if let endAt = viewModel.recurrenceEndAt,
+                  viewModel.isRecurring,
+                  endAt < viewModel.occurredAt {
+            errorMessage = "The recurrence end date must be on or after the transaction date."
+            return
         }
 
         isSaving = true
@@ -858,9 +730,6 @@ struct AddTransactionView: View {
     }
 
     private func saveTransfer(from sourceID: UUID, to destinationID: UUID, amount: String) async throws {
-        let sourceName = selectedAccount?.name ?? "account"
-        let destinationName = destinationAccount?.name ?? "account"
-
         try await transactionStore.createTransfer(
             TransferRequest(
                 fromAccountId: sourceID,
@@ -868,8 +737,6 @@ struct AddTransactionView: View {
                 amount: amount,
                 merchant: optionalText(viewModel.merchant),
                 payee: optionalText(viewModel.payee),
-                description: optionalText(viewModel.description) ??
-                    "Transfer from \(sourceName) to \(destinationName)",
                 note: optionalText(viewModel.note),
                 occurredAt: viewModel.occurredAt
             )
@@ -880,8 +747,7 @@ struct AddTransactionView: View {
         accountID: UUID,
         kind: TransactionKind,
         amount: String,
-        categoryID: UUID?,
-        fallbackDescription: String? = nil
+        categoryID: UUID?
     ) -> TransactionRequest {
         TransactionRequest(
             accountId: accountID,
@@ -890,15 +756,57 @@ struct AddTransactionView: View {
             categoryId: categoryID,
             merchant: optionalText(viewModel.merchant),
             payee: optionalText(viewModel.payee),
-            description: optionalText(viewModel.description) ?? fallbackDescription,
             note: optionalText(viewModel.note),
-            occurredAt: viewModel.occurredAt
+            occurredAt: viewModel.occurredAt,
+            recurrence: viewModel.isRecurring
+                ? RecurrenceRequest(
+                    frequency: viewModel.recurrenceFrequency,
+                    endAt: viewModel.recurrenceEndAt
+                )
+                : nil
         )
     }
 
     private func optionalText(_ value: String) -> String? {
         let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? nil : cleaned
+    }
+}
+
+struct QuickAccountMenu: View {
+    let accounts: [Account]
+    let selectedAccountID: UUID?
+    let onSelect: (UUID) -> Void
+
+    private var title: String {
+        accounts.first { $0.id == selectedAccountID }?.name ?? "Account"
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(accounts) { account in
+                Button {
+                    onSelect(account.id)
+                } label: {
+                    Label(account.name, systemImage: account.icon)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "creditcard.fill")
+                Text(title)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .modifier(QuickCapsuleControlBackground())
+        }
+        .buttonStyle(.plain)
+        .disabled(accounts.isEmpty)
+        .accessibilityLabel("Account, \(title)")
     }
 }
 
@@ -917,7 +825,7 @@ private struct QuickKeyBackground: ViewModifier {
     }
 }
 
-private struct QuickSubmitButtonStyle: ViewModifier {
+struct QuickSubmitButtonStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .buttonStyle(.plain)
@@ -929,8 +837,12 @@ private struct QuickSubmitButtonStyle: ViewModifier {
 private struct QuickTransactionDetailsView: View {
     @Binding var merchant: String
     @Binding var payee: String
-    @Binding var description: String
     @Binding var note: String
+    let supportsRecurrence: Bool
+    @Binding var isRecurring: Bool
+    @Binding var frequency: RecurrenceFrequency
+    @Binding var hasEndDate: Bool
+    @Binding var endDate: Date
 
     var body: some View {
         Form {
@@ -942,9 +854,35 @@ private struct QuickTransactionDetailsView: View {
             }
 
             Section("Details") {
-                TextField("Description", text: $description)
                 TextField("Note", text: $note, axis: .vertical)
                     .lineLimit(2...6)
+            }
+
+            if supportsRecurrence {
+                Section("Recurring transaction") {
+                    Toggle("Repeat", isOn: $isRecurring)
+
+                    if isRecurring {
+                        Picker("Frequency", selection: $frequency) {
+                            ForEach(RecurrenceFrequency.allCases) { frequency in
+                                Text(frequency.title).tag(frequency)
+                            }
+                        }
+
+                        Toggle("Set end date", isOn: $hasEndDate)
+
+                        if hasEndDate {
+                            DatePicker(
+                                "End date and time",
+                                selection: $endDate,
+                                displayedComponents: [.date, .hourAndMinute]
+                            )
+                        } else {
+                            LabeledContent("Ends", value: "Forever")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }
         .navigationTitle("Details")

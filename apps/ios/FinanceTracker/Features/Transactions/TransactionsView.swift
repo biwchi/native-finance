@@ -14,6 +14,8 @@ struct TransactionListView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @State private var editingTransaction: FinanceTransaction?
+    @State private var presentedAlert: TransactionListAlert?
+    @State private var deletingTransactionID: UUID?
 
     var recentLimit: Int? = nil
 
@@ -74,6 +76,25 @@ struct TransactionListView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .alert(item: $presentedAlert) { alert in
+            switch alert {
+            case let .confirmDeletion(transaction):
+                Alert(
+                    title: Text("Delete transaction?"),
+                    message: Text("This can't be undone."),
+                    primaryButton: .destructive(Text("Delete")) {
+                        Task { await delete(transaction) }
+                    },
+                    secondaryButton: .cancel()
+                )
+            case let .error(message):
+                Alert(
+                    title: Text("Couldn't delete transaction"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+        }
     }
 
     private func transactionButton(_ transaction: FinanceTransaction) -> some View {
@@ -88,6 +109,12 @@ struct TransactionListView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Edit transaction")
+        .disabled(deletingTransactionID != nil)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                presentedAlert = .confirmDeletion(transaction)
+            }
+        }
     }
 
     private var transactionGroups: [(day: Date, transactions: [FinanceTransaction])] {
@@ -108,6 +135,29 @@ struct TransactionListView: View {
     private func reload() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
     }
+
+    private func delete(_ transaction: FinanceTransaction) async {
+        deletingTransactionID = transaction.id
+        defer { deletingTransactionID = nil }
+
+        do {
+            try await transactionStore.deleteTransaction(transaction)
+        } catch {
+            presentedAlert = .error(error.localizedDescription)
+        }
+    }
+}
+
+private enum TransactionListAlert: Identifiable {
+    case confirmDeletion(FinanceTransaction)
+    case error(String)
+
+    var id: String {
+        switch self {
+        case let .confirmDeletion(transaction): "delete-\(transaction.id.uuidString)"
+        case let .error(message): "error-\(message)"
+        }
+    }
 }
 
 struct TransactionRow: View {
@@ -118,16 +168,7 @@ struct TransactionRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let category = transaction.category {
-                CategoryIcon(category: category, size: 42)
-            } else {
-                Image(systemName: transaction.kind == .income ? "arrow.down.left" : "arrow.up.right")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 42, height: 42)
-                    .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityHidden(true)
-            }
+            transactionIcon
 
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
@@ -146,6 +187,36 @@ struct TransactionRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var transactionIcon: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if let category = transaction.category {
+                    CategoryIcon(category: category, size: 42)
+                } else {
+                    Image(systemName: transaction.kind == .income ? "arrow.down.left" : "arrow.up.right")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(iconColor)
+                        .frame(width: 42, height: 42)
+                        .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+
+            if transaction.recurrence != nil {
+                Image(systemName: "repeat")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 16, height: 16)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay {
+                        Circle().stroke(Color(uiColor: .separator), lineWidth: 0.5)
+                    }
+                    .offset(x: 3, y: 3)
+            }
+        }
+        .frame(width: 45, height: 45, alignment: .topLeading)
+        .accessibilityHidden(true)
     }
 
     private var details: some View {
@@ -205,7 +276,10 @@ struct TransactionRow: View {
 
     private var accessibilityDescription: String {
         let date = transaction.occurredAt.formatted(date: .abbreviated, time: .shortened)
-        return "\(title), \(account?.name ?? "Unknown account"), \(amountText), \(date)"
+        let recurrence = transaction.recurrence.map {
+            ", recurring \($0.frequency.title.lowercased())"
+        } ?? ""
+        return "\(title), \(account?.name ?? "Unknown account"), \(amountText), \(date)\(recurrence)"
     }
 
     private var iconColor: Color {
@@ -233,11 +307,15 @@ struct TransactionRow: View {
         amount: "6.50",
         currency: "USD",
         category: category,
-        description: "Morning coffee",
         note: nil,
         occurredAt: timestamp,
         createdAt: timestamp,
-        updatedAt: timestamp
+        updatedAt: timestamp,
+        recurrence: TransactionRecurrence(
+            id: UUID(),
+            frequency: .daily,
+            endAt: nil
+        )
     )
 
     ZStack {
@@ -257,6 +335,8 @@ struct TransactionRow: View {
 #Preview("Transaction list") {
     TransactionsView()
         .environmentObject(AccountStore())
+        .environmentObject(BudgetStore.preview())
+        .environmentObject(ExchangeRateStore())
         .environmentObject(
             TransactionStore.preview(
                 transactions: TransactionListPreviewData.transactions
@@ -305,28 +385,29 @@ private enum TransactionListPreviewData {
             kind: .income,
             amount: "3200.00",
             category: salary,
-            description: "Monthly salary",
-            occurredAt: now
+            occurredAt: now,
+            recurrence: TransactionRecurrence(
+                id: UUID(),
+                frequency: .monthly,
+                endAt: nil
+            )
         ),
         transaction(
             kind: .expense,
             amount: "6.50",
             category: food,
-            description: "Morning coffee",
             occurredAt: now.addingTimeInterval(-2 * 60 * 60)
         ),
         transaction(
             kind: .expense,
             amount: "84.20",
             category: groceries,
-            description: "Weekly groceries",
             occurredAt: now.addingTimeInterval(-28 * 60 * 60)
         ),
         transaction(
             kind: .expense,
             amount: "18.75",
             category: transport,
-            description: "Taxi home",
             occurredAt: now.addingTimeInterval(-32 * 60 * 60)
         ),
     ]
@@ -353,8 +434,8 @@ private enum TransactionListPreviewData {
         kind: TransactionKind,
         amount: String,
         category: TransactionCategory,
-        description: String,
-        occurredAt: Date
+        occurredAt: Date,
+        recurrence: TransactionRecurrence? = nil
     ) -> FinanceTransaction {
         FinanceTransaction(
             id: UUID(),
@@ -363,11 +444,11 @@ private enum TransactionListPreviewData {
             amount: amount,
             currency: "USD",
             category: category,
-            description: description,
             note: nil,
             occurredAt: occurredAt,
             createdAt: occurredAt,
-            updatedAt: occurredAt
+            updatedAt: occurredAt,
+            recurrence: recurrence
         )
     }
 }

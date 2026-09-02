@@ -4,28 +4,68 @@ import UIKit
 struct MainTabView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var budgetStore: BudgetStore
+    @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
     @EnvironmentObject private var transactionStore: TransactionStore
-    @State private var isPresentingAddSheet = false
+    @AppStorage(AppPreferences.preferSimpleTransactionEntryKey)
+    private var preferSimpleTransactionEntry = false
+    @AppStorage("lastTransactionAccountID") private var lastTransactionAccountID = ""
+
+    @State private var addPresentation: AddTransactionPresentation?
+    @State private var isPresentingQuickEntry = false
+    @State private var quickEntryText = ""
+    @State private var quickEntryAccountID: UUID?
+    @FocusState private var isQuickEntryFocused: Bool
 
     var body: some View {
-        MainTabController(
-            accountStore: accountStore,
-            budgetStore: budgetStore,
-            transactionStore: transactionStore
-        ) {
-            isPresentingAddSheet = true
+        ZStack {
+            MainTabController(
+                accountStore: accountStore,
+                budgetStore: budgetStore,
+                exchangeRateStore: exchangeRateStore,
+                transactionStore: transactionStore
+            ) {
+                presentAddTransaction()
+            }
+            .ignoresSafeArea()
+
+            if isPresentingQuickEntry {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: handleQuickEntryBackgroundTap)
+                    .accessibilityHidden(true)
+
+                VStack(spacing: 0) {
+                    Spacer()
+                    quickEntryComposer
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        .ignoresSafeArea()
-        .sheet(isPresented: $isPresentingAddSheet) {
-            AddTransactionView()
+        .animation(.snappy(duration: 0.25), value: isPresentingQuickEntry)
+        .onChange(of: isQuickEntryFocused) { _, isFocused in
+            if !isFocused, isPresentingQuickEntry {
+                dismissQuickEntry()
+            }
+        }
+        .onChange(of: accountStore.accounts) { _, _ in
+            if isPresentingQuickEntry {
+                configureQuickEntryAccount()
+            }
+        }
+        .sheet(item: $addPresentation) { presentation in
+            AddTransactionView(
+                initialCommand: presentation.command,
+                initialAccountID: presentation.accountID
+            )
                 .environmentObject(accountStore)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .quickAddSheetBackground()
         }
-        .sheet(item: $accountStore.editor) { editor in
-            AccountEditorView(account: editor.account)
+        .sheet(isPresented: $accountStore.isManagingAccounts) {
+            AccountManagementView()
                 .environmentObject(accountStore)
+                .environmentObject(transactionStore)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -58,22 +98,137 @@ struct MainTabView: View {
             await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         }
     }
-}
 
-private extension View {
-    @ViewBuilder
-    func quickAddSheetBackground() -> some View {
-        if #available(iOS 26.0, *) {
-            presentationBackground(.ultraThinMaterial)
-        } else {
-            self
+    private var quickEntryComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            QuickAccountMenu(
+                accounts: accountStore.accounts,
+                selectedAccountID: quickEntryAccountID
+            ) { accountID in
+                quickEntryAccountID = accountID
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                TextField(
+                    "Coffee 4.50 this morning",
+                    text: $quickEntryText,
+                    axis: .vertical
+                )
+                .lineLimit(2...7)
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.sentences)
+                .focused($isQuickEntryFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(
+                    Color(uiColor: .tertiarySystemFill),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                )
+
+                if !trimmedQuickEntryText.isEmpty {
+                    Button(action: submitQuickEntry) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 17, weight: .bold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .disabled(quickEntryAccountID == nil)
+                    .accessibilityLabel("Review transaction")
+                    .transition(
+                        .scale(scale: 0.72, anchor: .trailing)
+                            .combined(with: .opacity)
+                    )
+                }
+            }
+            .animation(.snappy(duration: 0.22), value: trimmedQuickEntryText.isEmpty)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .accessibilityAction(.escape) {
+            dismissQuickEntry()
+        }
+        .task {
+            await Task.yield()
+            guard isPresentingQuickEntry else { return }
+            isQuickEntryFocused = true
         }
     }
+
+    private func presentAddTransaction() {
+        if preferSimpleTransactionEntry {
+            configureQuickEntryAccount()
+            withAnimation(.snappy(duration: 0.25)) {
+                isPresentingQuickEntry = true
+            }
+        } else {
+            addPresentation = AddTransactionPresentation(command: nil, accountID: nil)
+        }
+    }
+
+    private func handleQuickEntryBackgroundTap() {
+        dismissQuickEntry()
+    }
+
+    private func submitQuickEntry() {
+        guard !trimmedQuickEntryText.isEmpty, let quickEntryAccountID else { return }
+
+        let command = trimmedQuickEntryText
+        quickEntryText = ""
+        dismissQuickEntry()
+        addPresentation = AddTransactionPresentation(
+            command: command,
+            accountID: quickEntryAccountID
+        )
+    }
+
+    private var trimmedQuickEntryText: String {
+        quickEntryText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func dismissQuickEntry() {
+        isQuickEntryFocused = false
+        withAnimation(.snappy(duration: 0.25)) {
+            isPresentingQuickEntry = false
+        }
+    }
+
+    private func configureQuickEntryAccount() {
+        if let quickEntryAccountID,
+           accountStore.accounts.contains(where: { $0.id == quickEntryAccountID }) {
+            return
+        }
+
+        if let selectedAccountID = accountStore.selectedAccountID,
+           accountStore.accounts.contains(where: { $0.id == selectedAccountID }) {
+            quickEntryAccountID = selectedAccountID
+            return
+        }
+
+        if let lastAccountID = UUID(uuidString: lastTransactionAccountID),
+           accountStore.accounts.contains(where: { $0.id == lastAccountID }) {
+            quickEntryAccountID = lastAccountID
+            return
+        }
+
+        quickEntryAccountID = accountStore.accounts.first?.id
+    }
+}
+
+private struct AddTransactionPresentation: Identifiable {
+    let id = UUID()
+    let command: String?
+    let accountID: UUID?
 }
 
 private struct MainTabController: UIViewControllerRepresentable {
     let accountStore: AccountStore
     let budgetStore: BudgetStore
+    let exchangeRateStore: ExchangeRateStore
     let transactionStore: TransactionStore
     var onAdd: () -> Void
 
@@ -123,6 +278,7 @@ private struct MainTabController: UIViewControllerRepresentable {
             rootView: content
                 .environmentObject(accountStore)
                 .environmentObject(budgetStore)
+                .environmentObject(exchangeRateStore)
                 .environmentObject(transactionStore)
         )
         controller.tabBarItem = UITabBarItem(title: title, image: UIImage(systemName: systemImage), tag: 0)
@@ -161,5 +317,6 @@ private struct MainTabController: UIViewControllerRepresentable {
     MainTabView()
         .environmentObject(AccountStore())
         .environmentObject(BudgetStore())
+        .environmentObject(ExchangeRateStore())
         .environmentObject(TransactionStore())
 }

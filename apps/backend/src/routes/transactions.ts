@@ -2,12 +2,33 @@ import { and, desc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import { db } from "../db/client.ts";
-import { accounts, categories, transactions } from "../db/schema.ts";
-import { normalizeTransactionDescription } from "../services/category-resolution.ts";
+import {
+  accounts,
+  categories,
+  recurringSchedules,
+  transactions,
+} from "../db/schema.ts";
+import {
+  materializeRecurringSchedule,
+  materializeRecurringTransactions,
+  nextRecurrenceDate,
+} from "../services/recurring-transactions.ts";
 import { transactionKindSchema } from "./categories.ts";
 
 const amountPattern =
   "^(?=.{1,20}$)(?!0+(?:\\.0{1,4})?$)(?:0|[1-9]\\d{0,14})(?:\\.\\d{1,4})?$";
+
+const recurrenceFrequencySchema = t.Union([
+  t.Literal("daily"),
+  t.Literal("weekly"),
+  t.Literal("monthly"),
+  t.Literal("yearly"),
+]);
+
+const recurrenceBody = t.Object({
+  frequency: recurrenceFrequencySchema,
+  endAt: t.Optional(t.Nullable(t.String({ format: "date-time" }))),
+});
 
 const transactionBody = t.Object({
   accountId: t.String({ format: "uuid" }),
@@ -16,8 +37,8 @@ const transactionBody = t.Object({
   categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
   merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
   payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
-  description: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
+  recurrence: t.Optional(t.Nullable(recurrenceBody)),
   occurredAt: t.String({ format: "date-time" }),
 });
 
@@ -27,7 +48,6 @@ const transferBody = t.Object({
   amount: t.String({ pattern: amountPattern }),
   merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
   payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
-  description: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   occurredAt: t.String({ format: "date-time" }),
 });
@@ -44,12 +64,19 @@ const transactionSelection = {
     color: categories.color,
     isSystem: categories.isSystem,
   },
+  recurrence: {
+    id: recurringSchedules.id,
+    frequency: recurringSchedules.frequency,
+    endAt: recurringSchedules.endAt,
+  },
 };
 
 export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
   .get(
     "/",
     async ({ query }) => {
+      await materializeRecurringTransactions();
+
       const filters = query.accountId
         ? and(eq(transactions.accountId, query.accountId))
         : undefined;
@@ -58,6 +85,10 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
         .select(transactionSelection)
         .from(transactions)
         .leftJoin(categories, eq(transactions.categoryId, categories.id))
+        .leftJoin(
+          recurringSchedules,
+          eq(transactions.recurringScheduleId, recurringSchedules.id),
+        )
         .where(filters)
         .orderBy(desc(transactions.occurredAt), desc(transactions.createdAt));
 
@@ -78,17 +109,62 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
         return { message: prepared.error };
       }
 
-      const [transaction] = await db
-        .insert(transactions)
-        .values(prepared.values)
-        .returning();
+      const recurrence = parseRecurrence(body.recurrence, prepared.values.occurredAt);
+      if ("error" in recurrence) {
+        set.status = 400;
+        return { message: recurrence.error };
+      }
 
-      if (!transaction) {
+      const created = await db.transaction(async (databaseTransaction) => {
+        if (!recurrence.value) {
+          const [transaction] = await databaseTransaction
+            .insert(transactions)
+            .values(prepared.values)
+            .returning();
+          return { transaction, scheduleId: null };
+        }
+
+        const [schedule] = await databaseTransaction
+          .insert(recurringSchedules)
+          .values({
+            ...scheduleTemplate(prepared.values),
+            frequency: recurrence.value.frequency,
+            startAt: prepared.values.occurredAt,
+            lastOccurrenceAt: prepared.values.occurredAt,
+            nextOccurrenceAt: boundedNextOccurrence(
+              prepared.values.occurredAt,
+              prepared.values.occurredAt,
+              recurrence.value.frequency,
+              recurrence.value.endAt,
+            ),
+            endAt: recurrence.value.endAt,
+          })
+          .returning({ id: recurringSchedules.id });
+
+        if (!schedule) {
+          throw new Error("Recurring schedule insert did not return a row");
+        }
+
+        const [transaction] = await databaseTransaction
+          .insert(transactions)
+          .values({
+            ...prepared.values,
+            recurringScheduleId: schedule.id,
+          })
+          .returning();
+        return { transaction, scheduleId: schedule.id };
+      });
+
+      if (!created.transaction) {
         throw new Error("Transaction insert did not return a row");
       }
 
+      if (created.scheduleId) {
+        await materializeRecurringSchedule(created.scheduleId);
+      }
+
       set.status = 201;
-      return toTransactionResponse({ ...transaction, category: prepared.category });
+      return await findTransactionResponse(created.transaction.id);
     },
     { body: transactionBody },
   )
@@ -122,15 +198,12 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
         return { message: "occurredAt must be a valid date and time" };
       }
 
-      const description = cleanOptionalText(body.description);
       const sharedValues = {
         amount: body.amount,
         currency: sourceAccount.currency,
         categoryId: null,
         merchant: cleanOptionalText(body.merchant),
         payee: cleanOptionalText(body.payee),
-        description,
-        normalizedDescription: description ? normalizeTransactionDescription(description) : null,
         note: cleanOptionalText(body.note),
         occurredAt,
       };
@@ -151,8 +224,8 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
 
       set.status = 201;
       return {
-        source: toTransactionResponse({ ...source, category: null }),
-        destination: toTransactionResponse({ ...destination, category: null }),
+        source: toTransactionResponse({ ...source, category: null, recurrence: null }),
+        destination: toTransactionResponse({ ...destination, category: null, recurrence: null }),
       };
     },
     { body: transferBody },
@@ -161,7 +234,11 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
     "/:id",
     async ({ params, body, set }) => {
       const [existing] = await db
-        .select({ accountId: transactions.accountId, currency: transactions.currency })
+        .select({
+          accountId: transactions.accountId,
+          currency: transactions.currency,
+          recurringScheduleId: transactions.recurringScheduleId,
+        })
         .from(transactions)
         .where(eq(transactions.id, params.id))
         .limit(1);
@@ -177,29 +254,139 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
         return { message: prepared.error };
       }
 
-      const [transaction] = await db
-        .update(transactions)
-        .set({
-          ...prepared.values,
-          // Keep the historical currency unless the transaction moves to another account.
-          currency: existing.accountId === body.accountId
-            ? existing.currency
-            : prepared.values.currency,
-          updatedAt: new Date(),
-        })
-        .where(eq(transactions.id, params.id))
-        .returning();
+      const recurrence = parseRecurrence(body.recurrence, prepared.values.occurredAt);
+      if ("error" in recurrence) {
+        set.status = 400;
+        return { message: recurrence.error };
+      }
 
-      if (!transaction) {
+      const values = {
+        ...prepared.values,
+        // Keep the historical currency unless the transaction moves to another account.
+        currency: existing.accountId === body.accountId
+          ? existing.currency
+          : prepared.values.currency,
+        updatedAt: new Date(),
+      };
+
+      const scheduleId = await db.transaction(async (databaseTransaction) => {
+        if (!recurrence.value) {
+          const [transaction] = await databaseTransaction
+            .update(transactions)
+            .set(values)
+            .where(eq(transactions.id, params.id))
+            .returning({ id: transactions.id });
+
+          if (existing.recurringScheduleId) {
+            await databaseTransaction
+              .delete(recurringSchedules)
+              .where(eq(recurringSchedules.id, existing.recurringScheduleId));
+          }
+          return transaction ? null : undefined;
+        }
+
+        if (existing.recurringScheduleId) {
+          const [schedule] = await databaseTransaction
+            .select()
+            .from(recurringSchedules)
+            .where(eq(recurringSchedules.id, existing.recurringScheduleId))
+            .limit(1);
+
+          if (!schedule) {
+            throw new Error("Recurring schedule not found");
+          }
+
+          const frequencyChanged = schedule.frequency !== recurrence.value.frequency;
+          const nextOccurrenceAt = frequencyChanged || !schedule.nextOccurrenceAt
+            ? boundedNextOccurrence(
+                schedule.lastOccurrenceAt,
+                schedule.startAt,
+                recurrence.value.frequency,
+                recurrence.value.endAt,
+              )
+            : boundExistingNext(schedule.nextOccurrenceAt, recurrence.value.endAt);
+
+          await databaseTransaction
+            .update(recurringSchedules)
+            .set({
+              ...scheduleTemplate(values),
+              frequency: recurrence.value.frequency,
+              nextOccurrenceAt,
+              endAt: recurrence.value.endAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(recurringSchedules.id, schedule.id));
+
+          const [transaction] = await databaseTransaction
+            .update(transactions)
+            .set(values)
+            .where(eq(transactions.id, params.id))
+            .returning({ id: transactions.id });
+          return transaction ? schedule.id : undefined;
+        }
+
+        const [schedule] = await databaseTransaction
+          .insert(recurringSchedules)
+          .values({
+            ...scheduleTemplate(values),
+            frequency: recurrence.value.frequency,
+            startAt: values.occurredAt,
+            lastOccurrenceAt: values.occurredAt,
+            nextOccurrenceAt: boundedNextOccurrence(
+              values.occurredAt,
+              values.occurredAt,
+              recurrence.value.frequency,
+              recurrence.value.endAt,
+            ),
+            endAt: recurrence.value.endAt,
+          })
+          .returning({ id: recurringSchedules.id });
+
+        if (!schedule) {
+          throw new Error("Recurring schedule insert did not return a row");
+        }
+
+        const [transaction] = await databaseTransaction
+          .update(transactions)
+          .set({ ...values, recurringScheduleId: schedule.id })
+          .where(eq(transactions.id, params.id))
+          .returning({ id: transactions.id });
+        return transaction ? schedule.id : undefined;
+      });
+
+      if (scheduleId === undefined) {
         set.status = 404;
         return { message: "Transaction not found" };
       }
 
-      return toTransactionResponse({ ...transaction, category: prepared.category });
+      if (scheduleId) {
+        await materializeRecurringSchedule(scheduleId);
+      }
+
+      return await findTransactionResponse(params.id);
     },
     {
       params: t.Object({ id: t.String({ format: "uuid" }) }),
       body: transactionBody,
+    },
+  )
+  .delete(
+    "/:id",
+    async ({ params, set }) => {
+      const [deletedTransaction] = await db
+        .delete(transactions)
+        .where(eq(transactions.id, params.id))
+        .returning({ id: transactions.id });
+
+      if (!deletedTransaction) {
+        set.status = 404;
+        return { message: "Transaction not found" };
+      }
+
+      return { deleted: true };
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
     },
   );
 
@@ -216,11 +403,34 @@ type CategorySummary = {
 
 type TransactionResponseRow = typeof transactions.$inferSelect & {
   category: CategorySummary | null;
+  recurrence: {
+    id: string;
+    frequency: "daily" | "weekly" | "monthly" | "yearly";
+    endAt: Date | null;
+  } | null;
 };
 
 function toTransactionResponse(row: TransactionResponseRow) {
-  const { normalizedDescription: _, categoryId: __, ...transaction } = row;
+  const { categoryId: _, recurringScheduleId: __, ...transaction } = row;
   return transaction;
+}
+
+async function findTransactionResponse(id: string) {
+  const [transaction] = await db
+    .select(transactionSelection)
+    .from(transactions)
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(
+      recurringSchedules,
+      eq(transactions.recurringScheduleId, recurringSchedules.id),
+    )
+    .where(eq(transactions.id, id))
+    .limit(1);
+
+  if (!transaction) {
+    throw new Error("Transaction not found after save");
+  }
+  return toTransactionResponse(transaction);
 }
 
 function cleanOptionalText(value: string | null | undefined): string | null {
@@ -261,7 +471,6 @@ async function prepareTransaction(body: typeof transactionBody.static) {
     return { error: "occurredAt must be a valid date and time", status: 400 as const };
   }
 
-  const description = cleanOptionalText(body.description);
   return {
     category,
     values: {
@@ -273,10 +482,67 @@ async function prepareTransaction(body: typeof transactionBody.static) {
       categoryId: category?.id ?? null,
       merchant: cleanOptionalText(body.merchant),
       payee: cleanOptionalText(body.payee),
-      description,
-      normalizedDescription: description ? normalizeTransactionDescription(description) : null,
       note: cleanOptionalText(body.note),
       occurredAt,
     },
   };
+}
+
+function parseRecurrence(
+  recurrence: typeof recurrenceBody.static | null | undefined,
+  occurredAt: Date,
+) {
+  if (!recurrence) {
+    return { value: null } as const;
+  }
+
+  const endAt = recurrence.endAt ? new Date(recurrence.endAt) : null;
+  if (endAt && (Number.isNaN(endAt.getTime()) || endAt < occurredAt)) {
+    return {
+      error: "Recurrence end date must be on or after the transaction date",
+    } as const;
+  }
+
+  return {
+    value: {
+      frequency: recurrence.frequency,
+      endAt,
+    },
+  } as const;
+}
+
+function scheduleTemplate(values: {
+  accountId: string;
+  kind: "expense" | "income";
+  amount: string;
+  currency: string;
+  categoryId: string | null;
+  merchant: string | null;
+  payee: string | null;
+  note: string | null;
+}) {
+  return {
+    accountId: values.accountId,
+    kind: values.kind,
+    amount: values.amount,
+    currency: values.currency,
+    categoryId: values.categoryId,
+    merchant: values.merchant,
+    payee: values.payee,
+    note: values.note,
+  };
+}
+
+function boundedNextOccurrence(
+  after: Date,
+  startAt: Date,
+  frequency: "daily" | "weekly" | "monthly" | "yearly",
+  endAt: Date | null,
+): Date | null {
+  const next = nextRecurrenceDate(after, startAt, frequency);
+  return boundExistingNext(next, endAt);
+}
+
+function boundExistingNext(next: Date, endAt: Date | null): Date | null {
+  return endAt && next > endAt ? null : next;
 }

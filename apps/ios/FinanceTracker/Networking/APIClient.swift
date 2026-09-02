@@ -57,6 +57,31 @@ struct APIClient: Sendable {
         return try await send(request)
     }
 
+    func reorderAccounts(_ accountIDs: [UUID]) async throws -> [Account] {
+        var request = URLRequest(
+            url: apiURL
+                .appending(path: "accounts")
+                .appending(path: "order")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.jsonEncoder.encode(
+            AccountOrderRequest(accountIds: accountIDs)
+        )
+
+        return try await send(request)
+    }
+
+    func deleteAccount(id: UUID) async throws -> DeleteAccountResponse {
+        var request = URLRequest(
+            url: apiURL
+                .appending(path: "accounts")
+                .appending(path: id.uuidString)
+        )
+        request.httpMethod = "DELETE"
+        return try await send(request)
+    }
+
     func transactions(accountID: UUID?) async throws -> [FinanceTransaction] {
         var components = URLComponents(
             url: apiURL.appending(path: "transactions"),
@@ -73,6 +98,33 @@ struct APIClient: Sendable {
             throw APIClientError.invalidResponse
         }
 
+        return try await get(url: url)
+    }
+
+    func latestExchangeRates(
+        currencies: Set<String>,
+        reportingCurrency: String,
+        refresh: Bool = false
+    ) async throws -> ExchangeRateSnapshot {
+        var components = URLComponents(
+            url: apiURL.appending(path: "exchange-rates").appending(path: "latest"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "reportingCurrency", value: reportingCurrency.uppercased()),
+            URLQueryItem(
+                name: "currencies",
+                value: currencies.map { $0.uppercased() }.sorted().joined(separator: ",")
+            ),
+        ]
+        if refresh {
+            queryItems.append(URLQueryItem(name: "refresh", value: "true"))
+        }
+        components?.queryItems = queryItems
+
+        guard let url = components?.url else {
+            throw APIClientError.invalidResponse
+        }
         return try await get(url: url)
     }
 
@@ -146,6 +198,14 @@ struct APIClient: Sendable {
             transfer,
             to: apiURL.appending(path: "transactions").appending(path: "transfer")
         )
+    }
+
+    func deleteTransaction(id: UUID) async throws -> DeleteTransactionResponse {
+        var request = URLRequest(
+            url: apiURL.appending(path: "transactions").appending(path: id.uuidString)
+        )
+        request.httpMethod = "DELETE"
+        return try await send(request)
     }
 
     func monthlyBudget(month: String, accountID: UUID?) async throws -> MonthlyBudget? {

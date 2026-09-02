@@ -6,6 +6,7 @@ import { categories, transactions } from "../db/schema.ts";
 import {
   normalizeTransactionDescription,
   rankHistoryMatches,
+  trigramSimilarity,
   type HistoryMatch,
 } from "../services/category-resolution.ts";
 
@@ -42,8 +43,8 @@ const categoryColorSchema = t.Union([
 
 type FuzzyHistoryRow = {
   categoryId: string;
-  similarity: number;
-  createdAt: Date | string;
+  note: string;
+  createdAt: Date;
 };
 
 export const categoriesRoutes = new Elysia({ prefix: "/categories" })
@@ -326,20 +327,29 @@ export const categoriesRoutes = new Elysia({ prefix: "/categories" })
         return { suggestions: [] };
       }
 
-      const [exact] = await db
+      const history = await db
         .select({
           categoryId: transactions.categoryId,
+          note: transactions.note,
+          createdAt: transactions.createdAt,
         })
         .from(transactions)
         .where(
           and(
             eq(transactions.kind, body.kind),
-            eq(transactions.normalizedDescription, normalizedDescription),
             sql`${transactions.categoryId} is not null`,
+            sql`${transactions.note} is not null`,
           ),
         )
         .orderBy(desc(transactions.createdAt))
-        .limit(1);
+        .limit(500);
+
+      const exact = history.find(
+        (transaction) =>
+          transaction.note &&
+          normalizeTransactionDescription(transaction.note) ===
+            normalizedDescription,
+      );
 
       if (exact?.categoryId) {
         return {
@@ -353,34 +363,13 @@ export const categoriesRoutes = new Elysia({ prefix: "/categories" })
         };
       }
 
-      const result = await db.execute(sql<FuzzyHistoryRow>`
-        select
-          ${transactions.categoryId} as "categoryId",
-          greatest(
-            similarity(${transactions.normalizedDescription}, ${normalizedDescription}),
-            strict_word_similarity(${normalizedDescription}, ${transactions.normalizedDescription})
-          )::double precision as "similarity",
-          ${transactions.createdAt} as "createdAt"
-        from ${transactions}
-        where ${transactions.kind} = ${body.kind}
-          and ${transactions.categoryId} is not null
-          and ${transactions.normalizedDescription} is not null
-          and (
-            ${transactions.normalizedDescription} % ${normalizedDescription}
-            or ${normalizedDescription} <<% ${transactions.normalizedDescription}
-          )
-        order by "similarity" desc, ${transactions.createdAt} desc
-        limit 50
-      `);
-
-      const rows = [...result] as unknown as FuzzyHistoryRow[];
+      const rows = history.filter(
+        (row): row is FuzzyHistoryRow => Boolean(row.categoryId && row.note),
+      );
       const matches: HistoryMatch[] = rows.map((row) => ({
         categoryId: row.categoryId,
-        similarity: Number(row.similarity),
-        createdAt:
-          row.createdAt instanceof Date
-            ? row.createdAt
-            : new Date(row.createdAt),
+        similarity: trigramSimilarity(normalizedDescription, row.note),
+        createdAt: row.createdAt,
       }));
 
       return { suggestions: rankHistoryMatches(matches) };

@@ -178,7 +178,11 @@ final class TransactionStore: ObservableObject {
         _ request: TransactionRequest
     ) async throws -> FinanceTransaction {
         let transaction = try await apiClient.createTransaction(request)
-        apply(transaction)
+        if request.recurrence != nil {
+            await loadTransactions(accountID: currentAccountID)
+        } else {
+            apply(transaction)
+        }
         return transaction
     }
 
@@ -192,9 +196,20 @@ final class TransactionStore: ObservableObject {
 
     @discardableResult
     func updateTransaction(id: UUID, with request: TransactionRequest) async throws -> FinanceTransaction {
+        let wasRecurring = transactions.first { $0.id == id }?.recurrence != nil
         let transaction = try await apiClient.updateTransaction(id: id, with: request)
-        apply(transaction)
+        if wasRecurring || request.recurrence != nil {
+            await loadTransactions(accountID: currentAccountID)
+        } else {
+            apply(transaction)
+        }
         return transaction
+    }
+
+    func deleteTransaction(_ transaction: FinanceTransaction) async throws {
+        _ = try await apiClient.deleteTransaction(id: transaction.id)
+        transactions.removeAll { $0.id == transaction.id }
+        state = .loaded
     }
 
     private func apply(_ transaction: FinanceTransaction) {
@@ -224,11 +239,11 @@ private extension FinanceTransaction {
             category: category,
             merchant: merchant,
             payee: payee,
-            description: description,
             note: note,
             occurredAt: occurredAt,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            recurrence: recurrence
         )
     }
 }

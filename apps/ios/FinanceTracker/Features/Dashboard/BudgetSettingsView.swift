@@ -30,19 +30,19 @@ struct BudgetSettingsView: View {
 
         let assignments = budget?.categoryAssignments ?? []
         _hasMonthlyLimit = State(initialValue: budget?.monthlyLimit != nil)
-        _monthlyLimit = State(initialValue: budget?.monthlyLimit ?? "")
+        _monthlyLimit = State(initialValue: editableAmount(budget?.monthlyLimit))
         _groups = State(
             initialValue: (budget?.groups ?? []).map { group in
                 BudgetGroupDraft(
                     id: group.id,
                     name: group.name,
-                    limit: group.limit,
+                    limit: editableAmount(group.limit),
                     categories: assignments
                         .filter { $0.groupId == group.id }
                         .map {
                             BudgetCategoryDraft(
                                 categoryID: $0.categoryId,
-                                limit: $0.limit ?? ""
+                                limit: editableAmount($0.limit)
                             )
                         }
                 )
@@ -54,7 +54,7 @@ struct BudgetSettingsView: View {
                 .map {
                     BudgetCategoryDraft(
                         categoryID: $0.categoryId,
-                        limit: $0.limit ?? ""
+                        limit: editableAmount($0.limit)
                     )
                 }
         )
@@ -62,29 +62,24 @@ struct BudgetSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    introCard
-                    monthlyLimitCard
-                    groupsCard
-                    categoryLimitsCard
+            Form {
+                monthlyLimitSection
+                groupsSection
+                categoryLimitsSection
 
-                    if budget != nil {
-                        Button("Clear \(monthName) budget", role: .destructive) {
+                if budget != nil {
+                    Section {
+                        Button("Clear budget", role: .destructive) {
                             hasMonthlyLimit = false
                             monthlyLimit = ""
                             groups = []
                             standaloneAssignments = []
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.top, 4)
                     }
                 }
-                .padding(16)
-                .padding(.bottom, 90)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Budget · \(monthName)")
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("\(monthName) budget")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -107,95 +102,25 @@ struct BudgetSettingsView: View {
         .interactiveDismissDisabled(isSaving)
     }
 
-    private var introCard: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.purple.opacity(0.75), Color.accentColor.opacity(0.75)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 62, height: 62)
-
-                Image(systemName: "target")
-                    .font(.system(size: 25, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Build it your way")
-                    .font(.title3.bold())
-                Text("Start with one monthly number, then add pools and category guardrails whenever they help.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 6) {
-                    budgetLevel("1", title: "Month", active: hasMonthlyLimit)
-                    budgetLevel("2", title: "Pools", active: !groups.isEmpty)
-                    budgetLevel("3", title: "Details", active: limitedAssignmentsCount > 0)
-                }
-            }
-        }
-        .padding(18)
-        .budgetCardBackground()
-    }
-
-    private var monthlyLimitCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
+    private var monthlyLimitSection: some View {
+        Section("Monthly budget") {
             Toggle(isOn: $hasMonthlyLimit.animation(.snappy)) {
-                Label {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Monthly spending cap")
-                            .font(.headline)
-                        Text("Your simple, top-level limit")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "circle.dashed.inset.filled")
-                        .foregroundStyle(Color.accentColor)
-                }
+                Label("Monthly limit", systemImage: "calendar")
             }
 
             if hasMonthlyLimit {
                 BudgetAmountField(
-                    title: "I can spend",
+                    title: "Limit",
                     text: $monthlyLimit,
                     currency: currency
                 )
-                .transition(.move(edge: .top).combined(with: .opacity))
-
-                if let limit = parsedAmount(monthlyLimit) {
-                    let spent = spentForMonth
-                    VStack(spacing: 7) {
-                        ProgressView(value: progress(spent: spent, limit: limit))
-                            .tint(spent > limit ? .orange : .accentColor)
-                        HStack {
-                            Text("\(money(spent)) spent")
-                            Spacer()
-                            Text("\(money(max(limit - spent, 0))) left")
-                        }
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    }
-                }
+                .transition(.opacity)
             }
         }
-        .padding(18)
-        .budgetCardBackground()
     }
 
-    private var groupsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(
-                title: "Spending pools",
-                subtitle: "Bundle categories into a shared limit",
-                systemImage: "square.3.layers.3d"
-            )
-
+    private var groupsSection: some View {
+        Section("Spending pools") {
             ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                 groupRow(group, index: index)
             }
@@ -210,112 +135,57 @@ struct BudgetSettingsView: View {
                     groups.append(group)
                 }
             } label: {
-                Label("Add a spending pool", systemImage: "plus.circle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                Label("Add pool", systemImage: "plus")
             }
-            .buttonStyle(.plain)
         }
-        .padding(18)
-        .budgetCardBackground()
     }
 
     private func groupRow(_ group: BudgetGroupDraft, index: Int) -> some View {
         let categoryIDs = Set(group.categories.map(\.categoryID))
-        let spent = spent(in: categoryIDs)
         let limit = parsedAmount(group.limit) ?? 0
         let tint = groupTint(index)
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                Image(systemName: "shippingbox.fill")
+        return NavigationLink {
+            BudgetGroupEditorView(
+                group: group,
+                categories: expenseCategories,
+                currency: currency,
+                unavailableCategoryIDs: assignedCategoryIDs.subtracting(categoryIDs)
+            ) { updated in
+                replaceGroup(updated)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "square.3.layers.3d")
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 34, height: 34)
-                    .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                    .frame(width: 38, height: 38)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(group.name.isEmpty ? "New pool" : group.name)
-                        .font(.headline)
-                    Text("\(group.categories.count) \(group.categories.count == 1 ? "category" : "categories") · \(money(limit))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(group.name.isEmpty ? "Untitled pool" : group.name)
+                    .foregroundStyle(.primary)
 
                 Spacer()
 
-                Menu {
-                    Button("Remove pool", systemImage: "trash", role: .destructive) {
-                        removeGroup(group)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 30, height: 30)
-                }
+                Text(money(limit))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
-
-            ProgressView(value: progress(spent: spent, limit: limit))
-                .tint(spent > limit ? .orange : tint)
-
-            if !group.categories.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
-                        ForEach(group.categories) { assignment in
-                            Text(categoryName(assignment.categoryID))
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 6)
-                                .background(tint.opacity(0.12), in: Capsule())
-                        }
-                    }
-                }
-            }
-
-            NavigationLink {
-                BudgetGroupEditorView(
-                    group: group,
-                    categories: expenseCategories,
-                    currency: currency,
-                    unavailableCategoryIDs: assignedCategoryIDs.subtracting(categoryIDs)
-                ) { updated in
-                    replaceGroup(updated)
-                }
-            } label: {
-                HStack {
-                    Text("Tune this pool")
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tint)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(14)
-        .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
-        .overlay {
-            RoundedRectangle(cornerRadius: 17)
-                .stroke(tint.opacity(0.14), lineWidth: 1)
+        .swipeActions {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                removeGroup(group)
+            }
         }
     }
 
-    private var categoryLimitsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(
-                title: "Category guardrails",
-                subtitle: "Optional limits for the places you watch closely",
-                systemImage: "tag.circle.fill"
-            )
-
+    private var categoryLimitsSection: some View {
+        Section("Category limits") {
             ForEach(limitedAssignments) { reference in
                 categoryLimitRow(reference)
             }
 
-            if availableLimitCategoryIDs.isEmpty {
-                Text("Every available category already has a guardrail.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
+            if !availableLimitCategoryIDs.isEmpty {
                 NavigationLink {
                     BudgetCategoryLimitEditor(
                         assignment: nil,
@@ -329,114 +199,75 @@ struct BudgetSettingsView: View {
                         moveAssignment(assignment, to: groupID)
                     }
                 } label: {
-                    Label("Add a category limit", systemImage: "plus.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Color.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                    Label("Add category limit", systemImage: "plus")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.purple)
             }
         }
-        .padding(18)
-        .budgetCardBackground()
     }
 
     private func categoryLimitRow(_ reference: BudgetAssignmentReference) -> some View {
-        HStack(spacing: 8) {
-            NavigationLink {
-                BudgetCategoryLimitEditor(
-                    assignment: reference,
-                    categories: expenseCategories.filter {
-                        $0.id == reference.categoryID || !assignedCategoryIDs.contains($0.id)
-                    },
-                    groups: groups,
-                    currency: currency,
-                    groupIDByCategory: groupIDByCategory
-                ) { assignment, groupID in
-                    moveAssignment(assignment, to: groupID)
+        NavigationLink {
+            BudgetCategoryLimitEditor(
+                assignment: reference,
+                categories: expenseCategories.filter {
+                    $0.id == reference.categoryID || !assignedCategoryIDs.contains($0.id)
+                },
+                groups: groups,
+                currency: currency,
+                groupIDByCategory: groupIDByCategory
+            ) { assignment, groupID in
+                moveAssignment(assignment, to: groupID)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if let category = category(reference.categoryID) {
+                    CategoryIcon(category: category, size: 38)
                 }
-            } label: {
-                HStack(spacing: 12) {
-                    if let category = category(reference.categoryID) {
-                        CategoryIcon(category: category, size: 38)
-                    }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(categoryName(reference.categoryID))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(reference.groupID.flatMap(groupName) ?? "Standalone")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(categoryName(reference.categoryID))
+                        .foregroundStyle(.primary)
+                    if let groupName = reference.groupID.flatMap(groupName) {
+                        Text(groupName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-
-                    Spacer()
-
-                    Text(money(parsedAmount(reference.limit) ?? 0))
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.primary)
-                        .monospacedDigit()
                 }
+
+                Spacer()
+
+                Text(money(parsedAmount(reference.limit) ?? 0))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
-            .buttonStyle(.plain)
-
-            Menu {
-                Button("Remove limit", systemImage: "trash", role: .destructive) {
-                    removeLimit(reference)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 28, height: 36)
+        }
+        .swipeActions {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                removeLimit(reference)
             }
         }
     }
 
     private var saveBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            Button {
-                Task { await save() }
-            } label: {
-                HStack {
-                    if isSaving { ProgressView().tint(.white) }
-                    Text(hasAnyBudget ? "Save my plan" : "Save without a budget")
-                        .font(.headline)
+        Button {
+            Task { await save() }
+        } label: {
+            HStack(spacing: 8) {
+                if isSaving {
+                    ProgressView()
+                        .tint(Color(uiColor: .systemBackground))
                 }
-                .frame(maxWidth: .infinity, minHeight: 52)
+                Text("Save budget")
+                    .font(.headline)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(isSaving)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .foregroundStyle(Color(uiColor: .systemBackground))
         }
-        .background(.ultraThinMaterial)
-    }
-
-    private func sectionHeader(title: String, subtitle: String, systemImage: String) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-        } icon: {
-            Image(systemName: systemImage)
-                .foregroundStyle(Color.accentColor)
-        }
-    }
-
-    private func budgetLevel(_ number: String, title: String, active: Bool) -> some View {
-        HStack(spacing: 4) {
-            Text(number)
-                .font(.caption2.bold())
-                .frame(width: 17, height: 17)
-                .background(active ? Color.accentColor : Color.secondary.opacity(0.18), in: Circle())
-                .foregroundStyle(active ? .white : .secondary)
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(active ? .primary : .secondary)
-        }
+        .modifier(QuickSubmitButtonStyle())
+        .disabled(isSaving)
+        .padding(.top, 20)
+        .padding(.bottom, 24)
+        .padding(.horizontal, 10)
     }
 
     private var expenseCategories: [TransactionCategory] {
@@ -478,40 +309,6 @@ struct BudgetSettingsView: View {
         }
         let unassigned = expenseCategories.map(\.id).filter { !assignedCategoryIDs.contains($0) }
         return Set(categoriesWithoutLimits + unassigned)
-    }
-
-    private var limitedAssignmentsCount: Int {
-        limitedAssignments.count
-    }
-
-    private var hasAnyBudget: Bool {
-        hasMonthlyLimit || !groups.isEmpty || !standaloneAssignments.isEmpty
-    }
-
-    private var spentForMonth: Decimal {
-        let start = BudgetMonth.start(of: month)
-        let end = Calendar.current.date(byAdding: .month, value: 1, to: start) ?? start
-        return transactionStore.transactions.reduce(into: Decimal.zero) { total, transaction in
-            guard transaction.kind == .expense,
-                  transaction.occurredAt >= start,
-                  transaction.occurredAt < end,
-                  let amount = Decimal(string: transaction.amount) else { return }
-            total += amount
-        }
-    }
-
-    private func spent(in categoryIDs: Set<UUID>) -> Decimal {
-        let start = BudgetMonth.start(of: month)
-        let end = Calendar.current.date(byAdding: .month, value: 1, to: start) ?? start
-        return transactionStore.transactions.reduce(into: Decimal.zero) { total, transaction in
-            guard transaction.kind == .expense,
-                  transaction.occurredAt >= start,
-                  transaction.occurredAt < end,
-                  let categoryID = transaction.category?.id,
-                  categoryIDs.contains(categoryID),
-                  let amount = Decimal(string: transaction.amount) else { return }
-            total += amount
-        }
     }
 
     private func category(_ id: UUID) -> TransactionCategory? {
@@ -567,11 +364,6 @@ struct BudgetSettingsView: View {
     private func groupTint(_ index: Int) -> Color {
         let colors: [Color] = [.blue, .purple, .orange, .teal, .pink, .indigo]
         return colors[index % colors.count]
-    }
-
-    private func progress(spent: Decimal, limit: Decimal) -> Double {
-        guard limit > 0 else { return 0 }
-        return min(max(NSDecimalNumber(decimal: spent / limit).doubleValue, 0), 1)
     }
 
     private func money(_ value: Decimal) -> String {
@@ -703,21 +495,9 @@ private struct BudgetGroupEditorView: View {
 
     var body: some View {
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 9) {
-                    Label("One limit, a few teammates", systemImage: "person.3.fill")
-                        .font(.headline)
-                        .foregroundStyle(.purple)
-                    Text("Pick the categories that should share this pool. You can still add a tighter category limit later.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 6)
-            }
-
             Section("Pool details") {
-                TextField("Name, e.g. Needs", text: $group.name)
-                BudgetAmountField(title: "Pool limit", text: $group.limit, currency: currency)
+                TextField("Name", text: $group.name)
+                BudgetAmountField(title: "Limit", text: $group.limit, currency: currency)
             }
 
             Section("Categories") {
@@ -814,28 +594,17 @@ private struct BudgetCategoryLimitEditor: View {
 
     var body: some View {
         Form {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("A friendly guardrail", systemImage: "shield.lefthalf.filled")
-                        .font(.headline)
-                        .foregroundStyle(.orange)
-                    Text("This limit can stand alone or sit inside one of your spending pools.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 6)
-            }
-
             Section("Category") {
                 Picker("Category", selection: $categoryID) {
                     ForEach(categories) { category in
                         Text(category.name).tag(Optional(category.id))
                     }
                 }
+                .pickerStyle(.navigationLink)
             }
 
             Section("Limit") {
-                BudgetAmountField(title: "Category limit", text: $limit, currency: currency)
+                BudgetAmountField(title: "Amount", text: $limit, currency: currency)
             }
 
             Section("Lives in") {
@@ -845,6 +614,7 @@ private struct BudgetCategoryLimitEditor: View {
                         Text(group.name).tag(Optional(group.id))
                     }
                 }
+                .pickerStyle(.navigationLink)
             }
         }
         .navigationTitle("Category limit")
@@ -874,28 +644,19 @@ private struct BudgetAmountField: View {
     let currency: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        LabeledContent(title) {
+            HStack(spacing: 6) {
                 TextField("0", text: $text)
-                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.trailing)
                     .monospacedDigit()
                     .keyboardType(.decimalPad)
-            }
 
-            if !currency.isEmpty {
-                Text(currency)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(.secondary.opacity(0.10), in: Capsule())
+                if !currency.isEmpty {
+                    Text(currency)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(13)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
     }
 }
 
@@ -950,12 +711,10 @@ private func normalizedAmount(_ value: String) -> String? {
     parsedAmount(value).map { NSDecimalNumber(decimal: $0).stringValue }
 }
 
-private extension View {
-    func budgetCardBackground() -> some View {
-        background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22)
-                    .stroke(.white.opacity(0.07), lineWidth: 1)
-            }
+private func editableAmount(_ value: String?) -> String {
+    guard let value,
+          let amount = Decimal(string: value.replacingOccurrences(of: ",", with: ".")) else {
+        return value ?? ""
     }
+    return NSDecimalNumber(decimal: amount).stringValue
 }

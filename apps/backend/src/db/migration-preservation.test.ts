@@ -100,6 +100,41 @@ migrationDescribe("smart-entry migration preservation", () => {
       );
       expect(counts?.systemCategories).toBe(22);
       expect(legacyColumns.length).toBe(0);
+
+      await client`
+        update transactions
+        set note = null, description = 'legacy description'
+        where id = ${transactionId}
+      `;
+      for (const migration of [
+        "0003_colorful_war_machine.sql",
+        "0004_flaky_patriot.sql",
+        "0005_late_doctor_faustus.sql",
+        "0006_known_sabretooth.sql",
+        "0007_whole_slapstick.sql",
+        "0008_awesome_absorbing_man.sql",
+        "0009_lively_zemo.sql",
+      ]) {
+        await runMigration(client, migration);
+      }
+
+      const [current] = await client<Array<{ note: string }>>`
+        select note
+        from transactions
+        where id = ${transactionId}
+      `;
+      const removedDescriptionColumns = await client<
+        Array<{ columnName: string }>
+      >`
+        select column_name as "columnName"
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'transactions'
+          and column_name in ('description', 'normalized_description')
+      `;
+
+      expect(current?.note).toBe("legacy description");
+      expect(removedDescriptionColumns).toHaveLength(0);
     } finally {
       await client.end();
     }

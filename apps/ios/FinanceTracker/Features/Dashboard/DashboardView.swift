@@ -1,28 +1,30 @@
-import Charts
 import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var budgetStore: BudgetStore
+    @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
     @EnvironmentObject private var transactionStore: TransactionStore
+    @AppStorage(AppPreferences.defaultCurrencyKey)
+    private var reportingCurrency = AppPreferences.initialCurrency
 
     @State private var selectedMonth = BudgetMonth.start(of: .now)
     @State private var isShowingBudgetSettings = false
+    @State private var isShowingMonthPicker = false
     @State private var editingTransaction: FinanceTransaction?
 
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    highlightContent
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
+
+                monthlyBudgetProgressSection
+
+                monthlyHighlightsSection
 
                 recentTransactionsSection
             }
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.custom(10))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -34,17 +36,24 @@ struct DashboardView: View {
                 }
 
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isShowingBudgetSettings = true
-                    } label: {
-                        Image(systemName: budgetStore.budget == nil ? "chart.pie" : "chart.pie.fill")
-                    }
-                    .disabled(dashboardCurrency == nil)
-                    .accessibilityLabel("Budget settings")
+                    budgetSettingsButton
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    monthControl
+                    Button {
+                        isShowingMonthPicker = true
+                    } label: {
+                        Image(systemName: "calendar")
+                    }
+                    .accessibilityLabel("Choose month")
+                    .accessibilityValue(monthTitle)
+                    .popover(isPresented: $isShowingMonthPicker) {
+                        DashboardMonthPicker(
+                            selection: $selectedMonth,
+                            range: earliestMonth...latestMonth
+                        )
+                        .presentationCompactAdaptation(.popover)
+                    }
                 }
             }
             .refreshable { await reload() }
@@ -55,19 +64,24 @@ struct DashboardView: View {
                 accountID: accountStore.selectedAccountID
             )
         }
+        .task(id: exchangeRateScopeKey) {
+            await exchangeRateStore.load(
+                currencies: exchangeCurrencies,
+                reportingCurrency: dashboardCurrency
+            )
+        }
         .sheet(isPresented: $isShowingBudgetSettings) {
-            if let dashboardCurrency {
-                BudgetSettingsView(
-                    month: selectedMonth,
-                    accountID: accountStore.selectedAccountID,
-                    currency: dashboardCurrency,
-                    budget: budgetStore.budget
-                )
-                .environmentObject(budgetStore)
-                .environmentObject(transactionStore)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
+            BudgetSettingsView(
+                month: selectedMonth,
+                accountID: accountStore.selectedAccountID,
+                currency: dashboardCurrency,
+                budget: convertedBudget
+            )
+            .environmentObject(budgetStore)
+            .environmentObject(transactionStore)
+            .environmentObject(exchangeRateStore)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
@@ -78,36 +92,271 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder
-    private var highlightContent: some View {
-        if let currency = dashboardCurrency {
-            switch transactionStore.state {
-            case .idle, .loading:
-                DashboardHighlightPlaceholder()
-            case .loaded:
-                DashboardHighlightCard(
-                    insights: insights,
-                    transactions: monthTransactions,
-                    currency: currency,
-                    month: selectedMonth,
-                    isBudgetLoading: budgetStore.state == .loading
-                )
-            case let .failed(message):
-                DashboardMessageCard(
-                    title: "Highlights unavailable",
-                    message: message,
-                    systemImage: "chart.line.downtrend.xyaxis"
-                )
-            }
-        } else {
-            DashboardMessageCard(
-                title: accountStore.accounts.isEmpty ? "Add your first account" : "Choose one currency",
-                message: accountStore.accounts.isEmpty
-                    ? "Your monthly highlights and budgets will live here."
-                    : "Select an account to see accurate monthly totals and create its budget.",
-                systemImage: accountStore.accounts.isEmpty ? "creditcard.fill" : "arrow.triangle.2.circlepath"
-            )
+    private var budgetSettingsButton: some View {
+        Button {
+            isShowingBudgetSettings = true
+        } label: {
+            Image(systemName: "chart.pie")
         }
+        .disabled(!canOpenBudget)
+        .accessibilityLabel("Budget settings")
+    }
+
+    @ViewBuilder
+    private var dashboardHighlight: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                switch transactionStore.state {
+                case .idle, .loading:
+                    ProgressView("Loading monthly spending")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                case let .failed(message):
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                case .loaded:
+                    if budgetStore.state == .loading {
+                        ProgressView("Loading monthly spending")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    } else if let insights {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(highlightText(for: insights))
+                                .font(.title.weight(.semibold))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .contentTransition(.numericText())
+
+                            if let monthlyLimit = insights.monthlyLimit {
+                                Text(
+                                    "of \(money(monthlyLimit, currency: dashboardCurrency)) monthly budget"
+                                )
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                            }
+                        }
+                    } else {
+                        switch exchangeRateStore.state {
+                        case .idle, .loading:
+                            ProgressView("Converting to \(dashboardCurrency)")
+                        case let .failed(message):
+                            Label(message, systemImage: "arrow.triangle.2.circlepath")
+                                .foregroundStyle(.secondary)
+                        case .loaded:
+                            Label(
+                                "Some currencies could not be converted",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    private func highlightText(for insights: DashboardInsights) -> String {
+        if let remaining = insights.remaining, remaining >= 0 {
+            return "\(money(remaining, currency: dashboardCurrency)) left to spend"
+        }
+        return "\(money(insights.spent, currency: dashboardCurrency)) spent \(monthTitle)"
+    }
+
+    private func money(_ value: Decimal, currency: String) -> String {
+        value.formatted(
+            .currency(code: currency)
+                .precision(.fractionLength(0...2))
+        )
+    }
+
+    @ViewBuilder
+    private var monthlyBudgetProgressSection: some View {
+        if transactionStore.state == .loaded,
+           budgetStore.state == .loaded,
+           let insights,
+           let monthlyLimit = insights.monthlyLimit,
+           let progress = insights.budgetProgress {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    budgetProgressBar(progress: progress)
+                        .animation(.smooth, value: progress)
+                        .accessibilityLabel("Monthly budget used")
+                        .accessibilityValue(
+                            "\(money(insights.spent, currency: dashboardCurrency)) of \(money(monthlyLimit, currency: dashboardCurrency))"
+                        )
+
+                    HStack {
+                        Text("Monthly limit")
+                            .foregroundStyle(.secondary)
+                            .fontWeight(.bold)
+                            .font(.system(size: 14))
+
+                        Spacer()
+
+                        HStack(spacing: 0) {
+                            Text(money(insights.spent, currency: dashboardCurrency))
+                                .fontWeight(.semibold)
+                            Text(" / \(money(monthlyLimit, currency: dashboardCurrency))")
+                                .foregroundStyle(.secondary)
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    }
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .padding(.horizontal, 6)
+                }
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func clampedBudgetProgress(_ progress: Decimal) -> Double {
+        min(max(NSDecimalNumber(decimal: progress).doubleValue, 0), 1)
+    }
+
+    private func budgetProgressTint(for progress: Decimal) -> Color {
+        let value = clampedBudgetProgress(progress)
+        guard value < 1 else { return .red }
+        guard value >= 0.7 else { return .accentColor }
+
+        let proximityToLimit = (value - 0.7) / 0.3
+        return Color(
+            hue: 0.09 * (1 - proximityToLimit),
+            saturation: 0.88,
+            brightness: 0.92
+        )
+    }
+
+    private func budgetProgressBar(progress: Decimal) -> some View {
+        let value = clampedBudgetProgress(progress)
+        let tint = budgetProgressTint(for: progress)
+
+        return GeometryReader { geometry in
+            let horizontalInset: CGFloat = 4
+            let innerInset: CGFloat = 5
+            let markerDiameter: CGFloat = 22
+            let trackWidth = max(geometry.size.width - horizontalInset * 2, 0)
+            let availableWidth = max(trackWidth - markerDiameter, 0)
+            let markerCenter = markerDiameter / 2 + availableWidth * CGFloat(value)
+            let fillWidth = max(markerCenter - innerInset, 0)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .overlay {
+                        Capsule()
+                            .stroke(.secondary.opacity(0.08), lineWidth: 1)
+                    }
+
+                Canvas { context, size in
+                    var stripes = Path()
+                    for startX in stride(
+                        from: -size.height,
+                        through: size.width + size.height,
+                        by: 6
+                    ) {
+                        stripes.move(to: CGPoint(x: startX, y: size.height))
+                        stripes.addLine(to: CGPoint(x: startX + size.height, y: 0))
+                    }
+                    context.stroke(
+                        stripes,
+                        with: .color(tint.opacity(0.28)),
+                        lineWidth: 1.5
+                    )
+                }
+                .frame(height: 12)
+                .clipShape(Capsule())
+                .padding(.horizontal, innerInset)
+
+                Capsule()
+                    .fill(tint)
+                    .frame(width: value == 0 ? 0 : fillWidth, height: 12)
+                    .offset(x: innerInset)
+
+                if value > 0 {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: markerDiameter, height: markerDiameter)
+                        .overlay {
+                            Circle()
+                                .stroke(
+                                    Color(uiColor: .secondarySystemGroupedBackground),
+                                    lineWidth: 3
+                                )
+                        }
+                        .offset(x: markerCenter - markerDiameter / 2)
+                }
+            }
+            .frame(width: trackWidth, height: 24)
+            .clipShape(Capsule())
+            .offset(x: horizontalInset)
+        }
+        .frame(height: 24)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private var monthlyHighlightsSection: some View {
+        if transactionStore.state == .loaded,
+           budgetStore.state == .loaded,
+           let insights {
+            Section {
+                HStack(spacing: 10) {
+                    if insights.income > 0 { monthlyHighlight(
+                        title: "Income",
+                        amount: insights.income,
+                        systemImage: "arrow.down.left",
+                        color: .green,
+                        amountColor: .green
+                    )
+                    }
+
+                    if insights.spent > 0 { monthlyHighlight(
+                        title: "Spent",
+                        amount: insights.spent,
+                        systemImage: "arrow.up.right",
+                        color: .orange,
+                        amountColor: .primary
+                    )
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func monthlyHighlight(
+        title: String,
+        amount: Decimal,
+        systemImage: String,
+        color: Color,
+        amountColor: Color
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 20, height: 20)
+                .background(color.opacity(0.2), in: Circle())
+
+            Text(money(amount, currency: dashboardCurrency))
+                .font(.body.weight(.semibold))
+                .foregroundStyle(amountColor)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(money(amount, currency: dashboardCurrency))
     }
 
     @ViewBuilder
@@ -148,50 +397,70 @@ struct DashboardView: View {
         }
     }
 
-    private var monthControl: some View {
-        HStack(spacing: 10) {
-            Button {
-                moveMonth(by: -1)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.caption.bold())
-            }
-            .disabled(!canMoveToPreviousMonth)
-            .accessibilityLabel("Previous month")
-
-            Text(monthTitle)
-                .font(.subheadline.weight(.semibold))
-                .frame(minWidth: 76)
-                .contentTransition(.numericText())
-
-            Button {
-                moveMonth(by: 1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-            }
-            .disabled(!canMoveToNextMonth)
-            .accessibilityLabel("Next month")
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Month, \(monthTitle)")
-    }
-
-    private var insights: DashboardInsights {
-        DashboardInsights.calculate(
-            transactions: transactionStore.transactions,
+    private var insights: DashboardInsights? {
+        guard let transactions = convertedTransactions else { return nil }
+        return DashboardInsights.calculate(
+            transactions: transactions,
             month: selectedMonth,
-            monthlyLimit: budgetStore.budget?.monthlyLimit.flatMap { Decimal(string: $0) }
+            monthlyLimit: convertedBudget?.monthlyLimit.flatMap { Decimal(string: $0) }
         )
     }
 
-    private var dashboardCurrency: String? {
+    private var dashboardCurrency: String {
         if let account = accountStore.selectedAccount {
             return account.currency
         }
+        return reportingCurrency.uppercased()
+    }
 
-        let currencies = Set(accountStore.accounts.map(\.currency))
-        return currencies.count == 1 ? currencies.first : nil
+    private var convertedTransactions: [FinanceTransaction]? {
+        var converted: [FinanceTransaction] = []
+        converted.reserveCapacity(transactionStore.transactions.count)
+        for transaction in transactionStore.transactions {
+            guard let amount = Decimal(
+                string: transaction.amount,
+                locale: Locale(identifier: "en_US_POSIX")
+            ), let convertedAmount = exchangeRateStore.convert(
+                amount,
+                from: transaction.currency,
+                to: dashboardCurrency
+            ) else {
+                return nil
+            }
+            converted.append(
+                transaction.replacingAmount(
+                    NSDecimalNumber(decimal: convertedAmount).stringValue,
+                    currency: dashboardCurrency
+                )
+            )
+        }
+        return converted
+    }
+
+    private var convertedBudget: MonthlyBudget? {
+        guard let budget = budgetStore.budget else { return nil }
+        return budget.converted(to: dashboardCurrency, using: exchangeRateStore)
+    }
+
+    private var exchangeCurrencies: Set<String> {
+        let accountCurrencies: [String]
+        if let selectedAccount = accountStore.selectedAccount {
+            accountCurrencies = [selectedAccount.currency]
+        } else {
+            accountCurrencies = accountStore.accounts.map(\.currency)
+        }
+        return Set(
+            accountCurrencies +
+            transactionStore.transactions.map(\.currency) +
+            [budgetStore.budget?.currency].compactMap { $0 }
+        )
+    }
+
+    private var canOpenBudget: Bool {
+        budgetStore.state != .loading && exchangeRateStore.supports(
+            exchangeCurrencies,
+            reportingCurrency: dashboardCurrency
+        ) && (budgetStore.budget == nil || convertedBudget != nil)
     }
 
     private var monthTransactions: [FinanceTransaction] {
@@ -209,14 +478,6 @@ struct DashboardView: View {
         Calendar.current.date(byAdding: .month, value: 2, to: BudgetMonth.start(of: .now)) ?? selectedMonth
     }
 
-    private var canMoveToPreviousMonth: Bool {
-        selectedMonth > earliestMonth
-    }
-
-    private var canMoveToNextMonth: Bool {
-        selectedMonth < latestMonth
-    }
-
     private var monthTitle: String {
         let calendar = Calendar.current
         let currentYear = calendar.component(.year, from: .now)
@@ -230,11 +491,8 @@ struct DashboardView: View {
         "\(accountStore.selectedAccountID?.uuidString ?? "all"):\(BudgetMonth.key(for: selectedMonth))"
     }
 
-    private func moveMonth(by value: Int) {
-        guard let month = Calendar.current.date(byAdding: .month, value: value, to: selectedMonth) else {
-            return
-        }
-        selectedMonth = BudgetMonth.start(of: month)
+    private var exchangeRateScopeKey: String {
+        "\(dashboardCurrency):\(exchangeCurrencies.sorted().joined(separator: ","))"
     }
 
     private func reload() async {
@@ -246,376 +504,347 @@ struct DashboardView: View {
             accountID: accountStore.selectedAccountID,
             force: true
         )
-        _ = await (transactions, budget)
+        async let rates: Void = exchangeRateStore.load(
+            currencies: exchangeCurrencies,
+            reportingCurrency: dashboardCurrency,
+            force: true
+        )
+        _ = await (transactions, budget, rates)
     }
 }
 
-private struct DashboardHighlightCard: View {
-    let insights: DashboardInsights
-    let transactions: [FinanceTransaction]
-    let currency: String
-    let month: Date
-    let isBudgetLoading: Bool
+private struct DashboardMonthPicker: View {
+    @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(spacing: 4) {
-                Text(headline)
-                    .font(.title2.weight(.semibold))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .contentTransition(.numericText())
+    @Binding var selection: Date
+    let range: ClosedRange<Date>
 
-                Text(subheadline)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
+    @State private var displayedYear: Int
 
-            spendingChart
-        }
-        .dashboardCardStyle()
-        .overlay(alignment: .topTrailing) {
-            if isBudgetLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .padding(18)
-            }
-        }
-    }
+    private let calendar = Calendar.current
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 8),
+        count: 3
+    )
 
-    private var spendingChart: some View {
-        Chart {
-            ForEach(budgetPacePoints) { point in
-                LineMark(
-                    x: .value("Date", point.date),
-                    y: .value("Budget pace", point.amount),
-                    series: .value("Series", "Budget")
-                )
-                .foregroundStyle(Color.accentColor.opacity(0.35))
-                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, dash: [5, 6]))
-            }
-
-            ForEach(spendingPoints) { point in
-                AreaMark(
-                    x: .value("Date", point.date),
-                    yStart: .value("Baseline", 0),
-                    yEnd: .value("Spent", point.amount)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [spendingColor.opacity(0.22), spendingColor.opacity(0.01)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.monotone)
-            }
-
-            ForEach(spendingSegments) { segment in
-                LineMark(
-                    x: .value("Date", segment.start.date),
-                    y: .value("Spent", segment.start.amount),
-                    series: .value("Series", "Spent-\(segment.id)")
-                )
-                .foregroundStyle(segment.color)
-                .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.monotone)
-
-                LineMark(
-                    x: .value("Date", segment.end.date),
-                    y: .value("Spent", segment.end.amount),
-                    series: .value("Series", "Spent-\(segment.id)")
-                )
-                .foregroundStyle(segment.color)
-                .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.monotone)
-            }
-
-            if let latestPoint = spendingPoints.last {
-                PointMark(
-                    x: .value("Date", latestPoint.date),
-                    y: .value("Spent", latestPoint.amount)
-                )
-                .foregroundStyle(spendingColor)
-                .symbol {
-                    Circle()
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                        .stroke(spendingColor, lineWidth: 3)
-                        .frame(width: 12, height: 12)
-                }
-                .annotation(position: .bottom, alignment: .trailing, spacing: 8) {
-                    if let paceLabel {
-                        Text(paceLabel)
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(paceLabelForeground)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(
-                                spendingColor,
-                                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            )
-                    }
-                }
-            }
-        }
-        .chartXScale(domain: monthStart...chartEnd)
-        .chartYScale(domain: chartMinimum...chartMaximum)
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .frame(height: 150)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Monthly spending chart")
-        .accessibilityValue("\(money(insights.spent)) spent; \(subheadline)")
-    }
-
-    private var headline: String {
-        guard let remaining = insights.remaining else {
-            return Calendar.current.isDate(month, equalTo: .now, toGranularity: .month)
-                ? "\(money(insights.spent)) spent this month"
-                : "\(money(insights.spent)) spent"
-        }
-        return remaining >= 0
-            ? "\(money(remaining)) left"
-            : "\(money(-remaining)) over budget"
-    }
-
-    private var subheadline: String {
-        guard let monthlyLimit = insights.monthlyLimit else {
-            return "No monthly budget set"
-        }
-        return "out of \(money(monthlyLimit)) budgeted"
-    }
-
-    private var spendingColor: Color {
-        spendingPoints.last.map(color(for:)) ?? .accentColor
-    }
-
-    private var paceLabelForeground: Color {
-        guard let monthlyLimit = insights.monthlyLimit, insights.spent > monthlyLimit else {
-            return .black.opacity(0.78)
-        }
-        return .white
-    }
-
-    private var paceLabel: String? {
-        guard let difference = paceDifference else {
-            return nil
-        }
-        if abs(difference) < 0.01 {
-            return "On pace"
-        }
-        return difference > 0
-            ? "\(money(difference)) under"
-            : "\(money(-difference)) over"
-    }
-
-    private var paceDifference: Decimal? {
-        guard let monthlyLimit = insights.monthlyLimit, monthStart <= Date.now else {
-            return nil
-        }
-        let idealSpent = monthlyLimit * Decimal(idealProgress(at: spendingEnd))
-        return idealSpent - insights.spent
-    }
-
-    private var monthStart: Date {
-        BudgetMonth.start(of: month)
-    }
-
-    private var chartEnd: Date {
-        Calendar.current.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
-    }
-
-    private var spendingEnd: Date {
-        if monthStart > Date.now {
-            return monthStart
-        }
-        if Calendar.current.isDate(monthStart, equalTo: .now, toGranularity: .month) {
-            let startOfToday = Calendar.current.startOfDay(for: .now)
-            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? Date.now
-            return min(tomorrow, chartEnd)
-        }
-        return chartEnd
-    }
-
-    private var spendingPoints: [DashboardChartPoint] {
-        var points = [DashboardChartPoint(id: 0, date: monthStart, amount: 0)]
-        var runningTotal = Decimal.zero
-
-        let expenses = transactions
-            .filter { $0.kind == .expense && $0.occurredAt >= monthStart && $0.occurredAt < chartEnd && $0.occurredAt <= spendingEnd }
-            .sorted { $0.occurredAt < $1.occurredAt }
-
-        for transaction in expenses {
-            guard let amount = Decimal(string: transaction.amount) else {
-                continue
-            }
-            runningTotal += amount
-            points.append(
-                DashboardChartPoint(
-                    id: points.count,
-                    date: transaction.occurredAt,
-                    amount: decimalValue(runningTotal)
-                )
-            )
-        }
-
-        if points.last?.date != spendingEnd {
-            points.append(
-                DashboardChartPoint(
-                    id: points.count,
-                    date: spendingEnd,
-                    amount: decimalValue(runningTotal)
-                )
-            )
-        }
-        return points
-    }
-
-    private var spendingSegments: [DashboardChartSegment] {
-        zip(spendingPoints, spendingPoints.dropFirst()).enumerated().map { index, pair in
-            DashboardChartSegment(
-                id: index,
-                start: pair.0,
-                end: pair.1,
-                color: color(for: pair.1)
-            )
-        }
-    }
-
-    private var budgetPacePoints: [DashboardChartPoint] {
-        guard let monthlyLimit = insights.monthlyLimit else {
-            return []
-        }
-        return [
-            DashboardChartPoint(id: 0, date: monthStart, amount: 0),
-            DashboardChartPoint(id: 1, date: chartEnd, amount: decimalValue(monthlyLimit))
-        ]
-    }
-
-    private var chartMaximum: Double {
-        let spentMaximum = spendingPoints.map(\.amount).max() ?? 0
-        let budgetMaximum = insights.monthlyLimit.map(decimalValue) ?? 0
-        return max(spentMaximum, budgetMaximum, 1) * 1.12
-    }
-
-    private var chartMinimum: Double {
-        -chartMaximum * 0.16
-    }
-
-    private func money(_ value: Decimal) -> String {
-        value.formatted(
-            .currency(code: currency)
-                .precision(.fractionLength(0...2))
+    init(selection: Binding<Date>, range: ClosedRange<Date>) {
+        _selection = selection
+        self.range = range
+        _displayedYear = State(
+            initialValue: Calendar.current.component(.year, from: selection.wrappedValue)
         )
     }
 
-    private func decimalValue(_ value: Decimal) -> Double {
-        NSDecimalNumber(decimal: value).doubleValue
-    }
-
-    private func idealProgress(at date: Date) -> Double {
-        let duration = chartEnd.timeIntervalSince(monthStart)
-        guard duration > 0 else {
-            return 0
-        }
-        let elapsed = min(max(date.timeIntervalSince(monthStart), 0), duration)
-        return elapsed / duration
-    }
-
-    private func color(for point: DashboardChartPoint) -> Color {
-        guard let monthlyLimit = insights.monthlyLimit else {
-            return .accentColor
-        }
-
-        let budget = decimalValue(monthlyLimit)
-        guard budget > 0 else {
-            return .accentColor
-        }
-
-        let usedProgress = point.amount / budget
-        if usedProgress > 1 {
-            return .red
-        }
-
-        let differenceFromIdeal = usedProgress - idealProgress(at: point.date)
-        if differenceFromIdeal <= 0 {
-            return .green
-        }
-        if differenceFromIdeal < 0.2 {
-            return Color(red: 1, green: 0.64, blue: 0.14)
-        }
-        return Color(red: 0.93, green: 0.32, blue: 0.06)
-    }
-}
-
-private struct DashboardChartPoint: Identifiable {
-    let id: Int
-    let date: Date
-    let amount: Double
-}
-
-private struct DashboardChartSegment: Identifiable {
-    let id: Int
-    let start: DashboardChartPoint
-    let end: DashboardChartPoint
-    let color: Color
-}
-
-private struct DashboardHighlightPlaceholder: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ProgressView()
-            RoundedRectangle(cornerRadius: 8).fill(.secondary.opacity(0.12)).frame(height: 34)
-            RoundedRectangle(cornerRadius: 4).fill(.secondary.opacity(0.10)).frame(height: 8)
-            RoundedRectangle(cornerRadius: 8).fill(.secondary.opacity(0.08)).frame(height: 58)
-        }
-        .dashboardCardStyle()
-    }
-}
+        VStack(spacing: 16) {
+            HStack {
+                Button {
+                    displayedYear -= 1
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 32, height: 32)
+                }
+                .disabled(displayedYear <= earliestYear)
+                .accessibilityLabel("Previous year")
 
-private struct DashboardMessageCard: View {
-    let title: String
-    let message: String
-    let systemImage: String
+                Spacer()
 
-    var body: some View {
-        HStack(spacing: 15) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 48, height: 48)
-                .background(Color.accentColor.opacity(0.14), in: Circle())
+                Text(verbatim: String(displayedYear))
+                    .font(.headline)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
-                Text(message).font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+
+                Button {
+                    displayedYear += 1
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 32, height: 32)
+                }
+                .disabled(displayedYear >= latestYear)
+                .accessibilityLabel("Next year")
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(months, id: \.self) { month in
+                    Button {
+                        selection = month
+                        dismiss()
+                    } label: {
+                        Text(month.formatted(.dateTime.month(.abbreviated)))
+                            .font(.subheadline.weight(isSelected(month) ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .foregroundStyle(isSelected(month) ? .white : .primary)
+                            .background(
+                                isSelected(month) ? Color.accentColor : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isAvailable(month))
+                    .accessibilityLabel(month.formatted(.dateTime.month(.wide).year()))
+                    .accessibilityAddTraits(isSelected(month) ? .isSelected : [])
+                }
             }
         }
-        .dashboardCardStyle()
+        .padding(16)
+        .frame(width: 300)
+        .onAppear {
+            displayedYear = calendar.component(.year, from: selection)
+        }
+    }
+
+    private var earliestYear: Int {
+        calendar.component(.year, from: range.lowerBound)
+    }
+
+    private var latestYear: Int {
+        calendar.component(.year, from: range.upperBound)
+    }
+
+    private var months: [Date] {
+        (1...12).compactMap { month in
+            calendar.date(from: DateComponents(year: displayedYear, month: month, day: 1))
+        }
+    }
+
+    private func isAvailable(_ month: Date) -> Bool {
+        month >= range.lowerBound && month <= range.upperBound
+    }
+
+    private func isSelected(_ month: Date) -> Bool {
+        calendar.isDate(month, equalTo: selection, toGranularity: .month)
     }
 }
 
-private extension View {
-    func dashboardCardStyle() -> some View {
-        padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Color(uiColor: .secondarySystemGroupedBackground),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+private extension FinanceTransaction {
+    func replacingAmount(_ amount: String, currency: String) -> FinanceTransaction {
+        FinanceTransaction(
+            id: id,
+            accountId: accountId,
+            kind: kind,
+            amount: amount,
+            currency: currency,
+            category: category,
+            merchant: merchant,
+            payee: payee,
+            note: note,
+            occurredAt: occurredAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            recurrence: recurrence
+        )
+    }
+}
+
+private extension MonthlyBudget {
+    @MainActor
+    func converted(to currency: String, using rates: ExchangeRateStore) -> MonthlyBudget? {
+        guard self.currency.caseInsensitiveCompare(currency) != .orderedSame else {
+            return self
+        }
+
+        func convert(_ amount: String) -> String? {
+            guard let decimal = Decimal(
+                string: amount,
+                locale: Locale(identifier: "en_US_POSIX")
+            ), let converted = rates.convert(
+                decimal,
+                from: self.currency,
+                to: currency
+            ) else {
+                return nil
+            }
+            var value = converted
+            var rounded = Decimal()
+            NSDecimalRound(&rounded, &value, 4, .bankers)
+            return NSDecimalNumber(decimal: rounded).stringValue
+        }
+
+        let convertedLimit: String?
+        if let monthlyLimit {
+            guard let value = convert(monthlyLimit) else { return nil }
+            convertedLimit = value
+        } else {
+            convertedLimit = nil
+        }
+
+        let convertedGroups = groups.compactMap { group -> BudgetGroup? in
+            guard let limit = convert(group.limit) else { return nil }
+            return BudgetGroup(
+                id: group.id,
+                name: group.name,
+                limit: limit,
+                sortOrder: group.sortOrder
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
+        }
+        guard convertedGroups.count == groups.count else { return nil }
+
+        let convertedAssignments = categoryAssignments.compactMap {
+            assignment -> BudgetCategoryAssignment? in
+            guard let currentLimit = assignment.limit else {
+                return BudgetCategoryAssignment(
+                    categoryId: assignment.categoryId,
+                    groupId: assignment.groupId,
+                    limit: nil
+                )
             }
+            guard let limit = convert(currentLimit) else { return nil }
+            return BudgetCategoryAssignment(
+                categoryId: assignment.categoryId,
+                groupId: assignment.groupId,
+                limit: limit
+            )
+        }
+        guard convertedAssignments.count == categoryAssignments.count else { return nil }
+
+        return MonthlyBudget(
+            id: id,
+            accountId: accountId,
+            month: month,
+            currency: currency,
+            monthlyLimit: convertedLimit,
+            groups: convertedGroups,
+            categoryAssignments: convertedAssignments,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 }
 
-#Preview {
+#Preview("Dashboard") {
     DashboardView()
-        .environmentObject(AccountStore())
-        .environmentObject(BudgetStore.preview())
-        .environmentObject(TransactionStore())
+        .environmentObject(
+            AccountStore.preview(
+                accounts: [DashboardPreviewData.account],
+                selectedAccountID: DashboardPreviewData.account.id
+            )
+        )
+        .environmentObject(BudgetStore.preview(DashboardPreviewData.budget))
+        .environmentObject(ExchangeRateStore())
+        .environmentObject(
+            TransactionStore.preview(transactions: DashboardPreviewData.transactions)
+        )
+        .preferredColorScheme(.dark)
+}
+
+private enum DashboardPreviewData {
+    static let now = Date.now
+    static let account = Account(
+        id: UUID(),
+        name: "Everyday card",
+        type: .checking,
+        currency: "KZT",
+        icon: "creditcard.fill",
+        iconColor: .blue,
+        createdAt: "",
+        updatedAt: ""
+    )
+
+    static let budget = MonthlyBudget(
+        id: UUID(),
+        accountId: account.id,
+        month: BudgetMonth.key(for: now),
+        currency: account.currency,
+        monthlyLimit: "1200000",
+        groups: [],
+        categoryAssignments: [],
+        createdAt: now,
+        updatedAt: now
+    )
+
+    static let food = category(
+        systemKey: "expense.food-drink",
+        name: "Food & Drink",
+        icon: "fork.knife",
+        color: .orange
+    )
+    static let housing = category(
+        systemKey: "expense.housing",
+        name: "Housing",
+        icon: "house.fill",
+        color: .blue
+    )
+    static let shopping = category(
+        systemKey: "expense.shopping",
+        name: "Shopping",
+        icon: "bag.fill",
+        color: .purple
+    )
+    static let salary = TransactionCategory(
+        id: UUID(),
+        systemKey: "income.salary",
+        name: "Salary",
+        kind: .income,
+        icon: "banknote.fill",
+        color: .green,
+        isSystem: true,
+        examples: nil,
+        sortOrder: nil,
+        createdAt: now,
+        updatedAt: now
+    )
+
+    static let transactions = [
+        transaction(
+            kind: .expense,
+            amount: "520000",
+            category: housing
+        ),
+        transaction(
+            kind: .expense,
+            amount: "310000",
+            category: food
+        ),
+        transaction(
+            kind: .expense,
+            amount: "195265.84",
+            category: shopping
+        ),
+        transaction(
+            kind: .income,
+            amount: "2400000",
+            category: salary
+        ),
+    ]
+
+    private static func category(
+        systemKey: String,
+        name: String,
+        icon: String,
+        color: CategoryColor
+    ) -> TransactionCategory {
+        TransactionCategory(
+            id: UUID(),
+            systemKey: systemKey,
+            name: name,
+            kind: .expense,
+            icon: icon,
+            color: color,
+            isSystem: true,
+            examples: nil,
+            sortOrder: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    private static func transaction(
+        kind: TransactionKind,
+        amount: String,
+        category: TransactionCategory
+    ) -> FinanceTransaction {
+        FinanceTransaction(
+            id: UUID(),
+            accountId: account.id,
+            kind: kind,
+            amount: amount,
+            currency: account.currency,
+            category: category,
+            note: nil,
+            occurredAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
 }

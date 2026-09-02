@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -29,6 +30,13 @@ export const transactionKind = pgEnum("transaction_kind", [
   "income",
 ]);
 
+export const recurrenceFrequency = pgEnum("recurrence_frequency", [
+  "daily",
+  "weekly",
+  "monthly",
+  "yearly",
+]);
+
 export const accounts = pgTable("accounts", {
   id: uuid().defaultRandom().primaryKey(),
   name: varchar({ length: 120 }).notNull(),
@@ -36,6 +44,7 @@ export const accounts = pgTable("accounts", {
   currency: varchar({ length: 3 }).notNull(),
   icon: varchar({ length: 80 }).default("creditcard.fill").notNull(),
   iconColor: varchar({ length: 20 }).default("blue").notNull(),
+  sortOrder: integer().default(1_000).notNull(),
   createdAt: timestamp({ withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -88,8 +97,8 @@ export const categories = pgTable(
   ],
 );
 
-export const transactions = pgTable(
-  "transactions",
+export const recurringSchedules = pgTable(
+  "recurring_schedules",
   {
     id: uuid().defaultRandom().primaryKey(),
     accountId: uuid()
@@ -103,8 +112,48 @@ export const transactions = pgTable(
     }),
     merchant: text(),
     payee: text(),
-    description: text(),
-    normalizedDescription: text(),
+    note: text(),
+    frequency: recurrenceFrequency().notNull(),
+    startAt: timestamp({ withTimezone: true }).notNull(),
+    lastOccurrenceAt: timestamp({ withTimezone: true }).notNull(),
+    nextOccurrenceAt: timestamp({ withTimezone: true }),
+    endAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp({ withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("recurring_schedules_next_occurrence_at_idx").on(
+      table.nextOccurrenceAt,
+    ),
+    check(
+      "recurring_schedules_end_after_start",
+      sql`${table.endAt} is null or ${table.endAt} >= ${table.startAt}`,
+    ),
+  ],
+);
+
+export const transactions = pgTable(
+  "transactions",
+  {
+    id: uuid().defaultRandom().primaryKey(),
+    accountId: uuid()
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    kind: transactionKind().notNull(),
+    amount: numeric({ precision: 19, scale: 4 }).notNull(),
+    currency: varchar({ length: 3 }).notNull(),
+    categoryId: uuid().references(() => categories.id, {
+      onDelete: "set null",
+    }),
+    recurringScheduleId: uuid().references(() => recurringSchedules.id, {
+      onDelete: "set null",
+    }),
+    merchant: text(),
+    payee: text(),
     note: text(),
     occurredAt: timestamp({ withTimezone: true }).notNull(),
     createdAt: timestamp({ withTimezone: true })
@@ -117,17 +166,42 @@ export const transactions = pgTable(
   (table) => [
     index("transactions_account_id_idx").on(table.accountId),
     index("transactions_category_id_idx").on(table.categoryId),
-    index("transactions_occurred_at_idx").on(table.occurredAt),
-    index("transactions_kind_normalized_description_idx").on(
-      table.kind,
-      table.normalizedDescription,
+    index("transactions_recurring_schedule_id_idx").on(
+      table.recurringScheduleId,
     ),
-    index("transactions_normalized_description_trgm_idx")
-      .using(
-        "gist",
-        table.normalizedDescription.asc().op("gist_trgm_ops"),
-      )
-      .where(sql`${table.normalizedDescription} is not null`),
+    uniqueIndex("transactions_schedule_occurrence_unique")
+      .on(table.recurringScheduleId, table.occurredAt)
+      .where(sql`${table.recurringScheduleId} is not null`),
+    index("transactions_occurred_at_idx").on(table.occurredAt),
+  ],
+);
+
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
+    baseCurrency: varchar({ length: 3 }).notNull(),
+    quoteCurrency: varchar({ length: 3 }).notNull(),
+    rate: numeric({ precision: 30, scale: 15 }).notNull(),
+    effectiveDate: date({ mode: "string" }).notNull(),
+    provider: varchar({ length: 40 }).default("frankfurter").notNull(),
+    fetchedAt: timestamp({ withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "exchange_rates_base_quote_date_provider_pk",
+      columns: [
+        table.baseCurrency,
+        table.quoteCurrency,
+        table.effectiveDate,
+        table.provider,
+      ],
+    }),
+    index("exchange_rates_latest_idx").on(
+      table.baseCurrency,
+      table.quoteCurrency,
+      table.effectiveDate,
+    ),
+    check("exchange_rates_rate_positive", sql`${table.rate} > 0`),
   ],
 );
 
@@ -234,6 +308,10 @@ export type Category = typeof categories.$inferSelect;
 export type NewCategory = typeof categories.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
+export type RecurringSchedule = typeof recurringSchedules.$inferSelect;
+export type NewRecurringSchedule = typeof recurringSchedules.$inferInsert;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type NewExchangeRate = typeof exchangeRates.$inferInsert;
 export type BudgetPlan = typeof budgetPlans.$inferSelect;
 export type NewBudgetPlan = typeof budgetPlans.$inferInsert;
 export type BudgetGroup = typeof budgetGroups.$inferSelect;
