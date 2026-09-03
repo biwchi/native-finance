@@ -124,11 +124,14 @@ final class FinanceOverviewTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         for scheme in [ColorScheme.light, .dark] {
             for size in [DynamicTypeSize.large, .accessibility3] {
-                let view = VStack(spacing: 16) {
-                    FinanceMonthHeader(title: "Overview", month: .constant(now))
-                    MonthlySummaryCompactView(state: summary, showsPlannedBills: true, plannedBills: planned)
-                    FinanceMetricCards(first: .init(title: "Income", amount: 30000),
-                                       second: .init(title: "Net", amount: 19967, signed: true), currency: "RUB")
+                let view = NavigationStack {
+                    VStack(spacing: 16) {
+                        FinancePageHeader(title: "Overview")
+                        MonthlySummaryCompactView(state: summary, showsPlannedBills: true, plannedBills: planned)
+                        FinanceMetricCards(first: .init(title: "Income", amount: 30000),
+                                           second: .init(title: "Net", amount: 19967, signed: true), currency: "RUB")
+                    }
+                    .financeMonthPickerToolbar(month: .constant(now))
                 }
                 .padding(16)
                 .environment(\.dynamicTypeSize, size)

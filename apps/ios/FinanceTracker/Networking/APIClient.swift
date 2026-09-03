@@ -1,18 +1,5 @@
 import Foundation
 
-enum APIClientError: LocalizedError {
-    case invalidResponse
-    case requestFailed(status: Int, message: String?)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            "The backend returned an invalid response."
-        case let .requestFailed(status, message):
-            message ?? "The request failed with HTTP status \(status)."
-        }
-    }
-}
 
 struct APIClient: Sendable {
     let baseURL: URL
@@ -325,7 +312,7 @@ struct APIClient: Sendable {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = try? JSONDecoder().decode(ErrorResponse.self, from: data).message
+            let message = try? JSONDecoder().decode(APIErrorResponse.self, from: data).message
             throw APIClientError.requestFailed(
                 status: httpResponse.statusCode,
                 message: message
@@ -398,8 +385,4 @@ struct APIClient: Sendable {
 
         return url
     }
-}
-
-private struct ErrorResponse: Decodable {
-    let message: String
 }

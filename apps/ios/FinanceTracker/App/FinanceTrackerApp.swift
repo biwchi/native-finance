@@ -11,7 +11,7 @@ struct FinanceTrackerApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
-                .tint(Color("AccentColor"))
+                .tint(AppColor.accent)
                 .environmentObject(accountStore)
                 .environmentObject(budgetStore)
                 .environmentObject(exchangeRateStore)
