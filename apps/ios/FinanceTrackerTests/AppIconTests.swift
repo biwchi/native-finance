@@ -22,6 +22,29 @@ final class AppIconTests: XCTestCase {
         XCTAssertEqual(CategoryIconCatalog.group(containing: "cup.and.saucer.fill")?.title, "Food")
     }
 
+    func testSavedIconoirIdentifiersResolveToHugeiconsArtwork() {
+        let examples = [
+            "credit-card": "creditCard",
+            "cash": "cash01",
+            "coffee-cup": "coffee02",
+            "cutlery": "restaurant01",
+            "home-simple": "home03",
+            "graph-up": "chartIncrease",
+            "label": "tag01",
+            "arrow-down-left-circle": "circleArrowDownLeft",
+            "arrow-up-right-circle": "circleArrowUpRight",
+        ]
+        for (identifier, expected) in examples {
+            XCTAssertEqual(AppIcons.canonicalName(identifier), identifier)
+            XCTAssertEqual(AppIcons.resolve(identifier).swiftIdentifier, expected)
+        }
+        for (saved, identifier) in AppIcons.legacyNames {
+            XCTAssertNotNil(AppIcons.artwork[identifier], "Unmapped saved icon: \(saved)")
+            XCTAssertEqual(AppIcons.resolve(saved), AppIcons.resolve(identifier))
+        }
+        XCTAssertEqual(AppIcons.canonicalName("nosign"), "prohibition")
+    }
+
     func testAllPickerChoicesAndLegacyIconsHaveBundledArtwork() throws {
         let choices = CategoryIconCatalog.choices
             + CategoryIconCatalog.groups.map(\.symbol)
@@ -29,9 +52,10 @@ final class AppIconTests: XCTestCase {
             + AccountType.allCases.map(\.iconName)
             + AppTheme.allCases.map(\.iconName)
         for name in Set(choices) {
-            XCTAssertEqual(AppIcons.canonicalName(name), name, "Invalid Iconoir choice: \(name)")
+            XCTAssertNotNil(AppIcons.artwork[name], "Missing Hugeicons mapping: \(name)")
+            XCTAssertEqual(AppIcons.canonicalName(name), name, "Invalid icon choice: \(name)")
         }
-        for name in Set(choices + Array(AppIcons.legacyNames.keys)) {
+        for name in Set(choices + Array(AppIcons.legacyNames.keys) + Array(AppIcons.artwork.keys)) {
             let image = try XCTUnwrap(AppIcons.uiImage(named: name), "Missing artwork: \(name)")
             XCTAssertEqual(image.renderingMode, .alwaysTemplate)
             XCTAssertGreaterThan(image.size.width, 0)
@@ -62,7 +86,7 @@ final class AppIconTests: XCTestCase {
     func testIconControlsRenderInBothAppearances() throws {
         for scheme in [ColorScheme.light, .dark] {
             let content = VStack(alignment: .leading, spacing: 20) {
-                Text("Iconoir · Finance Tracker").font(.title2.bold())
+                Text("Hugeicons Stroke Rounded · Finance Tracker").font(.title2.bold())
                 HStack(spacing: 24) {
                     ForEach(["home-simple", "settings", "plus", "calendar", "percentage-circle", "coins-swap"], id: \.self) {
                         AppIcon($0, size: 24)
@@ -106,7 +130,7 @@ final class AppIconTests: XCTestCase {
                 XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "Iconoir controls — \(scheme)"
+            attachment.name = "Hugeicons controls — \(scheme)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }

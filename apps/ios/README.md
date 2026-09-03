@@ -1,12 +1,12 @@
 # iOS client
 
-Open `FinanceTracker.xcodeproj` in Xcode 26 or newer to build the iOS 26 Liquid Glass tab bar. Simulator builds connect to `http://localhost:3000`.
+Open `FinanceTracker.xcodeproj` in Xcode 26 or newer to build the iOS 26 Liquid Glass tab bar. Simulator Debug builds connect to `http://127.0.0.1:3000` to match the backend's IPv4 listener. Using `localhost` can reach another development server listening on IPv6 port 3000 and return a 404 even while this backend is running.
 
 ## Icons
 
-App icons use the official [Iconoir Swift package](https://github.com/iconoir-icons/iconoir-swift), pinned to revision `66391f61281c4c203ae2003ebf66627dc849f233`. Xcode resolves it through Swift Package Manager. Its MIT notice is included in the app's `ThirdPartyNotices.txt` resource.
+App icons use the free Hugeicons Stroke Rounded set through the [Hugeicons Swift package](https://github.com/iSapozhnik/hugeicons-swift), pinned to revision `81caddf04ce5352652ffaa619562f02477dbf35d`. This is a community-maintained Swift wrapper around `@hugeicons/core-free-icons`. Xcode resolves it through Swift Package Manager. License notices are included in the app's `ThirdPartyNotices.txt` resource.
 
-Use `AppIcon` for explicitly sized, Dynamic Type-aware icons, `Label(..., icon: ...)` for native labels and menus, and `AppIcons.uiImage(named:)` for UIKit tab items. Use Iconoir's kebab-case names. `AppIcons` translates previously saved SF Symbols names for account/category compatibility; new picker choices use Iconoir names. Icons without an exact equivalent use the closest available artwork, and unknown saved names show a tag.
+Use `AppIcon` for explicitly sized, Dynamic Type-aware icons, `Label(..., icon: ...)` for native labels and menus, and `AppIcons.uiImage(named:)` for UIKit tab items. `AppIcons.artwork` maps stable app identifiers to Hugeicons artwork. Existing Iconoir identifiers and older SF Symbols names remain compatible with saved accounts and categories. Keep using the app identifiers in picker choices; add new artwork mappings in `AppIcons` when needed. Icons without an exact equivalent use the closest available artwork, and unknown saved names show a tag.
 
 Run `AppIconTests` and `AccentControlContrastTests` when changing icon rendering or the icon catalog. The rendering tests attach light/dark samples to the Xcode test results.
 

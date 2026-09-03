@@ -358,7 +358,7 @@ struct BudgetSettingsView: View {
     }
 
     private func money(_ value: Decimal) -> String {
-        value.formatted(.currency(code: currency).precision(.fractionLength(0...2)))
+        MoneyFormatter.format(value, currency: currency)
     }
 
     private var monthName: String {
@@ -633,21 +633,33 @@ private struct BudgetAmountField: View {
     let title: String
     @Binding var text: String
     let currency: String
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         LabeledContent(title) {
-            HStack(spacing: 6) {
-                TextField("0", text: $text)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .keyboardType(.decimalPad)
-
+            HStack(spacing: 0) {
                 if !currency.isEmpty {
-                    Text(currency)
+                    Text(MoneyFormatter.symbol(for: currency))
                         .foregroundStyle(.secondary)
                 }
+
+                TextField(MoneyFormatter.number(.zero), text: displayedText)
+                    .fixedSize()
+                    .monospacedDigit()
+                    .keyboardType(.decimalPad)
+                    .focused($isFocused)
             }
         }
+    }
+
+    private var displayedText: Binding<String> {
+        Binding(
+            get: {
+                if isFocused { return text }
+                return MoneyFormatter.parseInput(text).map(MoneyFormatter.number) ?? text
+            },
+            set: { text = $0.replacingOccurrences(of: ".", with: MoneyFormatter.decimalSeparator) }
+        )
     }
 }
 
@@ -692,7 +704,7 @@ private struct BudgetDraftError: Error {
 }
 
 private func parsedAmount(_ value: String) -> Decimal? {
-    guard let amount = Decimal(string: value.replacingOccurrences(of: ",", with: ".")), amount > 0 else {
+    guard let amount = MoneyFormatter.parseInput(value), amount > 0 else {
         return nil
     }
     return amount
@@ -704,8 +716,8 @@ private func normalizedAmount(_ value: String) -> String? {
 
 private func editableAmount(_ value: String?) -> String {
     guard let value,
-          let amount = Decimal(string: value.replacingOccurrences(of: ",", with: ".")) else {
+          let amount = MoneyFormatter.parseInput(value) else {
         return value ?? ""
     }
-    return NSDecimalNumber(decimal: amount).stringValue
+    return MoneyFormatter.editingText(amount)
 }

@@ -1,53 +1,28 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var monthlySummaryCardBackground = Color(uiColor: .secondarySystemGroupedBackground)
+}
+
 struct MonthlySummaryCompactView: View {
     let state: MonthlySummaryState
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.colorSchemeContrast) private var contrast
-    @ScaledMetric(relativeTo: .title) private var amountSize = 32
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline) {
-                    month.fixedSize()
-                    Spacer(minLength: 12)
-                    status.fixedSize()
+        MonthlySummaryCard(monthTitle: state.monthTitle) {
+            Text(state.status.displayText)
+                .foregroundStyle(state.status == .onTrack ? .secondary : statusTint)
+        } content: {
+            MonthlySummaryContent {
+                MonthlySummaryAmount(amount: state.amountText, suffix: state.amountSuffix)
+                    .foregroundStyle(state.status == .overLimit ? statusTint : .primary)
+            } caption: {
+                MonthlySummaryRow {
+                    Text(state.spendingText)
+                } trailing: {
+                    Text(state.timeRemainingText)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    month
-                    status
-                }
-            }
-            .font(.subheadline)
-
-            VStack(alignment: .leading, spacing: 2) {
-                (
-                    Text(state.amountText)
-                        .font(.system(size: amountSize, weight: .semibold))
-                    + Text(" " + state.amountSuffix)
-                        .font(.title3.weight(.regular))
-                )
-                .foregroundStyle(state.status == .overLimit ? statusTint : .primary)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline) {
-                        spending.fixedSize()
-                        Spacer(minLength: 12)
-                        timeRemaining.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        spending
-                        timeRemaining
-                    }
-                }
-                .font(.footnote)
-                .foregroundStyle(contrast == .increased ? .primary : .secondary)
-                .fixedSize(horizontal: false, vertical: true)
             }
 
             BudgetProgressBar(
@@ -56,37 +31,98 @@ struct MonthlySummaryCompactView: View {
                 tint: state.status == .onTrack ? .accentColor : statusTint
             )
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 16 : 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(state.accessibilityLabel)
     }
 
-    private var month: some View {
-        Text(state.monthTitle)
-            .foregroundStyle(.primary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var status: some View {
-        Text(state.status.displayText)
-            .foregroundStyle(state.status == .onTrack ? .secondary : statusTint)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var spending: some View {
-        Text(state.spendingText).monospacedDigit()
-    }
-
-    private var timeRemaining: some View {
-        Text(state.timeRemainingText).monospacedDigit()
-    }
-
     private var statusTint: Color { state.status.tint(for: colorScheme) }
+}
+
+/// Both budget and activity cards use these same layout and typography roles.
+struct MonthlySummaryCard<Accessory: View, Content: View>: View {
+    let monthTitle: String
+    @ViewBuilder let accessory: Accessory
+    @ViewBuilder let content: Content
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.monthlySummaryCardBackground) private var cardBackground
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MonthlySummaryRow {
+                Text(monthTitle)
+            } trailing: {
+                accessory
+            }
+            .font(.subheadline.weight(.regular))
+
+            content
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 20)
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 16 : 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground,
+                    in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+}
+
+struct MonthlySummaryRow<Leading: View, Trailing: View>: View {
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                leading.fixedSize()
+                Spacer(minLength: 12)
+                trailing.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                leading
+                trailing
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct MonthlySummaryContent<Headline: View, Caption: View>: View {
+    @ViewBuilder let headline: Headline
+    @ViewBuilder let caption: Caption
+
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            headline
+            caption
+                .font(.footnote)
+                .foregroundStyle(contrast == .increased ? .primary : .secondary)
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct MonthlySummaryAmount: View {
+    let amount: String
+    var suffix: String = ""
+
+    @ScaledMetric(relativeTo: .title) private var amountSize = 32
+
+    var body: some View {
+        (
+            Text(amount)
+                .font(.system(size: amountSize, weight: .semibold))
+            + Text(suffix.isEmpty ? "" : " " + suffix)
+                .font(.title3.weight(.regular))
+        )
+        .monospacedDigit()
+        .fixedSize(horizontal: false, vertical: true)
+        .contentTransition(.numericText())
+    }
 }
 
 extension BudgetStatus {

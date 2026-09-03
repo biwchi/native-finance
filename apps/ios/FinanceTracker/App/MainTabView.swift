@@ -236,12 +236,19 @@ private struct MainTabController: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UITabBarController {
         let controller = UITabBarController()
         controller.delegate = context.coordinator
-        controller.view.tintColor = UIColor(Color.accentColor)
+        controller.view.tintColor = UIColor(named: "AccentColor")
 
         // Keep the same hosting controllers (and navigation/scroll state) when the sheet opens.
         let home = hostingController(DashboardView(), title: "Home", iconName: "home-simple")
         let assistant = hostingController(AssistantView(), title: "Assistant", iconName: "sparks")
-        let settings = hostingController(SettingsView(), title: "Settings", iconName: "settings")
+        let settingsView = SettingsView { [weak controller] isVisible in
+            if #available(iOS 18.0, *) {
+                controller?.setTabBarHidden(isVisible, animated: true)
+            } else {
+                controller?.tabBar.isHidden = isVisible
+            }
+        }
+        let settings = hostingController(settingsView, title: "Settings", iconName: "settings")
         let add = context.coordinator.addViewController
         add.tabBarItem = UITabBarItem(title: "Add", image: AppIcons.uiImage(named: "plus"), tag: 0)
 
@@ -269,6 +276,7 @@ private struct MainTabController: UIViewControllerRepresentable {
     ) -> UIViewController {
         let controller = UIHostingController(
             rootView: content
+                .tint(Color("AccentColor"))
                 .environmentObject(accountStore)
                 .environmentObject(budgetStore)
                 .environmentObject(exchangeRateStore)

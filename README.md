@@ -24,10 +24,10 @@ in a `.env` file at the repository root and change the port in
 `docker compose up -d postgres` again before applying migrations. The root `.env`
 configures Docker Compose; `apps/backend/.env` configures the backend and migrations.
 
-The API listens on `http://localhost:3000`. Check it with:
+The API is reachable over IPv4 at `http://127.0.0.1:3000`. Check it with:
 
 ```sh
-curl http://localhost:3000/health
+curl http://127.0.0.1:3000/health
 ```
 
 Keep one backend running at a time. Stop it with **Ctrl+C** before restarting;
@@ -37,7 +37,7 @@ and `fg` in the terminal where you started it, then **Ctrl+C** to stop it.
 
 ## Run the iOS app
 
-Open `apps/ios/FinanceTracker.xcodeproj`, select an iPhone simulator or your connected iPhone, and run the `FinanceTracker` scheme. Simulator builds connect to `http://localhost:3000`. Device Debug builds automatically connect to your Mac at `http://<your-Mac-hostname>.local:3000`.
+Open `apps/ios/FinanceTracker.xcodeproj`, select an iPhone simulator or your connected iPhone, and run the `FinanceTracker` scheme. Simulator Debug builds connect to `http://127.0.0.1:3000`. Device Debug builds automatically connect to your Mac at `http://<your-Mac-hostname>.local:3000`.
 
 For a physical iPhone, keep both devices on the same Wi-Fi, leave the backend running with `HOST=0.0.0.0`, and allow Local Network access when the app asks. See [the iOS setup guide](apps/ios/README.md) for troubleshooting and API address overrides.
 

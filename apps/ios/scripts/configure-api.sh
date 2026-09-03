@@ -12,6 +12,11 @@ if [ "$CONFIGURATION" = "Debug" ]; then
     /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$plist"
     /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string Connect to the Finance Tracker development server on your Mac over Wi-Fi." "$plist"
 
+    if [ "$PLATFORM_NAME" = "iphonesimulator" ] && [ -z "$api_url" ]; then
+        # Match the backend's IPv4 listener; localhost may reach another IPv6 server.
+        api_url="http://127.0.0.1:3000"
+    fi
+
     if [ "$PLATFORM_NAME" = "iphoneos" ] && [ -z "$api_url" ]; then
         # Bonjour hostnames keep working when the Mac's Wi-Fi IP changes.
         local_hostname="$(/usr/sbin/scutil --get LocalHostName)" || local_hostname=""

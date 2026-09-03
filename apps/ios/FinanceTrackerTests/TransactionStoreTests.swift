@@ -153,7 +153,7 @@ final class TransactionStoreTests: XCTestCase {
                 return (200, Data("[]".utf8))
             }
             if request.httpMethod == "GET" {
-                XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, accountID.uuidString)
+                XCTAssertNil(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems)
                 return (200, try self.encode([original]))
             }
             return (200, try self.encode(moved))
@@ -164,6 +164,9 @@ final class TransactionStoreTests: XCTestCase {
         try await store.updateTransaction(id: original.id, with: draft(moved))
 
         XCTAssertTrue(store.transactions.isEmpty)
+        XCTAssertEqual(store.allTransactions, [moved])
+        XCTAssertEqual(store.balance(accountID: accountID, currency: "USD", rates: nil), 0)
+        XCTAssertEqual(store.balance(accountID: moved.accountId, currency: "USD", rates: nil), Decimal(string: "-12.5"))
         XCTAssertEqual(store.state, .loaded)
     }
 
@@ -211,6 +214,8 @@ final class TransactionStoreTests: XCTestCase {
         try await store.deleteTransaction(transaction)
 
         XCTAssertTrue(store.transactions.isEmpty)
+        XCTAssertTrue(store.allTransactions.isEmpty)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: nil), 0)
         XCTAssertEqual(store.state, .loaded)
     }
 
@@ -403,15 +408,134 @@ final class TransactionStoreTests: XCTestCase {
         XCTAssertEqual(store.upcomingTransactions, [item])
     }
 
+    func testAllBalancesRemainAvailableWhileDashboardFiltersOneAccount() async throws {
+        let firstID = UUID()
+        let secondID = UUID()
+        let income = transaction(accountID: firstID, kind: .income, amount: "100")
+        let expense = transaction(accountID: firstID, amount: "25")
+        let otherIncome = transaction(accountID: secondID, kind: .income, amount: "50")
+        let all = [income, expense, otherIncome]
+        let session = makeSession { request in
+            if request.url?.lastPathComponent == "upcoming" {
+                return (200, Data("[]".utf8))
+            }
+            XCTAssertNil(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems)
+            return (200, try self.encode(all))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+
+        await store.loadTransactions(accountID: firstID)
+        XCTAssertEqual(store.transactions, [income, expense])
+        XCTAssertEqual(store.allTransactions, all)
+        XCTAssertEqual(store.balance(accountID: firstID, currency: "USD", rates: nil), 75)
+        XCTAssertEqual(store.balance(accountID: secondID, currency: "USD", rates: nil), 50)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: nil), 125)
+        XCTAssertEqual(store.balance(accountID: UUID(), currency: "USD", rates: nil), 0)
+
+        await store.loadTransactions(accountID: secondID)
+        XCTAssertEqual(store.transactions, [otherIncome])
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: nil), 125)
+    }
+
+    func testBalancesConvertEveryCurrencyAndDoNotReturnPartialTotals() {
+        let euros = transaction(accountID: UUID(), kind: .income, amount: "100", currency: "EUR")
+        let dollars = transaction(accountID: UUID(), amount: "25")
+        let store = TransactionStore.preview(transactions: [euros, dollars])
+        let rates = ExchangeRateSnapshot(
+            baseCurrency: "USD", reportingCurrency: "USD",
+            quotes: [
+                ExchangeRateQuote(currency: "USD", rate: "1", effectiveDate: "2026-09-03"),
+                ExchangeRateQuote(currency: "EUR", rate: "0.8", effectiveDate: "2026-09-03"),
+            ],
+            fetchedAt: .now, stale: false
+        )
+
+        XCTAssertEqual(store.balance(accountID: euros.accountId, currency: "EUR", rates: nil), 100)
+        XCTAssertEqual(store.balance(accountID: dollars.accountId, currency: "USD", rates: nil), -25)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: rates), 100)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "EUR", rates: rates), 80)
+        XCTAssertNil(store.balance(accountID: nil, currency: "USD", rates: nil))
+        XCTAssertNil(store.balance(accountID: nil, currency: "JPY", rates: rates))
+    }
+
+    func testCreatingTransactionInAnotherAccountUpdatesItsBalanceWithoutAddingDashboardRow() async throws {
+        let selected = transaction(accountID: UUID(), kind: .income, amount: "100")
+        let created = transaction(accountID: UUID(), kind: .income, amount: "40")
+        let session = makeSession { request in
+            if request.url?.lastPathComponent == "upcoming" {
+                return (200, Data("[]".utf8))
+            }
+            return request.httpMethod == "POST"
+                ? (201, try self.encode(created))
+                : (200, try self.encode([selected]))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: selected.accountId)
+        try await store.createTransaction(draft(created))
+
+        XCTAssertEqual(store.transactions, [selected])
+        XCTAssertEqual(store.balance(accountID: created.accountId, currency: "USD", rates: nil), 40)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: nil), 140)
+    }
+
+    func testTransferUpdatesBothAccountBalancesWithoutChangingCombinedBalance() async throws {
+        let fromID = UUID()
+        let toID = UUID()
+        let income = transaction(accountID: fromID, kind: .income, amount: "100")
+        let source = transaction(accountID: fromID, amount: "30")
+        let destination = transaction(accountID: toID, kind: .income, amount: "30")
+        let session = makeSession { request in
+            if request.url?.lastPathComponent == "upcoming" {
+                return (200, Data("[]".utf8))
+            }
+            if request.httpMethod == "POST" {
+                return (201, try self.encode(["source": source, "destination": destination]))
+            }
+            return (200, try self.encode([income]))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: fromID)
+        try await store.createTransfer(TransferRequest(
+            fromAccountId: fromID, toAccountId: toID, amount: "30",
+            merchant: nil, payee: nil, note: nil, occurredAt: .now
+        ))
+
+        XCTAssertEqual(store.transactions.count, 2)
+        XCTAssertTrue(store.transactions.allSatisfy { $0.accountId == fromID })
+        XCTAssertEqual(store.balance(accountID: fromID, currency: "USD", rates: nil), 70)
+        XCTAssertEqual(store.balance(accountID: toID, currency: "USD", rates: nil), 30)
+        XCTAssertEqual(store.balance(accountID: nil, currency: "USD", rates: nil), 100)
+    }
+
+    func testBalancesStayUnavailableUntilFullTransactionLoadSucceeds() async throws {
+        let created = transaction(accountID: UUID(), kind: .income, amount: "40")
+        let session = makeSession { request in
+            if request.httpMethod == "POST" {
+                return (201, try self.encode(created))
+            }
+            return (500, Data(#"{"message":"Unavailable"}"#.utf8))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        XCTAssertNil(store.balance(accountID: nil, currency: "USD", rates: nil))
+        await store.loadTransactions(accountID: nil)
+        try await store.createTransaction(draft(created))
+        XCTAssertNil(store.balance(accountID: nil, currency: "USD", rates: nil))
+    }
+
     private func upcomingTransaction(id: UUID = UUID(), accountID: UUID = UUID(), amount: String = "14.99") -> UpcomingTransaction {
         UpcomingTransaction(id: id, accountId: accountID, kind: .expense, amount: amount, currency: "USD", category: nil, merchant: "Netflix", payee: nil, note: nil, frequency: .monthly, occurredAt: ISO8601DateFormatter().date(from: "2100-01-31T12:00:00Z")!, endAt: ISO8601DateFormatter().date(from: "2100-12-31T12:00:00Z"))
     }
 
     private func transaction(
-        id: UUID = UUID(), accountID: UUID, occurredAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+        id: UUID = UUID(), accountID: UUID, occurredAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        kind: TransactionKind = .expense, amount: String = "12.5000", currency: String = "USD"
     ) -> FinanceTransaction {
         FinanceTransaction(
-            id: id, accountId: accountID, kind: .expense, amount: "12.5000", currency: "USD",
+            id: id, accountId: accountID, kind: kind, amount: amount, currency: currency,
             category: nil, note: nil, occurredAt: occurredAt,
             createdAt: Date(timeIntervalSince1970: 1_700_000_000), updatedAt: Date(timeIntervalSince1970: 1_700_002_000)
         )

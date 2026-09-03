@@ -40,7 +40,7 @@ struct MonthlySummaryState {
     let locale: Locale
     let calendar: Calendar
 
-    /// The dashboard hides the summary when no usable monthly limit is configured.
+    /// The dashboard shows an activity summary when no usable monthly limit is configured.
     /// Negative spending is treated as zero here, without altering transaction totals.
     init?(
         monthlyBudget: Decimal?,
@@ -133,14 +133,8 @@ struct MonthlySummaryState {
     }
 
     private func money(_ value: Decimal, spoken: Bool = false) -> String {
-        var style = Decimal.FormatStyle.Currency(code: currency)
-            .presentation(spoken ? .fullName : .narrow)
-            .locale(locale)
-        var source = value
-        var whole = Decimal()
-        NSDecimalRound(&whole, &source, 0, .plain)
-        // Keep ISO currency precision for fractional values, including JPY and KWD.
-        if whole == value { style = style.precision(.fractionLength(0)) }
-        return value.formatted(style)
+        spoken
+            ? MoneyFormatter.spoken(value, currency: currency, locale: locale)
+            : MoneyFormatter.format(value, currency: currency)
     }
 }

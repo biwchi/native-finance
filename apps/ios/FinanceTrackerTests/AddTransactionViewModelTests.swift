@@ -17,6 +17,7 @@ final class AddTransactionViewModelTests: XCTestCase {
         ["1", ",", "5", "+", "2", "⌫", "4", "/"].forEach { expression.enter($0) }
 
         XCTAssertEqual(expression.rawValue, "1.5+4/")
+        XCTAssertEqual(expression.displayValue, "1,5+4÷")
         XCTAssertEqual(expression.result, 5.5)
         XCTAssertEqual(expression.canonicalResult, "5.5")
     }
@@ -87,6 +88,21 @@ final class AddTransactionViewModelTests: XCTestCase {
         calculated.enter("2")
         XCTAssertEqual(calculated.rawValue, "12.5+2")
         XCTAssertEqual(calculated.canonicalResult, "14.5")
+    }
+
+    func testEditingPreservesStoredPrecisionWithoutReportingAnAmountChange() {
+        let date = Date(timeIntervalSince1970: 0)
+        let transaction = FinanceTransaction(
+            id: UUID(), accountId: UUID(), kind: .expense, amount: "62253.1230", currency: "KZT",
+            category: nil, note: nil, occurredAt: date, createdAt: date, updatedAt: date
+        )
+        let viewModel = AddTransactionViewModel(transaction: transaction)
+        XCTAssertEqual(viewModel.amountText, "62253.123")
+        XCTAssertEqual(viewModel.canonicalAmount(), "62253.123")
+        XCTAssertFalse(viewModel.hasChanges(from: transaction))
+        let expression = AmountExpression(rawValue: viewModel.amountText)
+        XCTAssertEqual(expression.canonicalResult, "62253.123")
+        XCTAssertEqual(expression.displayValue, "62253,123")
     }
 
     func testEditingPrefillsAndPreservesSavedFieldsWhileAccountsAndCategoriesLoad() {

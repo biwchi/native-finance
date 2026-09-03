@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    var onCurrencyPickerVisibilityChange: (Bool) -> Void = { _ in }
+
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var defaultCurrency = AppPreferences.initialCurrency
 
@@ -20,6 +22,8 @@ struct SettingsView: View {
                             currencyCodes: AppPreferences.currencyCodes
                         )
                         .navigationTitle("Default currency")
+                        .onAppear { onCurrencyPickerVisibilityChange(true) }
+                        .onDisappear { onCurrencyPickerVisibilityChange(false) }
                     } label: {
                         LabeledContent {
                             Text(currencyLabel)
@@ -29,15 +33,9 @@ struct SettingsView: View {
                         }
                     }
 
-                    Picker(selection: $theme) {
-                        ForEach(AppTheme.allCases) { theme in
-                            Label(theme.title, icon: theme.iconName)
-                                .tag(theme.rawValue)
-                        }
-                    } label: {
-                        Label("Theme", icon: "brightness")
+                    Toggle(isOn: isDarkTheme) {
+                        Label("Dark theme", icon: "half-moon")
                     }
-                    .pickerStyle(.navigationLink)
                 }
 
                 Section {
@@ -56,9 +54,17 @@ struct SettingsView: View {
                     } label: {
                         Label("Categories", icon: "label")
                     }
-                }            }
+                }
+            }
             .navigationTitle("Settings")
         }
+    }
+
+    private var isDarkTheme: Binding<Bool> {
+        Binding(
+            get: { (AppTheme(rawValue: theme) ?? .dark) == .dark },
+            set: { theme = ($0 ? AppTheme.dark : .light).rawValue }
+        )
     }
 
     private var currencyLabel: String {
@@ -207,7 +213,7 @@ private struct CategorySettingsView: View {
                     kind: category.kind
                 )
             }
-            .tint(.blue)
+            .tint(.gray)
         }
     }
 

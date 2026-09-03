@@ -12,7 +12,7 @@ struct AmountExpression: Equatable {
         rawValue
             .replacingOccurrences(of: "*", with: "×")
             .replacingOccurrences(of: "/", with: "÷")
-            .replacingOccurrences(of: ".", with: Locale.current.decimalSeparator ?? ".")
+            .replacingOccurrences(of: ".", with: MoneyFormatter.decimalSeparator)
     }
 
     var result: Decimal? {
@@ -180,9 +180,8 @@ final class AddTransactionViewModel: ObservableObject {
 
         if let transaction {
             accountID = transaction.accountId
-            amountText = Decimal(string: transaction.amount)?.formatted(
-                .number.grouping(.never).precision(.fractionLength(0...4))
-            ) ?? transaction.amount
+            amountText = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX"))
+                .map { NSDecimalNumber(decimal: $0).stringValue } ?? transaction.amount
             kind = transaction.kind
             categoryID = transaction.category?.id
             merchant = transaction.merchant ?? ""
@@ -343,8 +342,9 @@ final class AddTransactionViewModel: ObservableObject {
         scheduleCategoryResolution(categories: categories)
     }
 
-    func canonicalAmount(locale: Locale = .autoupdatingCurrent) -> String? {
-        canonicalTransactionAmount(amountText, locale: locale)
+    func canonicalAmount() -> String? {
+        // The keypad and command parser supply canonical dot-decimal strings.
+        canonicalTransactionAmount(amountText, locale: Locale(identifier: "en_US_POSIX"))
     }
 
     var canSave: Bool {

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var budgetStore: BudgetStore
@@ -35,17 +36,32 @@ struct DashboardView: View {
             }
             .listStyle(.insetGrouped)
             .listSectionSpacing(.custom(4))
-            .contentMargins(.top, 8, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .backgroundPreferenceValue(DashboardSummaryBoundsKey.self) { anchors in
+                monthlySummaryBackground(anchors)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
             .environment(\.defaultMinListRowHeight, 0)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    AccountSelector(compact: true)
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        AccountSelector(compact: true)
+                            // Compensate for the inset retained by the hidden system glass.
+                            .padding(.leading, -12)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        AccountSelector(compact: true)
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 0) {
-                        budgetSettingsButton
+                        if isAllAccounts {
+                            budgetSettingsButton
+                        }
 
                         Button {
                             isShowingMonthPicker = true
@@ -70,10 +86,7 @@ struct DashboardView: View {
             .refreshable { await reload() }
         }
         .task(id: budgetScopeKey) {
-            await budgetStore.loadBudget(
-                month: selectedMonth,
-                accountID: accountStore.selectedAccountID
-            )
+            await loadBudget()
         }
         .task(id: exchangeRateScopeKey) {
             await exchangeRateStore.load(
@@ -185,43 +198,61 @@ struct DashboardView: View {
     }
 
     private func money(_ value: Decimal, currency: String, spoken: Bool = false) -> String {
-        value.formatted(
-            .currency(code: currency)
-                .presentation(spoken ? .fullName : .narrow)
-                .locale(locale)
-                .precision(.fractionLength(0...2))
-        )
+        spoken
+            ? MoneyFormatter.spoken(value, currency: currency, locale: locale)
+            : MoneyFormatter.format(value, currency: currency)
     }
 
     @ViewBuilder
     private var monthlyBudgetProgressSection: some View {
         if transactionStore.state == .loaded,
-           budgetStore.state == .loaded,
+           !isAllAccounts || budgetStore.state == .loaded,
            let insights,
-           let monthlyLimit = insights.monthlyLimit,
-           !monthlyLimit.isNaN, monthlyLimit > 0,
+           !isAllAccounts || budgetStore.budget == nil || convertedBudget != nil,
            let interval = Calendar.current.dateInterval(of: .month, for: selectedMonth) {
             Section {
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    if let summary = MonthlySummaryState(
-                        monthlyBudget: monthlyLimit,
-                        amountSpent: insights.spent,
-                        currentDate: context.date,
-                        startOfMonth: interval.start,
-                        endOfMonth: interval.end,
-                        currency: dashboardCurrency,
-                        locale: locale
-                    ) {
-                        Button {
-                            isShowingBudgetSettings = true
-                        } label: {
-                            MonthlySummaryCompactView(state: summary)
+                Group {
+                    if let monthlyLimit = insights.monthlyLimit,
+                       !monthlyLimit.isNaN, monthlyLimit > 0 {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            if let summary = MonthlySummaryState(
+                                monthlyBudget: monthlyLimit,
+                                amountSpent: insights.spent,
+                                currentDate: context.date,
+                                startOfMonth: interval.start,
+                                endOfMonth: interval.end,
+                                currency: dashboardCurrency,
+                                locale: locale
+                            ) {
+                                Button {
+                                    isShowingBudgetSettings = true
+                                } label: {
+                                    MonthlySummaryCompactView(state: summary)
+                                }
+                                .buttonStyle(MonthlySummaryButtonStyle())
+                                .accessibilityHint("Open budget settings")
+                            }
                         }
-                        .buttonStyle(MonthlySummaryButtonStyle())
-                        .accessibilityHint("Open budget settings")
+                    } else {
+                        MonthlyActivitySummaryView(
+                            insights: insights,
+                            monthTitle: monthTitle,
+                            isCurrentMonth: Calendar.current.isDate(
+                                selectedMonth, equalTo: .now, toGranularity: .month
+                            ),
+                            currency: dashboardCurrency,
+                            showsBudgetSettings: isAllAccounts,
+                            canSetBudget: canOpenBudget
+                        ) {
+                            isShowingBudgetSettings = true
+                        }
                     }
                 }
-                .listRowInsets(EdgeInsets())
+                .environment(\.monthlySummaryCardBackground, .clear)
+                .anchorPreference(key: DashboardSummaryBoundsKey.self, value: .bounds) {
+                    [.summary: $0]
+                }
+                .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 0, trailing: 0))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -231,15 +262,18 @@ struct DashboardView: View {
     @ViewBuilder
     private var monthlyHighlightsSection: some View {
         if transactionStore.state == .loaded,
-           budgetStore.state == .loaded,
            let insights {
-            monthlyHighlights(for: insights)
+            let hasMonthlyBudget = insights.monthlyLimit.map { !$0.isNaN && $0 > 0 } ?? false
+            // The activity card already shows total spending when there is no income.
+            if insights.income > 0 || (insights.spent > 0 && hasMonthlyBudget) {
+                monthlyHighlights(for: insights)
+            }
         }
     }
 
     private func monthlyHighlights(for insights: DashboardInsights) -> some View {
         Section {
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 if insights.income > 0 {
                     monthlyHighlight(
                         title: "Income",
@@ -251,6 +285,10 @@ struct DashboardView: View {
                 }
 
                 if insights.spent > 0 {
+                    if insights.income > 0 {
+                        Spacer(minLength: 16)
+                    }
+
                     monthlyHighlight(
                         title: "Spent",
                         amount: insights.spent,
@@ -260,10 +298,37 @@ struct DashboardView: View {
                     )
                 }
             }
-            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 16)
+            .anchorPreference(key: DashboardSummaryBoundsKey.self, value: .bounds) {
+                [.highlights: $0]
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         }
+    }
+
+    private func monthlySummaryBackground(
+        _ anchors: [DashboardSummaryRegion: Anchor<CGRect>]
+    ) -> some View {
+        GeometryReader { geometry in
+            if let summary = anchors[.summary] {
+                let summaryFrame = geometry[summary]
+                let highlightsFrame = anchors[.highlights].map { geometry[$0] }
+                let bounds = highlightsFrame.map { summaryFrame.union($0) } ?? summaryFrame
+
+                // Join the existing sections visually without changing their layout or hit targets.
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(colorScheme == .dark
+                          ? Color(red: 43 / 255, green: 33 / 255, blue: 20 / 255)
+                          : Color(red: 1, green: 240 / 255, blue: 215 / 255))
+                    .frame(width: bounds.width, height: bounds.height)
+                    .position(x: bounds.midX, y: bounds.midY)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func monthlyHighlight(
@@ -287,7 +352,6 @@ struct DashboardView: View {
                 .minimumScaleFactor(0.6)
                 .contentTransition(.numericText())
         }
-        .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(money(amount, currency: dashboardCurrency, spoken: true))
@@ -345,6 +409,7 @@ struct DashboardView: View {
                 .accessibilityLabel("See all transactions")
             }
             .textCase(nil)
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16))
         }
     }
 
@@ -370,6 +435,7 @@ struct DashboardView: View {
                 .accessibilityLabel("See all recurring transactions")
             }
             .textCase(nil)
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16))
         }
     }
 
@@ -414,7 +480,7 @@ struct DashboardView: View {
     }
 
     private var convertedBudget: MonthlyBudget? {
-        guard let budget = budgetStore.budget else { return nil }
+        guard isAllAccounts, let budget = budgetStore.budget else { return nil }
         return budget.converted(to: dashboardCurrency, using: exchangeRateStore)
     }
 
@@ -428,12 +494,16 @@ struct DashboardView: View {
         return Set(
             accountCurrencies +
             transactionStore.transactions.map(\.currency) +
-            [budgetStore.budget?.currency].compactMap { $0 }
+            [isAllAccounts ? budgetStore.budget?.currency : nil].compactMap { $0 }
         )
     }
 
+    private var isAllAccounts: Bool {
+        accountStore.selectedAccountID == nil
+    }
+
     private var canOpenBudget: Bool {
-        budgetStore.state != .loading && exchangeRateStore.supports(
+        isAllAccounts && budgetStore.state != .loading && exchangeRateStore.supports(
             exchangeCurrencies,
             reportingCurrency: dashboardCurrency
         ) && (budgetStore.budget == nil || convertedBudget != nil)
@@ -471,21 +541,122 @@ struct DashboardView: View {
         "\(dashboardCurrency):\(exchangeCurrencies.sorted().joined(separator: ","))"
     }
 
+    private func loadBudget(force: Bool = false) async {
+        // Account summaries use activity only; the budget belongs to All accounts.
+        guard isAllAccounts else { return }
+        await budgetStore.loadBudget(month: selectedMonth, accountID: nil, force: force)
+    }
+
     private func reload() async {
         async let transactions: Void = transactionStore.loadTransactions(
             accountID: accountStore.selectedAccountID
         )
-        async let budget: Void = budgetStore.loadBudget(
-            month: selectedMonth,
-            accountID: accountStore.selectedAccountID,
-            force: true
-        )
+        async let budget: Void = loadBudget(force: true)
         async let rates: Void = exchangeRateStore.load(
             currencies: exchangeCurrencies,
             reportingCurrency: dashboardCurrency,
             force: true
         )
         _ = await (transactions, budget, rates)
+    }
+}
+
+private enum DashboardSummaryRegion: Hashable {
+    case summary
+    case highlights
+}
+
+private struct DashboardSummaryBoundsKey: PreferenceKey {
+    static let defaultValue: [DashboardSummaryRegion: Anchor<CGRect>] = [:]
+
+    static func reduce(
+        value: inout [DashboardSummaryRegion: Anchor<CGRect>],
+        nextValue: () -> [DashboardSummaryRegion: Anchor<CGRect>]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private struct MonthlyActivitySummaryView: View {
+    let insights: DashboardInsights
+    let monthTitle: String
+    let isCurrentMonth: Bool
+    let currency: String
+    let showsBudgetSettings: Bool
+    let canSetBudget: Bool
+    let setBudget: () -> Void
+
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        MonthlySummaryCard(monthTitle: monthTitle) {
+            if showsBudgetSettings {
+                setBudgetButton
+            }
+        } content: {
+            MonthlySummaryContent {
+                if hasNoActivity {
+                    Text("No activity yet")
+                        .font(.title3.weight(.semibold))
+                } else {
+                    MonthlySummaryAmount(
+                        amount: amountText,
+                        suffix: insights.income == 0 ? "spent" : ""
+                    )
+                }
+            } caption: {
+                if hasNoActivity {
+                    Text("Your monthly summary will appear here")
+                } else {
+                    Text(isCurrentMonth ? "this month" : "in \(monthTitle)")
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(summaryAccessibilityLabel)
+        }
+    }
+
+    private var setBudgetButton: some View {
+        // Reserve the same text height as a status, while keeping a 44-point tap target.
+        Text("Set budget")
+            .hidden()
+            .overlay {
+                Button(action: setBudget) {
+                    Text("Set budget")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .tint(.primary)
+                .disabled(!canSetBudget)
+                .opacity(canSetBudget ? 1 : 0.45)
+                .accessibilityHint("Open budget settings")
+            }
+    }
+
+    private var hasNoActivity: Bool {
+        insights.income == 0 && insights.spent == 0
+    }
+
+    private var amountText: String {
+        MoneyFormatter.format(
+            insights.income == 0 ? insights.spent : insights.net,
+            currency: currency,
+            showPositiveSign: insights.income != 0
+        )
+    }
+
+    private var summaryAccessibilityLabel: String {
+        if hasNoActivity {
+            return String(localized: "No activity yet. Your monthly summary will appear here")
+        }
+        let amount = MoneyFormatter.spoken(
+            insights.income == 0 ? insights.spent : insights.net,
+            currency: currency, locale: locale
+        )
+        return insights.income == 0
+            ? String(localized: "\(amount) spent in \(monthTitle)")
+            : String(localized: "Net income of \(amount) in \(monthTitle)")
     }
 }
 

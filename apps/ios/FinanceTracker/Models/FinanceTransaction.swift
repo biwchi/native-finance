@@ -51,6 +51,19 @@ protocol EditableTransaction {
     var recurrence: TransactionRecurrence? { get }
 }
 
+extension EditableTransaction {
+    func formattedAmount(showExpenseSign: Bool = true) -> String {
+        guard let value = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX")) else {
+            return "Unavailable"
+        }
+        return MoneyFormatter.format(
+            kind == .expense && showExpenseSign ? -value : value,
+            currency: currency,
+            showPositiveSign: kind == .income
+        )
+    }
+}
+
 struct FinanceTransaction: Codable, Identifiable, Hashable, EditableTransaction {
     let id: UUID
     let accountId: UUID
@@ -93,9 +106,7 @@ struct UpcomingTransaction: Codable, Identifiable, Hashable, EditableTransaction
     }
 
     var amountText: String {
-        let value = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX"))
-        let formatted = value?.formatted(.currency(code: currency)) ?? "\(amount) \(currency)"
-        return kind == .income ? "+\(formatted)" : formatted
+        formattedAmount(showExpenseSign: false)
     }
 }
 

@@ -12,6 +12,7 @@ final class TransactionStore: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var transactions: [FinanceTransaction] = []
+    @Published private(set) var allTransactions: [FinanceTransaction] = []
     @Published private(set) var upcomingState: State = .idle
     @Published private(set) var upcomingTransactions: [UpcomingTransaction] = []
     @Published private(set) var categories: [TransactionCategory] = []
@@ -22,6 +23,7 @@ final class TransactionStore: ObservableObject {
     private var currentAccountID: UUID?
     private var upcomingRequestID = UUID()
     private var hasLoadedCategories = false
+    private var hasLoadedTransactions = false
 
     init(apiClient: APIClient = APIClient()) {
         self.apiClient = apiClient
@@ -34,6 +36,8 @@ final class TransactionStore: ObservableObject {
     ) -> TransactionStore {
         let store = TransactionStore()
         store.transactions = transactions
+        store.allTransactions = transactions
+        store.hasLoadedTransactions = true
         store.categories = Array(Set(transactions.compactMap(\.category)))
         store.hasLoadedCategories = true
         store.state = .loaded
@@ -53,10 +57,14 @@ final class TransactionStore: ObservableObject {
         state = .loading
 
         do {
-            let transactions = try await apiClient.transactions(accountID: accountID)
+            // Keep every account available for the balance picker while the dashboard
+            // displays only the selected account's transactions.
+            let transactions = try await apiClient.transactions(accountID: nil)
             guard !Task.isCancelled, currentAccountID == accountID else { return }
 
-            self.transactions = transactions
+            allTransactions = transactions
+            hasLoadedTransactions = true
+            self.transactions = transactions.filter { accountID == nil || $0.accountId == accountID }
             state = .loaded
         } catch is CancellationError {
             return
@@ -175,10 +183,11 @@ final class TransactionStore: ObservableObject {
         if let index = categories.firstIndex(where: { $0.id == category.id }) {
             categories[index] = category
         }
-        transactions = transactions.map { transaction in
+        allTransactions = allTransactions.map { transaction in
             guard transaction.category?.id == category.id else { return transaction }
             return transaction.replacingCategory(with: category)
         }
+        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
         for index in upcomingTransactions.indices where upcomingTransactions[index].category?.id == category.id {
             upcomingTransactions[index].category = category
         }
@@ -193,11 +202,12 @@ final class TransactionStore: ObservableObject {
         )
         _ = try await apiClient.deleteCategory(id: category.id)
         categories.removeAll { removedIDs.contains($0.id) }
-        transactions = transactions.map { transaction in
+        allTransactions = allTransactions.map { transaction in
             guard let categoryID = transaction.category?.id,
                   removedIDs.contains(categoryID) else { return transaction }
             return transaction.replacingCategory(with: nil)
         }
+        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
         for index in upcomingTransactions.indices {
             if let categoryID = upcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
                 upcomingTransactions[index].category = nil
@@ -262,24 +272,43 @@ final class TransactionStore: ObservableObject {
         if transaction.recurrence != nil {
             await loadTransactions(accountID: currentAccountID)
         } else {
+            allTransactions.removeAll { $0.id == transaction.id }
             transactions.removeAll { $0.id == transaction.id }
             state = .loaded
         }
     }
 
     private func apply(_ transaction: FinanceTransaction) {
-        transactions.removeAll { $0.id == transaction.id }
-
-        if currentAccountID == nil || currentAccountID == transaction.accountId {
-            transactions.append(transaction)
-            transactions.sort {
-                if $0.occurredAt != $1.occurredAt {
-                    return $0.occurredAt > $1.occurredAt
-                }
-                return $0.createdAt > $1.createdAt
+        allTransactions.removeAll { $0.id == transaction.id }
+        allTransactions.append(transaction)
+        allTransactions.sort {
+            if $0.occurredAt != $1.occurredAt {
+                return $0.occurredAt > $1.occurredAt
             }
+            return $0.createdAt > $1.createdAt
         }
+        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
         state = .loaded
+    }
+
+    func balance(accountID: UUID?, currency: String, rates: ExchangeRateSnapshot?) -> Decimal? {
+        guard state == .loaded, hasLoadedTransactions else { return nil }
+
+        var balance = Decimal.zero
+        for transaction in allTransactions where accountID == nil || transaction.accountId == accountID {
+            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else {
+                return nil
+            }
+            let converted: Decimal?
+            if transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
+                converted = amount
+            } else {
+                converted = rates?.convert(amount, from: transaction.currency, to: currency)
+            }
+            guard let converted else { return nil }
+            balance += transaction.kind == .income ? converted : -converted
+        }
+        return balance
     }
 }
 

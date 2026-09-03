@@ -22,9 +22,10 @@ extension AccountIconColor {
 
 struct AccountSelector: View {
     @EnvironmentObject private var accountStore: AccountStore
-    @EnvironmentObject private var budgetStore: BudgetStore
-    @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
     @EnvironmentObject private var transactionStore: TransactionStore
+    // The picker needs all currencies even when the dashboard is showing one account.
+    @StateObject private var exchangeRateStore = ExchangeRateStore()
+    @ScaledMetric(relativeTo: .body) private var iconBadgeSize = 36
 
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var reportingCurrency = AppPreferences.initialCurrency
@@ -33,13 +34,11 @@ struct AccountSelector: View {
 
     var body: some View {
         Menu {
-            Button {
-                accountStore.selectedAccountID = nil
-            } label: {
+            Toggle(isOn: accountSelection(nil)) {
                 accountLabel(
                     title: "All Accounts",
-                    iconName: "credit-cards",
-                    isSelected: accountStore.selectedAccountID == nil
+                    subtitle: balanceSubtitle(for: nil),
+                    iconName: "credit-cards"
                 )
             }
 
@@ -47,14 +46,12 @@ struct AccountSelector: View {
                 Divider()
 
                 ForEach(accountStore.accounts) { account in
-                    Button {
-                        accountStore.selectedAccountID = account.id
-                    } label: {
+                    Toggle(isOn: accountSelection(account.id)) {
                         accountLabel(
                             title: account.name,
+                            subtitle: balanceSubtitle(for: account),
                             iconName: account.icon,
-                            color: account.iconColor.color,
-                            isSelected: accountStore.selectedAccountID == account.id
+                            color: account.iconColor.color
                         )
                     }
                 }
@@ -73,11 +70,12 @@ struct AccountSelector: View {
                 .accessibilityLabel("Account, \(accountStore.selectionTitle), \(selectionSubtitle)")
                 .accessibilityHint("Opens the account picker")
         }
+        .buttonStyle(.plain)
         .tint(.primary)
         .task(id: exchangeRateScopeKey) {
             await exchangeRateStore.load(
                 currencies: exchangeCurrencies,
-                reportingCurrency: selectionCurrency
+                reportingCurrency: reportingCurrency.uppercased()
             )
         }
     }
@@ -85,9 +83,8 @@ struct AccountSelector: View {
     @ViewBuilder
     private var selectorLabel: some View {
         if compact {
-            HStack(spacing: 7) {
-                AppIcon(selectedIcon, size: 15)
-                    .foregroundStyle(compactIconColor)
+            HStack(spacing: 9) {
+                selectedIconBadge
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(accountStore.selectionTitle)
@@ -106,17 +103,13 @@ struct AccountSelector: View {
                 AppIcon("nav-arrow-down", size: 11)
                     .foregroundStyle(.secondary)
             }
+            .padding([.leading, .vertical], 4)
+            .padding(.trailing, 12)
+            .accountSelectorGlass()
             .contentShape(Capsule())
         } else {
             HStack(spacing: 9) {
-                AppIcon(selectedIcon, size: 15)
-                    .foregroundStyle(selectedColor)
-                    .frame(width: 38, height: 38)
-                    .background(.black, in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(.white.opacity(0.08), lineWidth: 1)
-                    }
+                selectedIconBadge
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(accountStore.selectionTitle)
@@ -145,20 +138,34 @@ struct AccountSelector: View {
     }
 
     private var selectedColor: Color {
-        accountStore.selectedAccount?.iconColor.color ?? .white
-    }
-
-    private var compactIconColor: Color {
         accountStore.selectedAccount?.iconColor.color ?? .primary
     }
 
+    private var selectedIconBadge: some View {
+        AppIcon(selectedIcon, size: 24)
+            .foregroundStyle(selectedColor)
+            .frame(width: iconBadgeSize, height: iconBadgeSize)
+            .background(selectedColor.opacity(0.14), in: Circle())
+            .accessibilityHidden(true)
+    }
+
     private var selectionSubtitle: String {
+        balanceSubtitle(for: accountStore.selectedAccount)
+    }
+
+    private func balanceSubtitle(for account: Account?) -> String {
         switch transactionStore.state {
         case .idle, .loading:
             "Loading balance"
         case .loaded:
-            if let balanceText {
-                balanceText
+            if let balance = transactionStore.balance(
+                accountID: account?.id,
+                currency: account?.currency ?? reportingCurrency.uppercased(),
+                rates: exchangeRateStore.snapshot
+            ) {
+                MoneyFormatter.format(
+                    balance, currency: account?.currency ?? reportingCurrency.uppercased()
+                )
             } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
                 "Converting balance"
             } else {
@@ -169,67 +176,36 @@ struct AccountSelector: View {
         }
     }
 
-    private var balanceText: String? {
-        var balance = Decimal.zero
-        for transaction in transactionStore.transactions {
-            guard let amount = Decimal(
-                string: transaction.amount,
-                locale: Locale(identifier: "en_US_POSIX")
-            ), let converted = exchangeRateStore.convert(
-                amount,
-                from: transaction.currency,
-                to: selectionCurrency
-            ) else {
-                return nil
-            }
-            balance += transaction.kind == .income ? converted : -converted
-        }
-
-        return balance.formatted(
-            .currency(code: selectionCurrency)
-                .precision(.fractionLength(0...2))
-        )
-    }
-
-    private var selectionCurrency: String {
-        accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased()
-    }
-
     private var exchangeCurrencies: Set<String> {
-        let accountCurrencies: [String]
-        if let account = accountStore.selectedAccount {
-            accountCurrencies = [account.currency]
-        } else {
-            accountCurrencies = accountStore.accounts.map(\.currency)
-        }
         return Set(
-            accountCurrencies +
-            transactionStore.transactions.map(\.currency) +
-            [budgetStore.budget?.currency].compactMap { $0 }
+            accountStore.accounts.map(\.currency) +
+            transactionStore.allTransactions.map(\.currency)
         )
     }
 
     private var exchangeRateScopeKey: String {
-        "\(selectionCurrency):\(exchangeCurrencies.sorted().joined(separator: ","))"
+        "\(reportingCurrency.uppercased()):\(exchangeCurrencies.sorted().joined(separator: ","))"
     }
 
+    private func accountSelection(_ accountID: UUID?) -> Binding<Bool> {
+        Binding(
+            get: { accountStore.selectedAccountID == accountID },
+            set: { isSelected in
+                if isSelected { accountStore.selectedAccountID = accountID }
+            }
+        )
+    }
+
+    @ViewBuilder
     private func accountLabel(
         title: String,
+        subtitle: String,
         iconName: String,
-        color: Color? = nil,
-        isSelected: Bool
+        color: Color? = nil
     ) -> some View {
-        HStack {
-            Label {
-                Text(title)
-            } icon: {
-                menuIcon(iconName: iconName, color: color)
-            }
-
-            if isSelected {
-                AppIcon("check")
-            }
-        }
+        Text(title)
+        Text(subtitle)
+        menuIcon(iconName: iconName, color: color)
     }
 
     @ViewBuilder
@@ -243,7 +219,7 @@ struct AccountSelector: View {
                 )
             )
         } else {
-            AppIcons.resolve(iconName).asImage
+            AppIcons.resolve(iconName).image().renderingMode(.template)
                 .foregroundStyle(.primary)
         }
 #else
@@ -672,6 +648,7 @@ struct CurrencyPickerView: View {
     let currencyCodes: [String]
 
     @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         List(filteredCurrencyCodes, id: \.self) { code in
@@ -713,7 +690,49 @@ struct CurrencyPickerView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Code or currency name")
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            searchField
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            AppIcon("search", size: 20)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            TextField("Code or currency name", text: $query)
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($isSearchFocused)
+                .onSubmit { isSearchFocused = false }
+                .accessibilityLabel("Search currencies")
+
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    isSearchFocused = true
+                } label: {
+                    AppIcon("xmark", size: 16)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, query.isEmpty ? 18 : 4)
+        .frame(minHeight: 54)
+        .accountSelectorGlass()
+        .contentShape(Capsule())
+        .onTapGesture { isSearchFocused = true }
     }
 
     private var filteredCurrencyCodes: [String] {

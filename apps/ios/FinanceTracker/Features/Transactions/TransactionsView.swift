@@ -290,20 +290,7 @@ struct TransactionRow: View {
     }
 
     private var amountText: String {
-        let value = Decimal(string: transaction.amount).flatMap(formattedAmount) ?? transaction.amount
-        let sign = transaction.kind == .income ? "+ " : (style == .upcoming ? "" : "- ")
-        return "\(sign)\(value) \(transaction.currency)"
-    }
-
-    private func formattedAmount(_ amount: Decimal) -> String? {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.usesGroupingSeparator = true
-        formatter.groupingSeparator = " "
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 4
-        return formatter.string(from: amount as NSDecimalNumber)
+        transaction.formattedAmount(showExpenseSign: style == .transaction)
     }
 
     private var accessibilityDescription: String {

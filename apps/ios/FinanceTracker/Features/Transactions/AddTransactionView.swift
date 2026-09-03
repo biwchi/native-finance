@@ -64,7 +64,7 @@ struct AddTransactionView: View {
         ["1", "2", "3", "+"],
         ["4", "5", "6", "-"],
         ["7", "8", "9", "*"],
-        [",", "0", "⌫", "/"],
+        [MoneyFormatter.decimalSeparator, "0", "⌫", "/"],
     ]
 
     init(
@@ -259,21 +259,13 @@ struct AddTransactionView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(displayAmount)
-                    .font(.system(size: 48, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .contentTransition(.numericText(value: amountAnimationValue))
-                    .animation(.snappy(duration: 0.24), value: amountAnimationValue)
-
-                if let currency = selectedAccount?.currency {
-                    Text(currency)
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text(displayAmount)
+                .font(.system(size: 48, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .contentTransition(.numericText(value: amountAnimationValue))
+                .animation(.snappy(duration: 0.24), value: amountAnimationValue)
         }
         .frame(maxWidth: .infinity, minHeight: 98, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -508,10 +500,9 @@ struct AddTransactionView: View {
     }
 
     private var displayAmount: String {
-        guard let result = amountExpression.result else { return "0" }
-        return result.formatted(
-            .number.grouping(.automatic).precision(.fractionLength(0...4))
-        )
+        let value = amountExpression.result ?? .zero
+        guard let currency = selectedAccount?.currency else { return MoneyFormatter.number(value) }
+        return MoneyFormatter.format(value, currency: currency)
     }
 
     private var amountAnimationValue: Double {
@@ -520,9 +511,7 @@ struct AddTransactionView: View {
     }
 
     private var amountAccessibilityLabel: String {
-        ["Amount", displayAmount, selectedAccount?.currency]
-            .compactMap { $0 }
-            .joined(separator: " ")
+        "Amount, \(displayAmount)"
     }
 
     private var hasExtraDetails: Bool {
