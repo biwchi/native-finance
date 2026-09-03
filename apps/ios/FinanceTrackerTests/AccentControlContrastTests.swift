@@ -15,6 +15,12 @@ final class AccentControlContrastTests: XCTestCase {
                 contrast(luminance(fill), luminance(foreground)), 4.5,
                 "Accent text must contrast with its fill in \(style)."
             )
+            for surface in [UIColor.systemBackground, .secondarySystemGroupedBackground] {
+                XCTAssertGreaterThanOrEqual(
+                    contrast(luminance(fill), luminance(surface.resolvedColor(with: traits))), 4.5,
+                    "Accent links must remain readable on native surfaces in \(style)."
+                )
+            }
         }
     }
 
@@ -45,6 +51,54 @@ final class AccentControlContrastTests: XCTestCase {
                 scheme: scheme,
                 sampleSize: 12
             )
+        }
+    }
+
+    func testControlStatesRenderInBothAppearances() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for scheme in [ColorScheme.light, .dark] {
+            let content = VStack(spacing: 16) {
+                HStack {
+                    AccentSelectionButton("Unselected", isSelected: false) {}
+                    AccentSelectionButton("Selected", isSelected: true) {}
+                }
+                HStack {
+                    AccentSelectionButton("Disabled", isSelected: false) {}.disabled(true)
+                    AccentSelectionButton("Selected", isSelected: true) {}.disabled(true)
+                }
+                ForEach(PrimaryActionButton.Appearance.allCases, id: \.self) { appearance in
+                    HStack {
+                        PrimaryActionButton("Save", appearance: appearance) {}
+                        PrimaryActionButton("Disabled", appearance: appearance) {}.disabled(true)
+                    }
+                    PrimaryActionButton("Saving…", isLoading: true, appearance: appearance) {}
+                        .disabled(true)
+                }
+                HStack {
+                    PrimaryIconButton("Add", iconName: "plus") {}
+                    PrimaryIconButton("Disabled", iconName: "plus") {}.disabled(true)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .preferredColorScheme(scheme)
+            let controller = UIHostingController(rootView: content)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 820)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            controller.view.frame = window.bounds
+            try await Task.sleep(for: .milliseconds(200))
+            controller.view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "Accent-controls-\(scheme)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            window.isHidden = true
         }
     }
 

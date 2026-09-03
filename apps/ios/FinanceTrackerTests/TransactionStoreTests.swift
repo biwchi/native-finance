@@ -253,12 +253,13 @@ final class TransactionStoreTests: XCTestCase {
             category: nil, merchant: "Netflix", payee: nil, note: nil, frequency: .monthly,
             occurredAt: Date(timeIntervalSince1970: 4_124_044_800)
         )
+        let otherAccountUpcoming = upcomingTransaction()
         var recurring = true
         let session = makeSession { request in
             if request.url?.lastPathComponent == "upcoming" {
                 let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
-                XCTAssertEqual(query, [URLQueryItem(name: "accountId", value: accountID.uuidString)])
-                return (200, try self.encode(recurring ? [upcoming] : []))
+                XCTAssertNil(query)
+                return (200, try self.encode(recurring ? [upcoming, otherAccountUpcoming] : [otherAccountUpcoming]))
             }
             if request.httpMethod == "PUT" {
                 recurring = false
@@ -272,11 +273,13 @@ final class TransactionStoreTests: XCTestCase {
         await store.loadTransactions(accountID: accountID)
         XCTAssertEqual(store.upcomingState, .loaded)
         XCTAssertEqual(store.upcomingTransactions, [upcoming])
+        XCTAssertEqual(store.allUpcomingTransactions, [upcoming, otherAccountUpcoming])
         XCTAssertEqual(upcoming.title, "Netflix")
 
         try await store.updateTransaction(id: original.id, with: draft(original))
         XCTAssertEqual(store.upcomingState, .loaded)
         XCTAssertTrue(store.upcomingTransactions.isEmpty)
+        XCTAssertEqual(store.allUpcomingTransactions, [otherAccountUpcoming])
     }
 
     func testUpcomingFailureDoesNotHideTransactionsAndCanBeRetriedForAllAccounts() async throws {

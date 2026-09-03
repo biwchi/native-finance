@@ -9,17 +9,40 @@ struct TransactionsView: View {
     }
 }
 
+struct ActivityView: View {
+    var body: some View {
+        NavigationStack {
+            TransactionListView(showsOverview: true)
+        }
+    }
+}
+
 struct TransactionListView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @State private var editingTransaction: FinanceTransaction?
     @State private var presentedAlert: TransactionListAlert?
     @State private var deletingTransactionID: UUID?
+    @StateObject private var summaryRates = ExchangeRateStore()
+    @AppStorage(AppPreferences.defaultCurrencyKey)
+    private var reportingCurrency = AppPreferences.initialCurrency
+    @State private var selectedMonth: Date
+    @State private var searchText = ""
 
-    var recentLimit: Int? = nil
+    var recentLimit: Int?
+    var showsOverview: Bool
+
+    init(recentLimit: Int? = nil, showsOverview: Bool = false, month: Date = .now) {
+        self.recentLimit = recentLimit
+        self.showsOverview = showsOverview
+        _selectedMonth = State(initialValue: BudgetMonth.start(of: month))
+    }
 
     var body: some View {
         List {
+            if showsOverview {
+                overviewSection
+            }
             switch transactionStore.state {
             case .idle, .loading:
                 ProgressView("Loading transactions")
@@ -27,16 +50,18 @@ struct TransactionListView: View {
                     .listRowBackground(Color.clear)
 
             case .loaded:
-                if transactionStore.transactions.isEmpty {
+                if visibleTransactions.isEmpty {
                     ContentUnavailableView(
-                        "No transactions yet",
+                        searchText.isEmpty ? "No transactions yet" : "No matching transactions",
                         iconName: "list",
-                        description: Text(emptyDescription)
+                        description: Text(showsOverview
+                            ? (searchText.isEmpty ? "Transactions for the selected month will appear here." : "Try a different merchant, category or amount.")
+                            : emptyDescription)
                     )
                     .listRowBackground(Color.clear)
                 } else if let recentLimit {
                     Section("Recent transactions") {
-                        ForEach(transactionStore.transactions.prefix(recentLimit)) { transaction in
+                        ForEach(visibleTransactions.prefix(recentLimit)) { transaction in
                             transactionButton(transaction)
                         }
                     }
@@ -66,6 +91,11 @@ struct TransactionListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .modifier(ActivityToolbar(isEnabled: showsOverview))
+        .task(id: rateScope) {
+            if showsOverview { await loadRates() }
+        }
         .refreshable { await reload() }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
@@ -102,6 +132,59 @@ struct TransactionListView: View {
         }
     }
 
+    private var overviewSection: some View {
+        Section {
+            FinanceMonthHeader(title: "Activity", month: $selectedMonth)
+            if transactionStore.state == .loaded, let insights {
+                FinanceMetricCards(
+                    first: .init(title: "Spent", amount: insights.spent),
+                    second: .init(title: "Income", amount: insights.income),
+                    currency: currency
+                )
+            } else {
+                FinanceSummaryUnavailable(state: transactionStore.state, rateState: summaryRates.state)
+            }
+            HStack(spacing: 10) {
+                AppIcon("search", size: 18).foregroundStyle(.secondary)
+                TextField("Merchant, category or amount", text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .accessibilityLabel("Search transactions")
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        AppIcon("xmark", size: 16).frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .frame(minHeight: 44)
+            .padding(.horizontal, 12)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 0, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+        .modifier(FinanceSectionMargins())
+    }
+
+    private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
+    private var currencies: Set<String> { Set(transactionStore.transactions.map(\.currency)) }
+    private var rateScope: String { "\(currency):\(currencies.sorted().joined(separator: ","))" }
+    private var insights: DashboardInsights? {
+        guard let converted = FinanceOverviewData.converted(transactionStore.transactions, to: currency, using: summaryRates) else { return nil }
+        return DashboardInsights.calculate(transactions: converted, month: selectedMonth, monthlyLimit: nil)
+    }
+    private var visibleTransactions: [FinanceTransaction] {
+        guard showsOverview else { return transactionStore.transactions }
+        return FinanceOverviewData.transactions(transactionStore.transactions, in: selectedMonth)
+            .filter { FinanceOverviewData.matches($0, query: searchText, accounts: accountStore.accounts) }
+    }
+    private func loadRates(force: Bool = false) async {
+        await summaryRates.load(currencies: currencies, reportingCurrency: currency, force: force)
+    }
+
     private func transactionButton(_ transaction: FinanceTransaction) -> some View {
         Button {
             editingTransaction = transaction
@@ -125,7 +208,7 @@ struct TransactionListView: View {
     }
 
     private var transactionGroups: [(day: Date, transactions: [FinanceTransaction])] {
-        let groups = Dictionary(grouping: transactionStore.transactions) {
+        let groups = Dictionary(grouping: visibleTransactions) {
             Calendar.current.startOfDay(for: $0.occurredAt)
         }
         return groups.keys.sorted(by: >).map { (day: $0, transactions: groups[$0] ?? []) }
@@ -141,6 +224,7 @@ struct TransactionListView: View {
 
     private func reload() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
+        if showsOverview { await loadRates(force: true) }
     }
 
     private var alertBinding: Binding<Bool> {
@@ -156,6 +240,15 @@ struct TransactionListView: View {
         } catch {
             presentedAlert = .error(error.localizedDescription)
         }
+    }
+}
+
+private struct ActivityToolbar: ViewModifier {
+    let isEnabled: Bool
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled { content.leadingAccountSelectorToolbar() }
+        else { content }
     }
 }
 

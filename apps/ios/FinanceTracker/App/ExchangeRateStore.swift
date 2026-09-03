@@ -42,6 +42,12 @@ final class ExchangeRateStore: ObservableObject {
         }
 
         state = .loading
+        defer {
+            // A tab can disappear while its rates are loading. Let the next appearance retry.
+            if Task.isCancelled, currentScope == scope, state == .loading {
+                state = .idle
+            }
+        }
         do {
             let snapshot = try await apiClient.latestExchangeRates(
                 currencies: normalized,

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RecurringTransactionsView: View {
+    var allAccounts = false
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @State private var editingTransaction: UpcomingTransaction?
@@ -10,9 +11,10 @@ struct RecurringTransactionsView: View {
 
     var body: some View {
         List {
-            if transactionStore.upcomingState != .loaded || !transactionStore.upcomingTransactions.isEmpty {
+            if transactionStore.upcomingState != .loaded || !upcomingTransactions.isEmpty {
                 Section("Coming up") {
                     UpcomingTransactionsContent(
+                        allAccounts: allAccounts,
                         isDeleting: deletingTransactionID != nil,
                         onEdit: { editingTransaction = $0 },
                         onDelete: { deletingTransaction = $0 }
@@ -23,7 +25,7 @@ struct RecurringTransactionsView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Recurring transactions")
         .navigationBarTitleDisplayMode(.inline)
-        .accountSelectorToolbar()
+        .modifier(RecurringAccountsToolbar(allAccounts: allAccounts))
         .refreshable {
             await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         }
@@ -45,6 +47,10 @@ struct RecurringTransactionsView: View {
         } message: {
             Text(errorMessage ?? "This is a recurring transaction. What would you like to delete?")
         }
+    }
+
+    private var upcomingTransactions: [UpcomingTransaction] {
+        allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions
     }
 
     private var alertBinding: Binding<Bool> {
@@ -75,6 +81,7 @@ struct UpcomingTransactionsContent: View {
     @EnvironmentObject private var transactionStore: TransactionStore
 
     var limit: Int? = nil
+    var allAccounts = false
     var isDeleting = false
     let onEdit: (UpcomingTransaction) -> Void
     var onDelete: ((UpcomingTransaction) -> Void)? = nil
@@ -85,7 +92,7 @@ struct UpcomingTransactionsContent: View {
             ProgressView("Loading recurring transactions")
                 .frame(maxWidth: .infinity)
         case .loaded:
-            ForEach(transactionStore.upcomingTransactions.prefix(limit ?? Int.max)) { transaction in
+            ForEach((allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions).prefix(limit ?? Int.max)) { transaction in
                 transactionButton(transaction)
             }
         case .failed:
@@ -132,6 +139,15 @@ struct UpcomingTransactionsContent: View {
                 .disabled(isDeleting)
             }
         }
+    }
+}
+
+private struct RecurringAccountsToolbar: ViewModifier {
+    let allAccounts: Bool
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if allAccounts { content }
+        else { content.accountSelectorToolbar() }
     }
 }
 

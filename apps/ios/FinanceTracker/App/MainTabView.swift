@@ -240,7 +240,8 @@ private struct MainTabController: UIViewControllerRepresentable {
 
         // Keep the same hosting controllers (and navigation/scroll state) when the sheet opens.
         let home = hostingController(DashboardView(), title: "Home", iconName: "home-simple")
-        let assistant = hostingController(AssistantView(), title: "Assistant", iconName: "sparks")
+        let activity = hostingController(ActivityView(), title: "Activity", iconName: "list")
+        let plan = hostingController(PlanView(), title: "Plan", iconName: "percentage-circle")
         let settingsView = SettingsView { [weak controller] isVisible in
             if #available(iOS 18.0, *) {
                 controller?.setTabBarHidden(isVisible, animated: true)
@@ -258,11 +259,13 @@ private struct MainTabController: UIViewControllerRepresentable {
             addTab.image = AppIcons.uiImage(named: "plus")
             controller.tabs = [
                 UITab(title: "Home", image: home.tabBarItem.image, identifier: "home") { _ in home },
+                UITab(title: "Activity", image: activity.tabBarItem.image, identifier: "activity") { _ in activity },
+                UITab(title: "Plan", image: plan.tabBarItem.image, identifier: "plan") { _ in plan },
                 UITab(title: "Settings", image: settings.tabBarItem.image, identifier: "settings") { _ in settings },
                 addTab
             ]
         } else {
-            controller.viewControllers = [home, assistant, settings, add]
+            controller.viewControllers = [home, activity, plan, settings, add]
         }
         return controller
     }

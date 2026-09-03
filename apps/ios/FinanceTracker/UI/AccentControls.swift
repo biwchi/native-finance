@@ -4,9 +4,11 @@ import SwiftUI
 private enum AccentPalette {
     static let fill = Color("AccentColor")
     static let foreground = Color("OnAccentColor")
+    static let disabledForeground = Color.primary
 }
 
 struct AccentSelectionButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     let isSelected: Bool
     let action: () -> Void
@@ -22,7 +24,7 @@ struct AccentSelectionButton: View {
             Text(title)
                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: 40)
-                .foregroundStyle(isSelected ? AccentPalette.foreground : Color.primary)
+                .foregroundStyle(isSelected && isEnabled ? AccentPalette.foreground : Color.primary)
                 .background(
                     isSelected ? AccentPalette.fill : Color.clear,
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -35,6 +37,7 @@ struct AccentSelectionButton: View {
 }
 
 struct PrimaryActionButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     enum Appearance: CaseIterable {
         case capsule
         case prominent
@@ -62,7 +65,7 @@ struct PrimaryActionButton: View {
         Group {
             switch appearance {
             case .capsule:
-                button.buttonStyle(CapsulePrimaryButtonStyle())
+                button.buttonStyle(CapsulePrimaryButtonStyle(isLoading: isLoading))
             case .prominent:
                 button.buttonStyle(.borderedProminent)
             case .glass:
@@ -82,21 +85,32 @@ struct PrimaryActionButton: View {
             HStack(spacing: 8) {
                 if isLoading {
                     ProgressView()
-                        .tint(AccentPalette.foreground)
+                        .tint(foreground)
                 }
                 Text(title)
             }
             .font(appearance == .capsule ? .headline : nil)
-            .foregroundStyle(AccentPalette.foreground)
+            .foregroundStyle(foreground)
             .frame(
                 maxWidth: appearance == .prominent ? nil : .infinity,
                 minHeight: appearance == .capsule ? 52 : nil
             )
         }
     }
+
+    private var foreground: Color {
+        // Native prominent/glass styles replace the accent fill when disabled.
+        // Loading capsules retain their fill so their progress stays readable.
+        if isLoading && appearance == .capsule { return AccentPalette.foreground }
+        if !isEnabled || (isLoading && appearance != .capsule) {
+            return AccentPalette.disabledForeground
+        }
+        return AccentPalette.foreground
+    }
 }
 
 struct PrimaryIconButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     let iconName: String
     let action: () -> Void
@@ -110,7 +124,7 @@ struct PrimaryIconButton: View {
     var body: some View {
         Button(action: action) {
             AppIcon(iconName, size: 17)
-                .foregroundStyle(AccentPalette.foreground)
+                .foregroundStyle(isEnabled ? AccentPalette.foreground : AccentPalette.disabledForeground)
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(.borderedProminent)
@@ -122,12 +136,13 @@ struct PrimaryIconButton: View {
 
 private struct CapsulePrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    let isLoading: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(AccentPalette.fill, in: Capsule())
             .contentShape(Capsule())
-            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+            .opacity(isEnabled || isLoading ? (configuration.isPressed ? 0.9 : 1) : 0.45)
     }
 }
 

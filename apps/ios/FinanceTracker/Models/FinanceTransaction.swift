@@ -93,6 +93,8 @@ struct UpcomingTransaction: Codable, Identifiable, Hashable, EditableTransaction
     let frequency: RecurrenceFrequency
     let occurredAt: Date
     var endAt: Date? = nil
+    /// Original schedule anchor, used to preserve month-end and leap-day repeats.
+    var startAt: Date? = nil
 
     var recurrence: TransactionRecurrence? {
         TransactionRecurrence(id: id, frequency: frequency, endAt: endAt)

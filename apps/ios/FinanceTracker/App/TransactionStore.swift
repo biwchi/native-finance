@@ -15,6 +15,7 @@ final class TransactionStore: ObservableObject {
     @Published private(set) var allTransactions: [FinanceTransaction] = []
     @Published private(set) var upcomingState: State = .idle
     @Published private(set) var upcomingTransactions: [UpcomingTransaction] = []
+    @Published private(set) var allUpcomingTransactions: [UpcomingTransaction] = []
     @Published private(set) var categories: [TransactionCategory] = []
     @Published private(set) var isLoadingCategories = false
     @Published private(set) var categoryErrorMessage: String?
@@ -42,6 +43,7 @@ final class TransactionStore: ObservableObject {
         store.hasLoadedCategories = true
         store.state = .loaded
         store.upcomingTransactions = upcomingTransactions
+        store.allUpcomingTransactions = upcomingTransactions
         store.upcomingState = .loaded
         return store
     }
@@ -82,9 +84,10 @@ final class TransactionStore: ObservableObject {
         upcomingState = .loading
 
         do {
-            let upcoming = try await apiClient.upcomingTransactions(accountID: accountID)
+            let upcoming = try await apiClient.upcomingTransactions(accountID: nil)
             guard !Task.isCancelled, upcomingRequestID == requestID else { return }
-            upcomingTransactions = upcoming
+            allUpcomingTransactions = upcoming
+            upcomingTransactions = upcoming.filter { accountID == nil || $0.accountId == accountID }
             upcomingState = .loaded
         } catch is CancellationError {
             return
@@ -191,6 +194,9 @@ final class TransactionStore: ObservableObject {
         for index in upcomingTransactions.indices where upcomingTransactions[index].category?.id == category.id {
             upcomingTransactions[index].category = category
         }
+        for index in allUpcomingTransactions.indices where allUpcomingTransactions[index].category?.id == category.id {
+            allUpcomingTransactions[index].category = category
+        }
         return category
     }
 
@@ -211,6 +217,11 @@ final class TransactionStore: ObservableObject {
         for index in upcomingTransactions.indices {
             if let categoryID = upcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
                 upcomingTransactions[index].category = nil
+            }
+        }
+        for index in allUpcomingTransactions.indices {
+            if let categoryID = allUpcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
+                allUpcomingTransactions[index].category = nil
             }
         }
     }

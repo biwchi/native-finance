@@ -57,6 +57,10 @@ final class BudgetStore: ObservableObject {
         }
     }
 
+    func isLoaded(month: Date, accountID: UUID?) -> Bool {
+        state == .loaded && currentScope == "\(accountID?.uuidString ?? "all"):\(BudgetMonth.key(for: month))"
+    }
+
     @discardableResult
     func saveBudget(_ request: MonthlyBudgetRequest) async throws -> MonthlyBudget? {
         let budget = try await apiClient.saveMonthlyBudget(request)

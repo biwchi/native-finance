@@ -161,6 +161,7 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
           payee: schedule.payee,
           note: schedule.note,
           frequency: schedule.frequency,
+          startAt: schedule.startAt,
           endAt: schedule.endAt,
           occurredAt,
         }];

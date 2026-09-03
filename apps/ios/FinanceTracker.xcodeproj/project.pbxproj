@@ -55,6 +55,10 @@
 		E10000000000000000000002 /* MonthlySummaryCompactView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* MonthlySummaryCompactView.swift */; };
 		E10000000000000000000003 /* BudgetProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* BudgetProgressBar.swift */; };
 		E10000000000000000000004 /* MonthlySummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* MonthlySummaryTests.swift */; };
+		AB10000000000000000000001 /* FinanceOverviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB20000000000000000000001 /* FinanceOverviewData.swift */; };
+		AB10000000000000000000002 /* FinanceOverviewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB20000000000000000000002 /* FinanceOverviewComponents.swift */; };
+		AB10000000000000000000003 /* PlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB20000000000000000000003 /* PlanView.swift */; };
+		AB10000000000000000000004 /* FinanceOverviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB20000000000000000000004 /* FinanceOverviewTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +122,10 @@
 		E20000000000000000000002 /* MonthlySummaryCompactView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlySummaryCompactView.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* BudgetProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetProgressBar.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* MonthlySummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlySummaryTests.swift; sourceTree = "<group>"; };
+		AB20000000000000000000001 /* FinanceOverviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewData.swift; sourceTree = "<group>"; };
+		AB20000000000000000000002 /* FinanceOverviewComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewComponents.swift; sourceTree = "<group>"; };
+		AB20000000000000000000003 /* PlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanView.swift; sourceTree = "<group>"; };
+		AB20000000000000000000004 /* FinanceOverviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -253,6 +261,9 @@
 				E20000000000000000000002 /* MonthlySummaryCompactView.swift */,
 				E20000000000000000000001 /* MonthlySummaryState.swift */,
 				A20000000000000000000005 /* DashboardView.swift */,
+				AB20000000000000000000003 /* PlanView.swift */,
+				AB20000000000000000000002 /* FinanceOverviewComponents.swift */,
+				AB20000000000000000000001 /* FinanceOverviewData.swift */,
 				A20000000000000000000029 /* BudgetSettingsView.swift */,
 			);
 			path = Dashboard;
@@ -308,6 +319,7 @@
 				C20000000000000000000004 /* CategoryBenchmarkTests.swift */,
 				C20000000000000000000006 /* TransactionStoreTests.swift */,
 				C20000000000000000000007 /* BudgetTests.swift */,
+				AB20000000000000000000004 /* FinanceOverviewTests.swift */,
 				C20000000000000000000008 /* AccountStoreTests.swift */,
 				D20000000000000000000004 /* AppIconTests.swift */,
 				C20000000000000000000009 /* AccentControlContrastTests.swift */,
@@ -461,6 +473,9 @@
 				A10000000000000000000003 /* APIClient.swift in Sources */,
 				A10000000000000000000009 /* AssistantView.swift in Sources */,
 				A10000000000000000000005 /* DashboardView.swift in Sources */,
+				AB10000000000000000000003 /* PlanView.swift in Sources */,
+				AB10000000000000000000002 /* FinanceOverviewComponents.swift in Sources */,
+				AB10000000000000000000001 /* FinanceOverviewData.swift in Sources */,
 				A10000000000000000000001 /* FinanceTrackerApp.swift in Sources */,
 				A10000000000000000000011 /* FinanceTransaction.swift in Sources */,
 				A10000000000000000000002 /* HealthResponse.swift in Sources */,
@@ -492,6 +507,7 @@
 				C10000000000000000000004 /* CategoryBenchmarkTests.swift in Sources */,
 				C10000000000000000000006 /* TransactionStoreTests.swift in Sources */,
 				C10000000000000000000007 /* BudgetTests.swift in Sources */,
+				AB10000000000000000000004 /* FinanceOverviewTests.swift in Sources */,
 				C10000000000000000000008 /* AccountStoreTests.swift in Sources */,
 				D10000000000000000000004 /* AppIconTests.swift in Sources */,
 				C10000000000000000000009 /* AccentControlContrastTests.swift in Sources */,
