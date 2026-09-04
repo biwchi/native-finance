@@ -78,6 +78,23 @@ final class AccentControlContrastTests: XCTestCase {
                     PrimaryIconButton("Add", iconName: "plus") {}
                     PrimaryIconButton("Disabled", iconName: "plus") {}.disabled(true)
                 }
+                if #available(iOS 26.0, *) {
+                    HStack {
+                        PrimaryIconButton(
+                            "Glass Add",
+                            iconName: "plus",
+                            iconSize: 26,
+                            appearance: .glassProminent
+                        ) {}
+                        PrimaryIconButton(
+                            "Disabled Glass Add",
+                            iconName: "plus",
+                            iconSize: 26,
+                            appearance: .glassProminent
+                        ) {}
+                        .disabled(true)
+                    }
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

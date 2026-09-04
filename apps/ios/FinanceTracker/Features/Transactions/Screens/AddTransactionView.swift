@@ -8,8 +8,10 @@ struct AddTransactionView: View {
 
     let transaction: FinanceTransaction?
     let upcomingTransaction: UpcomingTransaction?
+    let quickEntryDraft: QuickEntryDraft?
     let initialCommand: String?
     let initialAccountID: UUID?
+    let onSaveDraft: ((QuickEntryDraft) -> Void)?
 
     @StateObject private var viewModel: AddTransactionViewModel
     @State private var navigationPath = NavigationPath()
@@ -24,24 +26,33 @@ struct AddTransactionView: View {
     init(
         transaction: FinanceTransaction? = nil,
         upcomingTransaction: UpcomingTransaction? = nil,
+        draft: QuickEntryDraft? = nil,
         initialCommand: String? = nil,
-        initialAccountID: UUID? = nil
+        initialAccountID: UUID? = nil,
+        onSaveDraft: ((QuickEntryDraft) -> Void)? = nil
     ) {
         self.transaction = transaction
         self.upcomingTransaction = upcomingTransaction
+        quickEntryDraft = draft
         self.initialCommand = initialCommand
         self.initialAccountID = initialAccountID
+        self.onSaveDraft = onSaveDraft
         let original: (any EditableTransaction)?
-        if let upcomingTransaction {
+        if let draft {
+            original = draft
+        } else if let upcomingTransaction {
             original = upcomingTransaction
         } else {
             original = transaction
         }
         _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: original))
-        _mode = State(initialValue: original.map(QuickTransactionMode.init) ?? .expense)
+        _mode = State(
+            initialValue: draft?.mode ?? original.map(QuickTransactionMode.init) ?? .expense
+        )
         _amountExpression = State(
             initialValue: AmountExpression(rawValue: original?.amount ?? "")
         )
+        _destinationAccountID = State(initialValue: draft?.destinationAccountId)
     }
 
     var body: some View {
@@ -91,7 +102,7 @@ struct AddTransactionView: View {
             await transactionStore.loadCategories()
             applyInitialCommandIfNeeded()
         }
-        .alert(isEditing ? "Couldn’t save transaction" : "Couldn’t add transaction", isPresented: errorAlertBinding) {
+        .alert(errorAlertTitle, isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Try again.")
@@ -100,10 +111,12 @@ struct AddTransactionView: View {
 
     private var manualEntryContent: some View {
         VStack(spacing: 0) {
-            TransactionModeSelector(modes: availableModes, selection: $mode)
-                .onChange(of: mode) { _, newMode in
-                    handleModeChange(newMode)
-                }
+            if !isLockedTransferDraft {
+                TransactionModeSelector(modes: availableModes, selection: $mode)
+                    .onChange(of: mode) { _, newMode in
+                        handleModeChange(newMode)
+                    }
+            }
             TransactionAmountPanel(expression: amountExpression, formattedAmount: displayAmount)
             TransactionMetadataBar(
                 accounts: accountStore.accounts,
@@ -138,6 +151,7 @@ struct AddTransactionView: View {
     }
 
     private var navigationTitle: String {
+        if quickEntryDraft != nil { return "Edit draft" }
         if upcomingTransaction != nil { return "Edit recurring transaction" }
         if transaction != nil { return "Edit transaction" }
         return initialCommand == nil ? "New transaction" : "Review transaction"
@@ -162,8 +176,15 @@ struct AddTransactionView: View {
     }
 
     private var availableModes: [QuickTransactionMode] {
+        if quickEntryDraft != nil {
+            return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
+        }
         guard !isEditing else { return [.expense, .income] }
         return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
+    }
+
+    private var isLockedTransferDraft: Bool {
+        quickEntryDraft?.mode == .transfer
     }
 
     private var submitButton: some View {
@@ -184,14 +205,23 @@ struct AddTransactionView: View {
     }
 
     private var isSubmitDisabled: Bool {
-        isSaving || originalTransaction.map { !viewModel.hasChanges(from: $0) } == true
+        if let quickEntryDraft {
+            return isSaving || !hasDraftChanges(from: quickEntryDraft)
+        }
+        return isSaving || originalTransaction.map { !viewModel.hasChanges(from: $0) } == true
     }
 
     private var isEditing: Bool { originalTransaction != nil }
 
     private var originalTransaction: (any EditableTransaction)? {
+        if let quickEntryDraft { return quickEntryDraft }
         if let upcomingTransaction { return upcomingTransaction }
         return transaction
+    }
+
+    private var errorAlertTitle: String {
+        if quickEntryDraft != nil { return "Couldn’t save draft" }
+        return isEditing ? "Couldn’t save transaction" : "Couldn’t add transaction"
     }
 
     private var selectedAccount: Account? {
@@ -448,8 +478,15 @@ struct AddTransactionView: View {
             viewModel.setKind(.income, categories: transactionStore.categories)
         case .transfer:
             viewModel.setCategoryID(nil)
+            viewModel.setRecurring(false)
             chooseDestinationIfNeeded()
         }
+    }
+
+    private func hasDraftChanges(from draft: QuickEntryDraft) -> Bool {
+        mode != draft.mode ||
+            (mode == .transfer && destinationAccountID != draft.destinationAccountId) ||
+            viewModel.hasChanges(from: draft)
     }
 
     private func save() async {
@@ -474,6 +511,12 @@ struct AddTransactionView: View {
                   viewModel.isRecurring,
                   endAt < viewModel.occurredAt {
             errorMessage = "The recurrence end date must be on or after the transaction date."
+            return
+        }
+
+        if let quickEntryDraft {
+            onSaveDraft?(updatedDraft(from: quickEntryDraft, amount: amount, accountID: accountID))
+            dismiss()
             return
         }
 
@@ -508,6 +551,45 @@ struct AddTransactionView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func updatedDraft(
+        from draft: QuickEntryDraft,
+        amount: String,
+        accountID: UUID
+    ) -> QuickEntryDraft {
+        let originalAmount = Decimal(
+            string: draft.amount.replacingOccurrences(of: ",", with: "."),
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        let updatedAmount = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX"))
+        let amountChanged = updatedAmount != originalAmount
+
+        var updated = draft
+        updated.mode = mode
+        updated.accountId = accountID
+        updated.destinationAccountId = mode == .transfer ? destinationAccountID : nil
+        updated.amount = amountChanged ? amount : draft.amount
+        updated.currency = selectedAccount?.currency ?? draft.currency
+        if mode == .transfer {
+            updated.category = nil
+        } else if viewModel.categoryID == draft.category?.id {
+            updated.category = draft.category
+        } else {
+            updated.category = transactionStore.categories.first { $0.id == viewModel.categoryID }
+        }
+        updated.merchant = optionalText(viewModel.merchant)
+        updated.payee = optionalText(viewModel.payee)
+        updated.note = optionalText(viewModel.note)
+        updated.occurredAt = viewModel.occurredAt
+        updated.isRecurring = mode != .transfer && viewModel.isRecurring
+        updated.recurrenceFrequency = viewModel.recurrenceFrequency
+        updated.recurrenceEndAt = updated.isRecurring ? viewModel.recurrenceEndAt : nil
+
+        if mode != draft.mode || accountID != draft.accountId || amountChanged {
+            updated.conversion = nil
+        }
+        return updated
     }
 
     private func saveTransfer(from sourceID: UUID, to destinationID: UUID, amount: String) async throws {

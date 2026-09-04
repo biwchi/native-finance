@@ -8,13 +8,12 @@ struct FinanceMonthPickerButton: View {
         Button {
             isShowingPicker = true
         } label: {
-            HStack(spacing: AppSpacing.compact) {
-                Text(month.formatted(.dateTime.month(.abbreviated).year()))
-                AppIcon("nav-arrow-down", size: 11)
-            }
-            .font(.subheadline.weight(.medium))
-            .frame(minHeight: 32)
-            .fixedSize()
+            Text(month.formatted(.dateTime.month(.wide).year()))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 32)
         }
         .accessibilityLabel("Choose month")
         .accessibilityValue(month.formatted(.dateTime.month(.wide).year()))

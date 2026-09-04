@@ -203,6 +203,24 @@ struct APIClient: Sendable {
         )
     }
 
+    func interpretQuickEntry(
+        _ quickEntry: QuickEntryRequest
+    ) async throws -> QuickEntryInterpretationResponse {
+        try await post(
+            quickEntry,
+            to: apiURL.appending(path: "quick-entry").appending(path: "interpret")
+        )
+    }
+
+    func createTransactionBatch(
+        _ batch: TransactionBatchRequest
+    ) async throws -> TransactionBatchResponse {
+        try await post(
+            batch,
+            to: apiURL.appending(path: "transactions").appending(path: "batch")
+        )
+    }
+
     func deleteTransaction(
         id: UUID,
         action: RecurringDeletionAction = .occurrence

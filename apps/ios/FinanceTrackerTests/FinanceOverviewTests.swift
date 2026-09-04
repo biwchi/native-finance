@@ -27,6 +27,14 @@ final class FinanceOverviewTests: XCTestCase {
         XCTAssertFalse(FinanceOverviewData.matches(rows[0], query: "rent", accounts: []))
     }
 
+    func testDashboardSummaryLayoutHidesZeroValueCards() {
+        XCTAssertEqual(summaryLayout(spent: 0, income: 0), .empty)
+        XCTAssertEqual(summaryLayout(spent: 100, income: 0), .spentOnly)
+        XCTAssertEqual(summaryLayout(spent: 0, income: 100), .incomeOnly)
+        XCTAssertEqual(summaryLayout(spent: 75, income: 100), .spentAndIncome(showsNet: true))
+        XCTAssertEqual(summaryLayout(spent: 100, income: 100), .spentAndIncome(showsNet: false))
+    }
+
     func testAfterBillsAndDailyAmountUseRealBudgetAndCalendarDays() throws {
         let bills = [bill(6000, at: "2026-09-16T09:00:00Z"), bill(300, at: "2026-09-18T09:00:00Z")]
         let result = try forecast(spent: 10033, bills: bills)
@@ -160,6 +168,17 @@ final class FinanceOverviewTests: XCTestCase {
     private func forecast(spent: Decimal, bills: [UpcomingTransaction], transactions: [FinanceTransaction] = []) throws -> PlannedBillsSummary {
         let summary = try state(month: now, now: now, spent: spent)
         return try XCTUnwrap(PlannedBillsSummary.calculate(summary: summary, transactions: transactions, upcoming: bills) { amount, _ in amount })
+    }
+    private func summaryLayout(spent: Decimal, income: Decimal) -> DashboardSummaryLayout {
+        DashboardSummaryLayout(
+            insights: DashboardInsights(
+                income: income,
+                spent: spent,
+                previousSpent: 0,
+                net: income - spent,
+                monthlyLimit: nil
+            )
+        )
     }
     private func state(month: Date, now: Date, spent: Decimal) throws -> MonthlySummaryState {
         let interval = try XCTUnwrap(calendar.dateInterval(of: .month, for: month))

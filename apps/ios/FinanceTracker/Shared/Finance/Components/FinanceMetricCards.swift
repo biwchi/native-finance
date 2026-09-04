@@ -8,7 +8,7 @@ struct FinanceMetricCards: View {
         var amountColor: Color = .primary
     }
     let first: Metric
-    let second: Metric
+    var second: Metric? = nil
     let currency: String
     var surface: FinanceCardSurface = .standard
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -22,7 +22,9 @@ struct FinanceMetricCards: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: AppSpacing.medium) {
                         card(first, wrapsAmount: false)
-                        card(second, wrapsAmount: false)
+                        if let second {
+                            card(second, wrapsAmount: false)
+                        }
                     }
                     stackedCards
                 }
@@ -37,7 +39,9 @@ struct FinanceMetricCards: View {
     private var stackedCards: some View {
         VStack(alignment: .leading, spacing: AppSpacing.medium) {
             card(first, wrapsAmount: true)
-            card(second, wrapsAmount: true)
+            if let second {
+                card(second, wrapsAmount: true)
+            }
         }
     }
 

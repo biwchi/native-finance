@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { app } from "./app.ts";
-import { db } from "./db/client.ts";
-import { accounts, categories, transactions } from "./db/schema.ts";
+import { db } from "./infrastructure/db/client.ts";
+import { accounts, categories, transactions } from "./infrastructure/db/schema/index.ts";
 
 const databaseDescribe =
   Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
@@ -64,13 +64,16 @@ databaseDescribe("category and transaction API integration", () => {
     const expenseResponse = await request(
       "/api/v1/categories?kind=expense",
     );
-    const expense = (await expenseResponse.json()) as Array<{ kind: string }>;
+    const expense = (await expenseResponse.json()) as Array<{
+      kind: string;
+      systemKey: string | null;
+    }>;
 
     expect(allResponse.status).toBe(200);
     expect(all.filter((category) => category.systemKey !== null)).toHaveLength(
       22,
     );
-    expect(expense).toHaveLength(16);
+    expect(expense.filter((category) => category.systemKey !== null)).toHaveLength(16);
     expect(expense.every((category) => category.kind === "expense")).toBeTrue();
   });
 
@@ -288,7 +291,7 @@ databaseDescribe("category and transaction API integration", () => {
   });
 
   it("does not guess when equally similar history conflicts", async () => {
-    const token = `conflict${suffix}`;
+    const token = `conflict${crypto.randomUUID().replaceAll("-", "")}`;
     const notes = [
       {
         note: `quasar alpha portal ${token}`,

@@ -2,11 +2,13 @@ import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { app } from "./app.ts";
-import { db } from "./db/client.ts";
-import { accounts, recurringSchedules, transactions } from "./db/schema.ts";
-import { materializeRecurringSchedule } from "./services/recurring-transactions.ts";
+import { materializeRecurringSchedule } from "./application/transactions/materialize-recurring-schedule.ts";
+import { db } from "./infrastructure/db/client.ts";
+import { createDrizzleTransactionRepository } from "./infrastructure/db/repositories/drizzle-transaction.repository.ts";
+import { accounts, recurringSchedules, transactions } from "./infrastructure/db/schema/index.ts";
 
 const databaseDescribe = Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
+const transactionRepository = createDrizzleTransactionRepository(db);
 type Upcoming = { id: string; occurredAt: string; endAt: string | null; amount: string; accountId: string };
 type Created = { id: string; recurrence: { id: string } };
 
@@ -93,7 +95,10 @@ databaseDescribe("recurring template editing and deletion", () => {
         if (action === "occurrence") {
           expect(await ledger()).toEqual([]);
           expect((await upcoming())[0]!.occurredAt).toBe(recorded ? "2100-02-28T12:00:00.000Z" : "2100-03-31T12:00:00.000Z");
-          await materializeRecurringSchedule(item!.id, new Date("2100-03-31T12:00:00.000Z"));
+          await materializeRecurringSchedule(
+            { scheduleId: item!.id, through: new Date("2100-03-31T12:00:00.000Z") },
+            { transactions: transactionRepository },
+          );
           expect((await ledger()).some((row) => row.occurredAt.toISOString() === item!.occurredAt)).toBeFalse();
         } else {
           expect(await upcoming()).toEqual([]);
@@ -102,7 +107,10 @@ databaseDescribe("recurring template editing and deletion", () => {
           if (action === "stopRepeating") {
             expect(rows[0]).toMatchObject({ recurringScheduleId: null, occurredAt: new Date(item!.occurredAt) });
           }
-          await materializeRecurringSchedule(item!.id, new Date("2100-12-31T12:00:00.000Z"));
+          await materializeRecurringSchedule(
+            { scheduleId: item!.id, through: new Date("2100-12-31T12:00:00.000Z") },
+            { transactions: transactionRepository },
+          );
           expect(await ledger()).toEqual(rows);
         }
       });
@@ -142,7 +150,10 @@ databaseDescribe("recurring template editing and deletion", () => {
     const [item] = await upcoming();
     const [response] = await Promise.all([
       remove(item!, "occurrence"),
-      materializeRecurringSchedule(item!.id, new Date("2100-03-31T12:00:00.000Z")),
+      materializeRecurringSchedule(
+        { scheduleId: item!.id, through: new Date("2100-03-31T12:00:00.000Z") },
+        { transactions: transactionRepository },
+      ),
     ]);
     expect(response.status).toBe(200);
     expect((await ledger()).map((row) => row.occurredAt.toISOString())).toEqual(["2100-03-31T12:00:00.000Z"]);

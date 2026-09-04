@@ -19,3 +19,4 @@ xcuserdata/
 # Local tooling
 .idea/
 .vscode/
+buildServer.json

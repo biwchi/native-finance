@@ -2,6 +2,22 @@ import Foundation
 import SwiftUI
 
 struct TransactionListView: View {
+    private enum DetachedContentID: Hashable {
+        case overview
+        case search
+    }
+
+    private struct DetachedContentBoundsPreferenceKey: PreferenceKey {
+        static let defaultValue: [DetachedContentID: Anchor<CGRect>] = [:]
+
+        static func reduce(
+            value: inout [DetachedContentID: Anchor<CGRect>],
+            nextValue: () -> [DetachedContentID: Anchor<CGRect>]
+        ) {
+            value.merge(nextValue()) { _, next in next }
+        }
+    }
+
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @State private var editingTransaction: FinanceTransaction?
@@ -11,15 +27,21 @@ struct TransactionListView: View {
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var reportingCurrency = AppPreferences.initialCurrency
     @State private var selectedMonth: Date
-    @State private var searchText = ""
+    @Binding private var searchText: String
 
     var recentLimit: Int?
     var showsOverview: Bool
 
-    init(recentLimit: Int? = nil, showsOverview: Bool = false, month: Date = .now) {
+    init(
+        recentLimit: Int? = nil,
+        showsOverview: Bool = false,
+        month: Date = .now,
+        searchText: Binding<String> = .constant("")
+    ) {
         self.recentLimit = recentLimit
         self.showsOverview = showsOverview
         _selectedMonth = State(initialValue: BudgetMonth.start(of: month))
+        _searchText = searchText
     }
 
     var body: some View {
@@ -73,8 +95,39 @@ struct TransactionListView: View {
                 }
                 .listRowBackground(Color.clear)
             }
+
+            if showsOverview {
+                FinanceListBottomSpacer()
+            }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(4))
+        .environment(\.defaultMinListRowHeight, 0)
+        .financePage(
+            enabled: showsOverview,
+            detachedPreference: DetachedContentBoundsPreferenceKey.self
+        ) {
+            bounds, proxy in
+            ZStack {
+                if let anchor = bounds[.overview],
+                    transactionStore.state == .loaded,
+                    let insights
+                {
+                    let frame = proxy[anchor]
+                    overviewCards(for: insights)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                        .allowsHitTesting(false)
+                }
+
+                if let anchor = bounds[.search] {
+                    let frame = proxy[anchor]
+                    TransactionSearchField(text: $searchText)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                }
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
         .modifier(ActivityToolbar(isEnabled: showsOverview, month: $selectedMonth))
         .task(id: rateScope) {
@@ -120,20 +173,43 @@ struct TransactionListView: View {
         Section {
             FinancePageHeader(title: "Activity")
             if transactionStore.state == .loaded, let insights {
-                FinanceMetricCards(
-                    first: .init(title: "Spent", amount: insights.spent),
-                    second: .init(title: "Income", amount: insights.income),
-                    currency: currency
-                )
+                if #available(iOS 26.0, *) {
+                    overviewCards(for: insights)
+                        .hidden()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .anchorPreference(
+                            key: DetachedContentBoundsPreferenceKey.self,
+                            value: .bounds
+                        ) { [.overview: $0] }
+                } else {
+                    overviewCards(for: insights)
+                }
             } else {
                 FinanceSummaryUnavailable(state: transactionStore.state, rateState: summaryRates.state)
             }
             TransactionSearchField(text: $searchText)
-            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 0, trailing: 0))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
+                .hidden()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .anchorPreference(
+                    key: DetachedContentBoundsPreferenceKey.self,
+                    value: .bounds
+                ) { [.search: $0] }
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
         .modifier(FinanceSectionMargins())
+    }
+
+    private func overviewCards(for insights: DashboardInsights) -> some View {
+        FinanceMetricCards(
+            first: .init(title: "Spent", amount: insights.spent),
+            second: .init(title: "Income", amount: insights.income),
+            currency: currency,
+            surface: .glass
+        )
     }
 
     private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
@@ -158,7 +234,8 @@ struct TransactionListView: View {
         } label: {
             TransactionRow(
                 transaction: transaction,
-                account: accountStore.accounts.first { $0.id == transaction.accountId }
+                account: accountStore.accounts.first { $0.id == transaction.accountId },
+                timestampStyle: recentLimit == nil ? .time : .dateAndTime
             )
                 .contentShape(Rectangle())
         }

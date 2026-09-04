@@ -235,6 +235,77 @@ final class TransactionStore: ObservableObject {
             .suggestions
     }
 
+    func interpretQuickEntry(
+        text: String,
+        defaultAccountID: UUID,
+        locale: String = Locale.current.identifier,
+        timeZone: String = TimeZone.current.identifier
+    ) async throws -> QuickEntryReviewPresentation {
+        await loadCategories()
+        if let categoryErrorMessage {
+            throw QuickEntryStoreError.categoriesUnavailable(categoryErrorMessage)
+        }
+
+        let response = try await apiClient.interpretQuickEntry(
+            QuickEntryRequest(
+                text: text,
+                defaultAccountId: defaultAccountID,
+                locale: locale,
+                timeZone: timeZone
+            )
+        )
+        let drafts = response.transactions.map { payload in
+            QuickEntryDraft(
+                payload: payload,
+                category: categories.first { $0.id == payload.categoryId }
+            )
+        }
+        return QuickEntryReviewPresentation(
+            prompt: text,
+            drafts: drafts,
+            unparsedText: response.unparsedText
+        )
+    }
+
+    @discardableResult
+    func commitQuickEntryDrafts(_ drafts: [QuickEntryDraft]) async throws -> Int {
+        let items = try drafts.map { draft -> TransactionBatchItem in
+            if draft.mode == .transfer {
+                guard let destinationAccountID = draft.destinationAccountId else {
+                    throw QuickEntryStoreError.invalidTransfer
+                }
+                return .transfer(TransferRequest(
+                    fromAccountId: draft.accountId,
+                    toAccountId: destinationAccountID,
+                    amount: Self.normalizedAmount(draft.amount),
+                    merchant: draft.merchant,
+                    payee: draft.payee,
+                    note: draft.note,
+                    occurredAt: draft.occurredAt
+                ))
+            }
+            return .transaction(TransactionRequest(
+                accountId: draft.accountId,
+                kind: draft.kind,
+                amount: Self.normalizedAmount(draft.amount),
+                categoryId: draft.category?.id,
+                merchant: draft.merchant,
+                payee: draft.payee,
+                note: draft.note,
+                occurredAt: draft.occurredAt,
+                recurrence: draft.isRecurring ? RecurrenceRequest(
+                    frequency: draft.recurrenceFrequency,
+                    endAt: draft.recurrenceEndAt
+                ) : nil
+            ))
+        }
+        let result = try await apiClient.createTransactionBatch(
+            TransactionBatchRequest(transactions: items)
+        )
+        await loadTransactions(accountID: currentAccountID)
+        return result.created
+    }
+
     @discardableResult
     func createTransaction(
         _ request: TransactionRequest
@@ -320,6 +391,25 @@ final class TransactionStore: ObservableObject {
             balance += transaction.kind == .income ? converted : -converted
         }
         return balance
+    }
+
+    private static func normalizedAmount(_ amount: String) -> String {
+        amount
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+    }
+}
+
+private enum QuickEntryStoreError: LocalizedError {
+    case categoriesUnavailable(String)
+    case invalidTransfer
+
+    var errorDescription: String? {
+        switch self {
+        case let .categoriesUnavailable(message): message
+        case .invalidTransfer: "Choose a destination account for every transfer"
+        }
     }
 }
 

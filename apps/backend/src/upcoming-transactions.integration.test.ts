@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { app } from "./app.ts";
-import { db } from "./db/client.ts";
-import { accounts, recurringSchedules, transactions } from "./db/schema.ts";
+import { db } from "./infrastructure/db/client.ts";
+import { accounts, recurringSchedules, transactions } from "./infrastructure/db/schema/index.ts";
 
 const databaseDescribe = Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
 type Upcoming = { id: string; accountId: string; merchant: string; amount: string; occurredAt: string };

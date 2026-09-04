@@ -4,6 +4,7 @@ struct MonthlySummaryCard<Accessory: View, Content: View>: View {
     let monthTitle: String
     var titleColor: Color = .primary
     var surface: FinanceCardSurface = .standard
+    var gradientTint: Color? = nil
     @ViewBuilder let accessory: Accessory
     @ViewBuilder let content: Content
 
@@ -26,6 +27,18 @@ struct MonthlySummaryCard<Accessory: View, Content: View>: View {
         .padding(.horizontal, AppSpacing.extraLarge)
         .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? AppSpacing.large : 11)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if let gradientTint {
+                RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [gradientTint.opacity(0.14), gradientTint.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+        }
         .financeCardSurface(
             surface,
             fallbackColor: cardBackground,

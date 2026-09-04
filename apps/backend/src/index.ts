@@ -1,6 +1,6 @@
 import { app } from "./app.ts";
 import { config } from "./config.ts";
-import { closeDatabase } from "./db/client.ts";
+import { closeDatabase } from "./infrastructure/db/client.ts";
 
 app.listen({
   hostname: config.host,

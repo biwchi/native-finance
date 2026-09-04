@@ -6,13 +6,20 @@ struct TransactionRow: View {
         case upcoming
     }
 
+    enum TimestampStyle {
+        case time
+        case dateAndTime
+    }
+
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let transaction: any EditableTransaction
     let account: Account?
     var titleOverride: String? = nil
     var recurrenceDetails: String? = nil
+    var secondaryAmountText: String? = nil
     var style: Style = .transaction
+    var timestampStyle: TimestampStyle = .time
 
     var body: some View {
         HStack(alignment: .center, spacing: AppSpacing.medium) {
@@ -21,12 +28,14 @@ struct TransactionRow: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: AppSpacing.small) {
                     details
-                    amount
+                    amountDetails
                 }
+            } else if style == .transaction {
+                transactionDetails
             } else {
                 details
                 Spacer(minLength: AppSpacing.medium)
-                amount
+                amountDetails
                     .layoutPriority(1)
             }
         }
@@ -67,13 +76,10 @@ struct TransactionRow: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            titleLabel
 
             if style == .transaction {
-                accountLabel
+                timestampLabel
             }
 
             if let recurrenceDetails {
@@ -81,6 +87,63 @@ struct TransactionRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var transactionDetails: some View {
+        Grid(alignment: .leading, verticalSpacing: 5) {
+            GridRow {
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.medium) {
+                    titleLabel
+                    Spacer(minLength: AppSpacing.medium)
+                    amount
+                }
+            }
+
+            GridRow {
+                HStack(alignment: .top, spacing: AppSpacing.medium) {
+                    timestampLabel
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    transactionMetadata
+                        .layoutPriority(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var titleLabel: some View {
+        Text(title)
+            .font(.body.weight(.medium))
+            .foregroundStyle(.primary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+    }
+
+    private var timestampLabel: some View {
+        Text(timestampText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(noteText == nil ? 1 : 4)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var amountDetails: some View {
+        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 5) {
+            amountWithSecondary
+
+            if style == .transaction {
+                accountLabel
+            }
+        }
+    }
+
+    private var transactionMetadata: some View {
+        VStack(alignment: .trailing, spacing: 5) {
+            if let secondaryAmountText {
+                secondaryAmountLabel(secondaryAmountText)
+            }
+
+            accountLabel
         }
     }
 
@@ -106,6 +169,28 @@ struct TransactionRow: View {
             .fixedSize(horizontal: true, vertical: false)
     }
 
+    private var amountWithSecondary: some View {
+        VStack(
+            alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing,
+            spacing: 2
+        ) {
+            amount
+
+            if let secondaryAmountText {
+                secondaryAmountLabel(secondaryAmountText)
+            }
+        }
+    }
+
+    private func secondaryAmountLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.regular))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
     private var title: String {
         titleOverride ?? transaction.category?.name ?? "Uncategorized"
     }
@@ -114,13 +199,33 @@ struct TransactionRow: View {
         transaction.formattedAmount(showExpenseSign: style == .transaction)
     }
 
+    private var timestampText: String {
+        if let noteText {
+            return noteText
+        }
+
+        switch timestampStyle {
+        case .time:
+            return transaction.occurredAt.formatted(date: .omitted, time: .shortened)
+        case .dateAndTime:
+            return transaction.occurredAt.formatted(date: .abbreviated, time: .shortened)
+        }
+    }
+
     private var accessibilityDescription: String {
         let date = transaction.occurredAt.formatted(date: .abbreviated, time: .shortened)
         let recurrence = transaction.recurrence.map {
             ", recurring \($0.frequency.title.lowercased())"
         } ?? ""
         let accountDetails = style == .transaction ? ", \(account?.name ?? "Unknown account")" : ""
-        return "\(title)\(accountDetails), \(amountText), \(date)\(recurrence)"
+        let original = secondaryAmountText.map { ", originally \($0)" } ?? ""
+        return "\(title)\(accountDetails), \(amountText)\(original), \(noteText ?? date)\(recurrence)"
+    }
+
+    private var noteText: String? {
+        guard let note = transaction.note?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !note.isEmpty else { return nil }
+        return note
     }
 
     private var iconColor: Color {

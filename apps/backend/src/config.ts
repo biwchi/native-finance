@@ -16,5 +16,8 @@ export const config = {
   databaseUrl: Bun.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
   frankfurterBaseUrl: Bun.env.FRANKFURTER_BASE_URL ?? "https://api.frankfurter.dev",
   host: Bun.env.HOST ?? "0.0.0.0",
+  openAIBaseUrl: Bun.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+  openAIApiKey: Bun.env.OPENAI_API_KEY,
+  openAIModel: Bun.env.OPENAI_MODEL ?? "gpt-5-nano",
   port: readPort(Bun.env.PORT),
 } as const;

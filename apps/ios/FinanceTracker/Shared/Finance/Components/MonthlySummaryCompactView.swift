@@ -5,9 +5,10 @@ struct MonthlySummaryCompactView: View {
     var showsPlannedBills = false
     var plannedBills: PlannedBillsSummary? = nil
     var isLoadingPlannedBills = false
+    var surface: FinanceCardSurface = .standard
 
     var body: some View {
-        MonthlySummaryCard(monthTitle: state.monthTitle) {
+        MonthlySummaryCard(monthTitle: state.monthTitle, surface: surface) {
             Text(state.status.displayText)
                 .foregroundStyle(state.status == .onTrack ? .secondary : statusTint)
         } content: {

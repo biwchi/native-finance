@@ -2,13 +2,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm";
 
 import { app } from "./app.ts";
-import { db } from "./db/client.ts";
+import { db } from "./infrastructure/db/client.ts";
 import {
   accounts,
   categories,
   recurringSchedules,
   transactions,
-} from "./db/schema.ts";
+} from "./infrastructure/db/schema/index.ts";
 
 const databaseDescribe = Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
 type TransactionResponse = { id: string; createdAt: string; updatedAt: string };

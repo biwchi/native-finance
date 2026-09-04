@@ -109,6 +109,7 @@ enum AppIcons {
         "home-secure": Hugeicons.securityLock,
         "home-simple": Hugeicons.home03,
         "input-field": Hugeicons.keyboard,
+        "information-circle": Hugeicons.informationCircle,
         "jellyfish": Hugeicons.octopus,
         "key": Hugeicons.key01,
         "label": Hugeicons.tag01,

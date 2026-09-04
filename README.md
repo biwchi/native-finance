@@ -30,6 +30,10 @@ The API is reachable over IPv4 at `http://127.0.0.1:3000`. Check it with:
 curl http://127.0.0.1:3000/health
 ```
 
+Quick Entry runs through the backend so the OpenAI key never ships in the iOS
+app. Set `OPENAI_API_KEY` in `apps/backend/.env`; `OPENAI_MODEL` defaults to
+`gpt-5-nano`. Restart the backend after changing either value.
+
 Keep one backend running at a time. Stop it with **Ctrl+C** before restarting;
 **Ctrl+Z** suspends it and leaves the API port occupied. A second server now fails
 with a port-in-use error. If a suspended server is holding the port, use `jobs`
@@ -53,4 +57,6 @@ bun run db:migrate
 bun run db:studio
 ```
 
-Drizzle schema changes belong in `apps/backend/src/db/schema.ts`. Run `bun run db:generate` after changing it and commit the generated migration.
+Drizzle schema changes belong in `apps/backend/src/infrastructure/db/schema/`.
+Keep tables grouped by domain, then run `bun run db:generate` and commit any
+generated migration.

@@ -3,6 +3,7 @@ import SwiftUI
 enum FinanceCardSurface {
     case standard
     case glass
+    case tintedGlass(Color)
 }
 
 extension EnvironmentValues {
@@ -26,6 +27,18 @@ extension View {
                 glassEffect(.regular, in: shape)
             } else {
                 background(.thinMaterial, in: shape)
+                    .overlay {
+                        shape.stroke(.white.opacity(0.10), lineWidth: 1)
+                    }
+            }
+        case let .tintedGlass(tint):
+            if #available(iOS 26.0, *) {
+                glassEffect(.regular.tint(tint), in: shape)
+            } else {
+                background(tint, in: shape)
+                    .overlay {
+                        shape.fill(.thinMaterial)
+                    }
                     .overlay {
                         shape.stroke(.white.opacity(0.10), lineWidth: 1)
                     }

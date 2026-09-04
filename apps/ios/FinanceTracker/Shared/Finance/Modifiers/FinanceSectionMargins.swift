@@ -7,3 +7,18 @@ struct FinanceSectionMargins: ViewModifier {
         else { content }
     }
 }
+
+struct FinanceListBottomSpacer: View {
+    var body: some View {
+        Section {
+            Color.clear
+                .frame(height: AppSpacing.large)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .modifier(FinanceSectionMargins())
+    }
+}

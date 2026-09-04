@@ -14,6 +14,7 @@ struct MainTabController: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UITabBarController {
         let controller = UITabBarController()
+        let coordinator = context.coordinator
         controller.delegate = context.coordinator
         controller.view.tintColor = UIColor(AppColor.accent)
 
@@ -21,12 +22,13 @@ struct MainTabController: UIViewControllerRepresentable {
         let home = hostingController(DashboardView(), title: "Home", iconName: "home-simple")
         let activity = hostingController(ActivityView(), title: "Activity", iconName: "list")
         let plan = hostingController(PlanView(), title: "Plan", iconName: "percentage-circle")
-        let settingsView = SettingsView { [weak controller] isVisible in
+        let settingsView = SettingsView { [weak controller, weak coordinator] isVisible in
             if #available(iOS 18.0, *) {
                 controller?.setTabBarHidden(isVisible, animated: true)
             } else {
                 controller?.tabBar.isHidden = isVisible
             }
+            coordinator?.setAddButtonHidden(isVisible)
         }
         let settings = hostingController(settingsView, title: "Settings", iconName: "settings")
         let add = context.coordinator.addViewController
@@ -34,8 +36,16 @@ struct MainTabController: UIViewControllerRepresentable {
 
         if #available(iOS 18.0, *) {
             let addTab = UISearchTab { _ in add }
-            addTab.title = "Add"
-            addTab.image = AppIcons.uiImage(named: "plus")
+            if #available(iOS 26.0, *) {
+                // Keep the search-tab slot only for its native trailing placement. A real
+                // prominent-glass button is laid over it below.
+                addTab.title = ""
+                addTab.image = UIImage()
+                addTab.isEnabled = false
+            } else {
+                addTab.title = "Add"
+                addTab.image = AppIcons.uiImage(named: "plus")
+            }
             controller.tabs = [
                 UITab(title: "Home", image: home.tabBarItem.image, identifier: "home") { _ in home },
                 UITab(title: "Activity", image: activity.tabBarItem.image, identifier: "activity") { _ in activity },
@@ -43,10 +53,49 @@ struct MainTabController: UIViewControllerRepresentable {
                 UITab(title: "Settings", image: settings.tabBarItem.image, identifier: "settings") { _ in settings },
                 addTab
             ]
+            if #available(iOS 26.0, *) {
+                installAddButton(in: controller, coordinator: coordinator)
+            }
         } else {
             controller.viewControllers = [home, activity, plan, settings, add]
         }
         return controller
+    }
+
+    @available(iOS 26.0, *)
+    private func installAddButton(
+        in controller: UITabBarController,
+        coordinator: Coordinator
+    ) {
+        let buttonController = UIHostingController(
+            rootView: PrimaryIconButton(
+                "Add",
+                iconName: "plus",
+                iconSize: 26,
+                appearance: .glassProminent
+            ) { [weak coordinator] in
+                coordinator?.onAdd()
+            }
+            .dynamicTypeSize(.large)
+            .frame(width: 62, height: 62)
+        )
+        buttonController.view.backgroundColor = .clear
+        buttonController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        controller.addChild(buttonController)
+        controller.view.addSubview(buttonController.view)
+        buttonController.didMove(toParent: controller)
+
+        NSLayoutConstraint.activate([
+            buttonController.view.widthAnchor.constraint(equalToConstant: 62),
+            buttonController.view.heightAnchor.constraint(equalToConstant: 62),
+            buttonController.view.trailingAnchor.constraint(
+                equalTo: controller.view.safeAreaLayoutGuide.trailingAnchor,
+                constant: -21
+            ),
+            buttonController.view.topAnchor.constraint(equalTo: controller.tabBar.topAnchor),
+        ])
+        coordinator.addButtonView = buttonController.view
     }
 
     func updateUIViewController(_ controller: UITabBarController, context: Context) {
@@ -70,10 +119,15 @@ struct MainTabController: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UITabBarControllerDelegate {
         let addViewController = UIViewController()
+        weak var addButtonView: UIView?
         var onAdd: () -> Void
 
         init(onAdd: @escaping () -> Void) {
             self.onAdd = onAdd
+        }
+
+        func setAddButtonHidden(_ isHidden: Bool) {
+            addButtonView?.isHidden = isHidden
         }
 
         @available(iOS 18.0, *)
