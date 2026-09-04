@@ -18,6 +18,6 @@ export const config = {
   host: Bun.env.HOST ?? "0.0.0.0",
   openAIBaseUrl: Bun.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
   openAIApiKey: Bun.env.OPENAI_API_KEY,
-  openAIModel: Bun.env.OPENAI_MODEL ?? "gpt-5-nano",
+  openAIModel: Bun.env.OPENAI_MODEL ?? "gpt-5.6-luna",
   port: readPort(Bun.env.PORT),
 } as const;

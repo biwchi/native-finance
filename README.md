@@ -32,7 +32,8 @@ curl http://127.0.0.1:3000/health
 
 Quick Entry runs through the backend so the OpenAI key never ships in the iOS
 app. Set `OPENAI_API_KEY` in `apps/backend/.env`; `OPENAI_MODEL` defaults to
-`gpt-5-nano`. Restart the backend after changing either value.
+`gpt-5.6-luna` with low reasoning effort. Restart the backend after changing
+either value.
 
 Keep one backend running at a time. Stop it with **Ctrl+C** before restarting;
 **Ctrl+Z** suspends it and leaves the API port occupied. A second server now fails
