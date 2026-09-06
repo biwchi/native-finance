@@ -13,5 +13,7 @@ struct FinanceTransaction: Codable, Identifiable, Hashable, EditableTransaction 
     let occurredAt: Date
     let createdAt: Date
     let updatedAt: Date
+    var debtId: UUID? = nil
+    var debt: Debt? = nil
     var recurrence: TransactionRecurrence? = nil
 }

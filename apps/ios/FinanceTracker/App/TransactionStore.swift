@@ -20,6 +20,69 @@ final class TransactionStore: ObservableObject {
     @Published private(set) var isLoadingCategories = false
     @Published private(set) var categoryErrorMessage: String?
 
+    @Published private(set) var debts: [Debt] = []
+    @Published private(set) var debtErrorMessage: String?
+    @Published private(set) var isLoadingDebts = false
+
+    var debtTransactions: [FinanceTransaction] {
+        allTransactions.filter { $0.kind == .debt }
+    }
+
+    func outstandingDebtInCurrency(_ currency: String) -> Decimal? {
+        var total = Decimal.zero
+        for transaction in debtTransactions where transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
+            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+            total += amount
+        }
+        return total
+    }
+
+    func outstandingDebt(currency: String, rates: ExchangeRateSnapshot?) -> Decimal? {
+        guard state == .loaded, hasLoadedTransactions else { return nil }
+        var total = Decimal.zero
+        for transaction in debtTransactions {
+            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+            if transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
+                total += amount
+            } else {
+                guard let converted = rates?.convert(amount, from: transaction.currency, to: currency) else { return nil }
+                total += converted
+            }
+        }
+        return total
+    }
+
+    func loadDebts() async {
+        isLoadingDebts = true
+        debtErrorMessage = nil
+        defer { isLoadingDebts = false }
+        do {
+            debts = try await apiClient.debts()
+        } catch {
+            debtErrorMessage = error.localizedDescription
+        }
+    }
+
+    func createDebt(name: String, icon: String = "user", color: CategoryColor = .blue) async throws -> Debt {
+        let debt = try await apiClient.createDebt(name: name.trimmingCharacters(in: .whitespacesAndNewlines), icon: icon, color: color)
+        debts.append(debt)
+        debts.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return debt
+    }
+
+    func updateDebt(_ existing: Debt, name: String, icon: String, color: CategoryColor) async throws -> Debt {
+        let debt = try await apiClient.updateDebt(id: existing.id,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), icon: icon, color: color)
+        debts.removeAll { $0.id == debt.id }
+        debts.append(debt)
+        debts.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        for index in allTransactions.indices where allTransactions[index].debtId == debt.id || allTransactions[index].debt?.id == debt.id {
+            allTransactions[index].debt = debt
+        }
+        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
+        return debt
+    }
+
     private let apiClient: APIClient
     private var currentAccountID: UUID?
     private var upcomingRequestID = UUID()
@@ -428,6 +491,8 @@ private extension FinanceTransaction {
             occurredAt: occurredAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            debtId: debtId,
+            debt: debt,
             recurrence: recurrence
         )
     }

@@ -9,5 +9,6 @@ struct TransactionRequest: Encodable {
     var payee: String? = nil
     let note: String?
     let occurredAt: Date
+    var debtId: UUID? = nil
     var recurrence: RecurrenceRequest? = nil
 }

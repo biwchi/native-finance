@@ -1,3 +1,4 @@
+import type { DebtRepository } from "../../domain/debts/debt.ts";
 import { nextRecurrenceDate } from "../../domain/transactions/recurrence.ts";
 import type {
   TransactionInput,
@@ -24,6 +25,7 @@ export async function updateRecurringTransaction(
   dependencies: {
     accounts: AccountRepository;
     categories: CategoryRepository;
+    debts?: DebtRepository;
     transactions: TransactionRepository;
     now?: () => Date;
   },

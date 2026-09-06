@@ -1,3 +1,4 @@
+import type { DebtRepository } from "../../domain/debts/debt.ts";
 import {
   boundExistingNext,
   boundedNextOccurrence,
@@ -24,6 +25,7 @@ export async function updateTransaction(
   dependencies: {
     accounts: AccountRepository;
     categories: CategoryRepository;
+    debts?: DebtRepository;
     transactions: TransactionRepository;
   },
 ): Promise<Result<TransactionResponse, UpdateTransactionError>> {

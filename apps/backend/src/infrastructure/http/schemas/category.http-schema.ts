@@ -2,7 +2,7 @@ import { t } from "elysia";
 
 import { transactionKindSchema } from "./finance.http-schema.ts";
 
-const categoryColorSchema = t.Union([
+export const categoryColorSchema = t.Union([
   t.Literal("red"),
   t.Literal("coral"),
   t.Literal("orange"),

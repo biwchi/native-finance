@@ -1,6 +1,6 @@
 import SwiftUI
 
 #Preview {
-    SettingsView()
+    NavigationStack { SettingsView() }
         .environmentObject(TransactionStore())
 }

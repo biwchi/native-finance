@@ -1,6 +1,6 @@
 import { error, ok, type Result } from "../shared/result.ts";
 
-export type TransactionKind = "expense" | "income";
+export type TransactionKind = "expense" | "income" | "debt";
 
 export type Category = {
   id: string;

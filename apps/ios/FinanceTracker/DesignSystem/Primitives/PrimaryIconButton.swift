@@ -3,7 +3,7 @@ import SwiftUI
 struct PrimaryIconButton: View {
     enum Appearance {
         case filled
-        case glassProminent
+        case glass
     }
 
     @Environment(\.isEnabled) private var isEnabled
@@ -37,8 +37,8 @@ struct PrimaryIconButton: View {
 
     @ViewBuilder
     private var styledButton: some View {
-        if #available(iOS 26.0, *), appearance == .glassProminent {
-            button.buttonStyle(.glassProminent)
+        if #available(iOS 26.0, *), appearance == .glass {
+            button.buttonStyle(.glass(.regular.tint(AppColor.accent.opacity(0.22))))
         } else {
             button.buttonStyle(.borderedProminent)
         }
@@ -47,8 +47,15 @@ struct PrimaryIconButton: View {
     private var button: some View {
         Button(action: action) {
             AppIcon(iconName, size: iconSize)
-                .foregroundStyle(isEnabled ? AppColor.onAccent : Color.primary)
+                .foregroundStyle(foreground)
                 .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
         }
+    }
+
+    private var foreground: Color {
+        if #available(iOS 26.0, *), appearance == .glass {
+            return isEnabled ? .primary : .secondary
+        }
+        return isEnabled ? AppColor.onAccent : .primary
     }
 }

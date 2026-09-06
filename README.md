@@ -44,7 +44,7 @@ and `fg` in the terminal where you started it, then **Ctrl+C** to stop it.
 
 Open `apps/ios/FinanceTracker.xcodeproj`, select an iPhone simulator or your connected iPhone, and run the `FinanceTracker` scheme. Simulator Debug builds connect to `http://127.0.0.1:3000`. Device Debug builds automatically connect to your Mac at `http://<your-Mac-hostname>.local:3000`.
 
-For a physical iPhone, keep both devices on the same Wi-Fi, leave the backend running with `HOST=0.0.0.0`, and allow Local Network access when the app asks. See [the iOS setup guide](apps/ios/README.md) for troubleshooting and API address overrides.
+For a physical iPhone, keep both devices on the same Wi-Fi, leave the backend running with `HOST=::`, and allow Local Network access when the app asks. See [the iOS setup guide](apps/ios/README.md) for troubleshooting and API address overrides.
 
 The app loads accounts from `/api/v1/accounts`, creates and edits them from the account picker, and filters `/api/v1/transactions` by the selected account. Account icons, colors, and ISO currency codes are stored by the backend. The default Total selection loads transactions across every account.
 

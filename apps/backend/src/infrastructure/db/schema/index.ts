@@ -1,3 +1,4 @@
+export * from "./debt.schema.ts";
 export * from "./account.schema.ts";
 export * from "./budget.schema.ts";
 export * from "./category.schema.ts";

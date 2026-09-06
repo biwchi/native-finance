@@ -24,6 +24,25 @@ private struct FinancePageGradientModifier: ViewModifier {
 
     private func page<PageContent: View>(content: PageContent) -> some View {
         ZStack(alignment: .top) {
+            pageBackground
+
+            if #available(iOS 26.0, *) {
+                content
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .modifier(FinanceToolbarScrollEdgeModifier(background: pageBackground))
+            } else {
+                content
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+            }
+        }
+    }
+
+    private var pageBackground: some View {
+        let pullDownDistance = max(0, -scrollOffset)
+
+        return ZStack(alignment: .top) {
             backgroundColor
                 .ignoresSafeArea()
 
@@ -34,13 +53,15 @@ private struct FinancePageGradientModifier: ViewModifier {
             )
             .frame(maxWidth: .infinity)
             .frame(height: height)
+            .overlay(alignment: .top) {
+                // Extend the top color without stretching the gradient's existing stops.
+                tint.opacity(opacity)
+                    .frame(height: pullDownDistance)
+                    .offset(y: -pullDownDistance)
+            }
             .offset(y: -scrollOffset)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
-
-            content
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
         }
     }
 }

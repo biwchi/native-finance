@@ -24,6 +24,17 @@ final class AccentControlContrastTests: XCTestCase {
         }
     }
 
+    func testSummaryStatusTextContrastInBothAppearances() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            for token in [AppColor.positiveText, AppColor.destructiveText] {
+                let foreground = UIColor(token).resolvedColor(with: traits)
+                let surface = UIColor.secondarySystemGroupedBackground.resolvedColor(with: traits)
+                XCTAssertGreaterThanOrEqual(contrast(luminance(foreground), luminance(surface)), 4.5)
+            }
+        }
+    }
+
     func testSelectedLabelRemainsVisibleInBothAppearances() throws {
         for scheme in [ColorScheme.light, .dark] {
             try assertVisibleContent(
@@ -84,13 +95,13 @@ final class AccentControlContrastTests: XCTestCase {
                             "Glass Add",
                             iconName: "plus",
                             iconSize: 26,
-                            appearance: .glassProminent
+                            appearance: .glass
                         ) {}
                         PrimaryIconButton(
                             "Disabled Glass Add",
                             iconName: "plus",
                             iconSize: 26,
-                            appearance: .glassProminent
+                            appearance: .glass
                         ) {}
                         .disabled(true)
                     }
@@ -117,6 +128,93 @@ final class AccentControlContrastTests: XCTestCase {
             add(attachment)
             window.isHidden = true
         }
+    }
+
+    func testTransactionGlassControlsRenderInBothAppearances() async throws {
+        let account = Account(
+            id: UUID(), name: "Main account", type: .checking, currency: "USD",
+            icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: ""
+        )
+        for scheme in [ColorScheme.light, .dark] {
+            let controls = VStack(spacing: 20) {
+                ForEach(QuickTransactionMode.allCases) { mode in
+                    TransactionModeSelector(modes: QuickTransactionMode.allCases, selection: .constant(mode))
+                }
+                TransactionModeSelector(modes: QuickTransactionMode.allCases, selection: .constant(.expense))
+                    .disabled(true)
+                TransactionMetadataBar(
+                    accounts: [account], selectedAccountID: account.id,
+                    date: .constant(Date(timeIntervalSince1970: 1_788_600_000)),
+                    hasExtraDetails: true, onSelectAccount: { _ in }
+                )
+                PrimaryActionButton("Add transaction", appearance: .glass) {}
+                    .controlSize(.large)
+                PrimaryActionButton("Disabled", appearance: .glass) {}
+                    .controlSize(.large)
+                    .disabled(true)
+                PrimaryActionButton("Saving…", isLoading: true, appearance: .glass) {}
+                    .controlSize(.large)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppColor.groupedBackground)
+            .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(
+                controls,
+                name: "Transaction-glass-\(scheme)"
+            )
+        }
+    }
+
+    func testTransactionGlassSelectorAtAccessibilitySize() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let controls = TransactionModeSelector(modes: QuickTransactionMode.allCases, selection: .constant(.expense))
+                .environment(\.dynamicTypeSize, .accessibility3)
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppColor.groupedBackground)
+                .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(controls, name: "Transaction-glass-large-text-\(scheme)")
+        }
+    }
+
+    func testTransactionGlassSheetInBothAppearances() async throws {
+        let accounts = ["Main", "Savings"].map { name in
+            Account(id: UUID(), name: name, type: .checking, currency: "USD",
+                    icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
+        }
+        for scheme in [ColorScheme.light, .dark] {
+            let content = Color(uiColor: .systemGroupedBackground)
+                .sheet(isPresented: .constant(true)) {
+                    AddTransactionView()
+                        .environmentObject(AccountStore.preview(accounts: accounts))
+                        .environmentObject(TransactionStore.preview(transactions: []))
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                }
+                .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(content, name: "Transaction-glass-sheet-\(scheme)")
+        }
+    }
+
+    private func attachGlassSnapshot<Content: View>(_ content: Content, name: String) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let controller = UIHostingController(rootView: content)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 760)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.frame = window.bounds
+        try await Task.sleep(for: .milliseconds(750))
+        controller.view.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func assertVisibleContent<Content: View>(

@@ -31,7 +31,7 @@ struct CategoryEditorView: View {
 
                     if editor.category == nil {
                         Picker("Type", selection: $kind) {
-                            ForEach(TransactionKind.allCases) { kind in
+                            ForEach([TransactionKind.expense, .income]) { kind in
                                 Text(kind.title).tag(kind)
                             }
                         }

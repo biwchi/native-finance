@@ -1,6 +1,35 @@
 import SwiftUI
 
 enum FinanceOverviewData {
+    static func upcomingReminders(
+        _ transactions: [UpcomingTransaction], daysBefore: Int,
+        now: Date = .now, calendar: Calendar = .current
+    ) -> [UpcomingTransaction] {
+        let days = min(max(daysBefore, AppPreferences.recurringReminderDaysRange.lowerBound),
+                       AppPreferences.recurringReminderDaysRange.upperBound)
+        guard let end = calendar.date(byAdding: .day, value: days + 1, to: calendar.startOfDay(for: now)) else {
+            return []
+        }
+        return transactions.filter { transaction in
+            transaction.occurredAt >= now && transaction.occurredAt < end
+                && transaction.endAt.map { transaction.occurredAt <= $0 } != false
+        }.sorted {
+            $0.occurredAt == $1.occurredAt ? $0.id.uuidString < $1.id.uuidString : $0.occurredAt < $1.occurredAt
+        }
+    }
+
+    static func transactions(
+        _ transactions: [FinanceTransaction], in filter: FinanceDateFilter,
+        now: Date = .now, calendar: Calendar = .current
+    ) -> [FinanceTransaction] {
+        let interval = filter.transactionInterval(now: now, calendar: calendar)
+        return transactions.filter { transaction in
+            guard let interval else { return true }
+            return transaction.occurredAt >= interval.start && transaction.occurredAt < interval.end
+        }
+            .sorted { $0.occurredAt == $1.occurredAt ? $0.createdAt > $1.createdAt : $0.occurredAt > $1.occurredAt }
+    }
+
     static func transactions(
         _ transactions: [FinanceTransaction], in month: Date,
         now: Date = .now, calendar: Calendar = .current
@@ -20,7 +49,7 @@ enum FinanceOverviewData {
     static func matches(_ transaction: FinanceTransaction, query: String, accounts: [Account]) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return [transaction.merchant, transaction.payee, transaction.note,
+        return [transaction.debt?.name, transaction.kind == .debt ? "Debt" : nil, transaction.merchant, transaction.payee, transaction.note,
                 transaction.category?.name, transaction.category == nil ? "Uncategorized" : nil,
                 transaction.amount, transaction.formattedAmount(),
                 accounts.first { $0.id == transaction.accountId }?.name]

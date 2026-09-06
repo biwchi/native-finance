@@ -25,6 +25,45 @@ struct DashboardInsights: Equatable {
         return ((spent - previousSpent) / previousSpent) * 100
     }
 
+    var hasBudget: Bool {
+        guard let monthlyLimit else { return false }
+        return !monthlyLimit.isNaN && monthlyLimit > 0
+    }
+
+    static func calculate(
+        transactions: [FinanceTransaction],
+        filter: FinanceDateFilter,
+        now: Date = .now,
+        calendar: Calendar = .current,
+        monthlyLimit: Decimal? = nil
+    ) -> DashboardInsights {
+        let selected = filter.transactionInterval(now: now, calendar: calendar)
+        let previous = filter.comparisonInterval(now: now, calendar: calendar)
+        var income = Decimal.zero
+        var spent = Decimal.zero
+        var previousSpent = Decimal.zero
+
+        for transaction in transactions {
+            guard let amount = Decimal(string: transaction.amount), !amount.isNaN else { continue }
+            if selected.map({ transaction.occurredAt >= $0.start && transaction.occurredAt < $0.end }) ?? true {
+                if transaction.kind == .income {
+                    income += amount
+                } else if transaction.kind == .expense {
+                    spent += amount
+                }
+            }
+            if transaction.kind == .expense, let previous,
+               transaction.occurredAt >= previous.start, transaction.occurredAt < previous.end {
+                previousSpent += amount
+            }
+        }
+
+        return DashboardInsights(
+            income: income, spent: spent, previousSpent: previousSpent, net: income - spent,
+            monthlyLimit: filter.preset == .month ? monthlyLimit : nil
+        )
+    }
+
     static func calculate(
         transactions: [FinanceTransaction],
         month: Date,
@@ -32,48 +71,7 @@ struct DashboardInsights: Equatable {
         calendar: Calendar = .current,
         monthlyLimit: Decimal?
     ) -> DashboardInsights {
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: month)) ?? month
-        let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
-        let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
-        let isCurrentMonth = calendar.isDate(monthStart, equalTo: currentMonth, toGranularity: .month)
-
-        let end = isCurrentMonth
-            ? min(calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? nextMonth, nextMonth)
-            : nextMonth
-        let elapsedDays = max(1, calendar.dateComponents([.day], from: monthStart, to: end).day ?? 1)
-        let previousStart = calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
-        let previousNextMonth = monthStart
-        let previousEnd = min(
-            calendar.date(byAdding: .day, value: elapsedDays, to: previousStart) ?? previousNextMonth,
-            previousNextMonth
-        )
-
-        var income = Decimal.zero
-        var spent = Decimal.zero
-        var previousSpent = Decimal.zero
-
-        for transaction in transactions {
-            guard let amount = Decimal(string: transaction.amount) else { continue }
-
-            if transaction.occurredAt >= monthStart, transaction.occurredAt < end {
-                if transaction.kind == .income {
-                    income += amount
-                } else {
-                    spent += amount
-                }
-            } else if transaction.kind == .expense,
-                      transaction.occurredAt >= previousStart,
-                      transaction.occurredAt < previousEnd {
-                previousSpent += amount
-            }
-        }
-
-        return DashboardInsights(
-            income: income,
-            spent: spent,
-            previousSpent: previousSpent,
-            net: income - spent,
-            monthlyLimit: monthlyLimit
-        )
+        calculate(transactions: transactions, filter: FinanceDateFilter(anchor: month),
+                  now: now, calendar: calendar, monthlyLimit: monthlyLimit)
     }
 }

@@ -1,3 +1,4 @@
+import type { DebtRepository } from "../../domain/debts/debt.ts";
 import {
   createTransaction as createTransactionModel,
   type TransactionDraft,
@@ -13,13 +14,17 @@ export async function prepareTransaction(
   dependencies: {
     accounts: AccountRepository;
     categories: CategoryRepository;
+    debts?: DebtRepository;
   },
 ): Promise<Result<TransactionDraft, TransactionValidationError>> {
-  const [account, category] = await Promise.all([
+  const [account, category, debt] = await Promise.all([
     dependencies.accounts.findById(input.accountId),
     input.categoryId
       ? dependencies.categories.findById(input.categoryId)
       : Promise.resolve(null),
+    input.debtId && dependencies.debts
+      ? dependencies.debts.findById(input.debtId)
+      : Promise.resolve(null),
   ]);
-  return createTransactionModel(input, { account, category });
+  return createTransactionModel(input, { account, category, debt });
 }

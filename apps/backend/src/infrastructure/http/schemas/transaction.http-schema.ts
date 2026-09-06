@@ -22,8 +22,9 @@ export const recurringDeletionActionSchema = t.Union([
 
 export const transactionBodySchema = t.Object({
   accountId: t.String({ format: "uuid" }),
-  kind: transactionKindSchema,
+  kind: t.Union([transactionKindSchema, t.Literal("debt")]),
   amount: amountSchema,
+  debtId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
   categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
   merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
   payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),

@@ -5,6 +5,8 @@ import type {
   RecurrenceFrequency,
   TransactionResponse,
 } from "../../../domain/transactions/transaction.ts";
+import type { Debt } from "../../../domain/debts/debt.ts";
+import { debts } from "../schema/debt.schema.ts";
 import { categories } from "../schema/category.schema.ts";
 import { recurringSchedules } from "../schema/recurring-schedule.schema.ts";
 import { transactions } from "../schema/transaction.schema.ts";
@@ -22,6 +24,7 @@ export const categorySelection = {
 
 export const transactionSelection = {
   ...getTableColumns(transactions),
+  debt: { id: debts.id, name: debts.name, icon: debts.icon, color: debts.color },
   category: categorySelection,
   recurrence: {
     id: recurringSchedules.id,
@@ -32,6 +35,7 @@ export const transactionSelection = {
 
 type TransactionSelectionRow = typeof transactions.$inferSelect & {
   category: CategorySummary | null;
+  debt: Debt | null;
   recurrence: {
     id: string;
     frequency: RecurrenceFrequency;

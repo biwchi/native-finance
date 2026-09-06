@@ -182,6 +182,8 @@ enum AppIcons {
         "suitcase": Hugeicons.briefcase01,
         "sun-light": Hugeicons.sun03,
         "tools": Hugeicons.tools,
+        "trade-down": Hugeicons.tradeDown,
+        "trade-up": Hugeicons.tradeUp,
         "train": Hugeicons.train01,
         "tram": Hugeicons.tram,
         "trash": Hugeicons.delete02,

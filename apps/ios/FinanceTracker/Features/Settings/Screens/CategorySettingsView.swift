@@ -13,7 +13,7 @@ struct CategorySettingsView: View {
         List {
             Section {
                 Picker("Type", selection: $kind) {
-                    ForEach(TransactionKind.allCases) { kind in
+                    ForEach([TransactionKind.expense, .income]) { kind in
                         Text(kind.title).tag(kind)
                     }
                 }

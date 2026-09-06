@@ -2,6 +2,22 @@ import XCTest
 @testable import FinanceTracker
 
 final class MoneyFormatterTests: XCTestCase {
+    func testWholeTotalsRoundOnceWithoutChangingEditingPrecision() throws {
+        for (raw, expected) in [
+            ("1234.0000", "$1 234"), ("1234.4999", "$1 234"),
+            ("1234.5000", "$1 235"), ("-1234.5", "-$1 235"),
+            ("-0.49", "$0"), ("999.9999", "$1 000")
+        ] {
+            let value = try XCTUnwrap(Decimal(string: raw))
+            XCTAssertEqual(MoneyFormatter.format(value, currency: "USD", roundToWhole: true), expected)
+            XCTAssertEqual(MoneyFormatter.parseInput(MoneyFormatter.editingText(value)), value)
+        }
+        XCTAssertEqual(MoneyFormatter.format(.nan, currency: "USD", roundToWhole: true), "Unavailable")
+        XCTAssertEqual(MoneyFormatter.format(10, currency: "USD", showPositiveSign: true, roundToWhole: true), "+$10")
+        XCTAssertEqual(MoneyFormatter.format(10, currency: "USD"), "$10,00")
+        XCTAssertEqual(MoneyFormatter.spoken(10, currency: "USD", locale: Locale(identifier: "en_US"), roundToWhole: true), "10 US dollars")
+    }
+
     func testCurrencyExamplesHaveFixedTwoDecimalPlaces() throws {
         for (raw, currency, expected) in [
             ("62253.40", "KZT", "₸62 253,40"),

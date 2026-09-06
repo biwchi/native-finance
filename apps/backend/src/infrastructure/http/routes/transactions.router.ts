@@ -142,6 +142,7 @@ function transactionErrorStatus(code: string): 400 | 404 | 409 {
     code === "transaction_not_found" ||
     code === "account_not_found" ||
     code === "category_not_found" ||
+    code === "debt_not_found" ||
     code === "recurring_transaction_not_found"
   ) {
     return 404;

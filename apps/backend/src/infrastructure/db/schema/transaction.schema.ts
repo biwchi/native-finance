@@ -10,6 +10,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+import { debts } from "./debt.schema.ts";
 import { accounts } from "./account.schema.ts";
 import { categories } from "./category.schema.ts";
 import { transactionKind } from "./enums.schema.ts";
@@ -25,6 +26,7 @@ export const transactions = pgTable(
     kind: transactionKind().notNull(),
     amount: numeric({ precision: 19, scale: 4 }).notNull(),
     currency: varchar({ length: 3 }).notNull(),
+    debtId: uuid().references(() => debts.id, { onDelete: "restrict" }),
     categoryId: uuid().references(() => categories.id, {
       onDelete: "set null",
     }),
@@ -39,6 +41,7 @@ export const transactions = pgTable(
     updatedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    index("transactions_debt_id_idx").on(table.debtId),
     index("transactions_account_id_idx").on(table.accountId),
     index("transactions_category_id_idx").on(table.categoryId),
     index("transactions_recurring_schedule_id_idx").on(

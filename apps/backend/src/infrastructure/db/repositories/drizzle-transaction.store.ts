@@ -2,6 +2,7 @@ import { and, asc, eq, gt, ne } from "drizzle-orm";
 
 import type { TransactionStore } from "../../../application/transactions/transaction.repository.ts";
 import type { Database } from "../client.ts";
+import { debts } from "../schema/debt.schema.ts";
 import { categories } from "../schema/category.schema.ts";
 import { recurringSchedules } from "../schema/recurring-schedule.schema.ts";
 import { transactions } from "../schema/transaction.schema.ts";
@@ -30,6 +31,7 @@ export function createDrizzleTransactionStore(
       const [transaction] = await client.select(transactionSelection)
         .from(transactions)
         .leftJoin(categories, eq(transactions.categoryId, categories.id))
+        .leftJoin(debts, eq(transactions.debtId, debts.id))
         .leftJoin(
           recurringSchedules,
           eq(transactions.recurringScheduleId, recurringSchedules.id),

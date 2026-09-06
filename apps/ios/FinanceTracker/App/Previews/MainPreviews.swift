@@ -1,7 +1,7 @@
 import SwiftUI
 
 #Preview {
-    MainTabView()
+    MainView()
         .environmentObject(AccountStore())
         .environmentObject(BudgetStore())
         .environmentObject(ExchangeRateStore())

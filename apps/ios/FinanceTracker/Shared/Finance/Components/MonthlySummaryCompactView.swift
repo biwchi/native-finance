@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MonthlySummaryCompactView: View {
+    @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
     let state: MonthlySummaryState
     var showsPlannedBills = false
     var plannedBills: PlannedBillsSummary? = nil
@@ -13,11 +14,11 @@ struct MonthlySummaryCompactView: View {
                 .foregroundStyle(state.status == .onTrack ? .secondary : statusTint)
         } content: {
             MonthlySummaryContent {
-                MonthlySummaryAmount(amount: state.amountText, suffix: state.amountSuffix)
+                MonthlySummaryAmount(amount: displayState.amountText, suffix: state.amountSuffix)
                     .foregroundStyle(state.status == .overLimit ? statusTint : .primary)
             } caption: {
                 MonthlySummaryRow {
-                    Text(state.spendingText)
+                    Text(displayState.spendingText)
                 } trailing: {
                     Text(state.timeRemainingText)
                 }
@@ -36,13 +37,13 @@ struct MonthlySummaryCompactView: View {
                             Text("After planned bills")
                                 .foregroundStyle(.secondary)
                         } trailing: {
-                            Text(MoneyFormatter.format(plannedBills.afterBills, currency: state.currency))
+                            Text(MoneyFormatter.format(plannedBills.afterBills, currency: state.currency, roundToWhole: roundTotals))
                                 .fontWeight(.semibold)
                                 .monospacedDigit()
                         }
                         .font(.subheadline)
                         if let daily = plannedBills.dailyAmount, let range = plannedBills.dailyRange {
-                            Text("\(MoneyFormatter.format(daily, currency: state.currency))/day · \(dateRange(range))")
+                            Text("\(MoneyFormatter.format(daily, currency: state.currency, roundToWhole: roundTotals))/day · \(dateRange(range))")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
@@ -63,6 +64,12 @@ struct MonthlySummaryCompactView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    private var displayState: MonthlySummaryState {
+        var value = state
+        value.roundTotals = roundTotals
+        return value
+    }
+
     private var statusTint: Color { state.status.tint }
 
     private func dateRange(_ range: ClosedRange<Date>) -> String {
@@ -75,14 +82,14 @@ struct MonthlySummaryCompactView: View {
     }
 
     private var accessibilityLabel: String {
-        guard showsPlannedBills else { return state.accessibilityLabel }
+        guard showsPlannedBills else { return displayState.accessibilityLabel }
         guard let plannedBills else {
-            return state.accessibilityLabel + ". " + (isLoadingPlannedBills ? "Loading planned bills" : "Planned bills unavailable")
+            return displayState.accessibilityLabel + ". " + (isLoadingPlannedBills ? "Loading planned bills" : "Planned bills unavailable")
         }
-        let remaining = MoneyFormatter.spoken(plannedBills.afterBills, currency: state.currency, locale: state.locale)
-        var label = state.accessibilityLabel + ". After planned bills, " + remaining
+        let remaining = MoneyFormatter.spoken(plannedBills.afterBills, currency: state.currency, locale: state.locale, roundToWhole: roundTotals)
+        var label = displayState.accessibilityLabel + ". After planned bills, " + remaining
         if let daily = plannedBills.dailyAmount, let range = plannedBills.dailyRange {
-            label += ". " + MoneyFormatter.spoken(daily, currency: state.currency, locale: state.locale)
+            label += ". " + MoneyFormatter.spoken(daily, currency: state.currency, locale: state.locale, roundToWhole: roundTotals)
                 + " per day, " + dateRange(range)
         }
         return label

@@ -11,6 +11,7 @@ export const accountType = pgEnum("account_type", [
 export const transactionKind = pgEnum("transaction_kind", [
   "expense",
   "income",
+  "debt",
 ]);
 
 export const recurrenceFrequency = pgEnum("recurrence_frequency", [

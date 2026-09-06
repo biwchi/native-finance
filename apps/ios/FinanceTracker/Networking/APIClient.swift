@@ -13,6 +13,36 @@ struct APIClient: Sendable {
         self.session = session
     }
 
+    func debts() async throws -> [Debt] {
+        try await get(url: apiURL.appending(path: "debts"))
+    }
+
+    func createDebt(name: String, icon: String = "user", color: CategoryColor = .blue) async throws -> Debt {
+        var request = URLRequest(url: apiURL.appending(path: "debts"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(DebtRequest(name: name, icon: icon, color: color))
+        return try await send(request)
+    }
+
+    func updateDebt(id: UUID, name: String, icon: String, color: CategoryColor) async throws -> Debt {
+        var request = URLRequest(url: apiURL.appending(path: "debts").appending(path: id.uuidString))
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(DebtRequest(name: name, icon: icon, color: color))
+        return try await send(request)
+    }
+
+    func deleteAllData(confirmation: String) async throws {
+        struct Response: Decodable { let deleted: Bool }
+        var request = URLRequest(url: apiURL.appending(path: "settings/data"))
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["confirmation": confirmation])
+        let response: Response = try await send(request)
+        guard response.deleted else { throw APIClientError.invalidResponse }
+    }
+
     func health() async throws -> HealthResponse {
         let url = baseURL.appending(path: "health")
         return try await get(url: url)

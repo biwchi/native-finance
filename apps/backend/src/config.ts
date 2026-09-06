@@ -15,7 +15,8 @@ export const config = {
   corsOrigin: Bun.env.CORS_ORIGIN ?? "http://localhost:3001",
   databaseUrl: Bun.env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
   frankfurterBaseUrl: Bun.env.FRANKFURTER_BASE_URL ?? "https://api.frankfurter.dev",
-  host: Bun.env.HOST ?? "0.0.0.0",
+  // Accept both IPv6 and IPv4 connections from physical devices.
+  host: Bun.env.HOST ?? "::",
   openAIBaseUrl: Bun.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
   openAIApiKey: Bun.env.OPENAI_API_KEY,
   openAIModel: Bun.env.OPENAI_MODEL ?? "gpt-5.6-luna",

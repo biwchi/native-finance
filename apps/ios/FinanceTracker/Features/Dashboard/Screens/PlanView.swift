@@ -21,56 +21,54 @@ struct PlanView: View {
     @State private var editingUpcomingTransaction: UpcomingTransaction?
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    FinancePageHeader(title: "Plan")
-                    summaryContent
+        List {
+            Section {
+                FinancePageHeader(title: "Budget")
+                summaryContent
+            }
+            .modifier(FinanceSectionMargins())
+
+            if budgetIsLoaded, let budget = convertedBudget,
+                let transactions = monthTransactions,
+                transactionStore.state == .loaded
+            {
+                let pools = BudgetLimitProgress.pools(
+                    budget: budget, transactions: transactions)
+                let categories = BudgetLimitProgress.categories(
+                    budget: budget, transactions: transactions,
+                    categories: transactionStore.categories
+                )
+                if !pools.isEmpty { limitsSection("Budget pools", rows: pools) }
+                if !categories.isEmpty {
+                    limitsSection("Category limits", rows: categories)
                 }
+            }
+
+            ComingUpSection { editingUpcomingTransaction = $0 }
                 .modifier(FinanceSectionMargins())
-
-                if budgetIsLoaded, let budget = convertedBudget,
-                    let transactions = monthTransactions,
-                    transactionStore.state == .loaded
-                {
-                    let pools = BudgetLimitProgress.pools(
-                        budget: budget, transactions: transactions)
-                    let categories = BudgetLimitProgress.categories(
-                        budget: budget, transactions: transactions,
-                        categories: transactionStore.categories
-                    )
-                    if !pools.isEmpty { limitsSection("Budget pools", rows: pools) }
-                    if !categories.isEmpty {
-                        limitsSection("Category limits", rows: categories)
-                    }
-                }
-
-                ComingUpSection { editingUpcomingTransaction = $0 }
-                    .modifier(FinanceSectionMargins())
-                FinanceListBottomSpacer()
-            }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.custom(4))
-            .environment(\.defaultMinListRowHeight, 0)
-            .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self) {
-                bounds, proxy in
-                if let bounds {
-                    let frame = proxy[bounds]
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        if let summary = currentSummary(at: context.date) {
-                            summaryButton(for: summary)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .frame(width: frame.width, height: frame.height)
-                    .position(x: frame.midX, y: frame.midY)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .leadingAccountSelectorToolbar()
-            .financeMonthPickerToolbar(month: $selectedMonth)
-            .refreshable { await reload() }
+            FinanceListBottomSpacer()
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(4))
+        .environment(\.defaultMinListRowHeight, 0)
+        .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self) {
+            bounds, proxy in
+            if let bounds {
+                let frame = proxy[bounds]
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    if let summary = currentSummary(at: context.date) {
+                        summaryButton(for: summary)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .leadingAccountSelectorToolbar()
+        .financeMonthPickerToolbar(month: $selectedMonth)
+        .refreshable { await reload() }
         .task(id: budgetScope) {
             await budgetStore.loadBudget(
                 month: selectedMonth, accountID: accountStore.selectedAccountID)

@@ -7,6 +7,7 @@ final class AddTransactionViewModel: ObservableObject {
     @Published private(set) var accountID: UUID?
     @Published private(set) var amountText = ""
     @Published private(set) var kind: TransactionKind = .expense
+    @Published private(set) var debtID: UUID?
     @Published private(set) var categoryID: UUID?
     @Published private(set) var merchant = ""
     @Published private(set) var payee = ""
@@ -49,6 +50,7 @@ final class AddTransactionViewModel: ObservableObject {
             amountText = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX"))
                 .map { NSDecimalNumber(decimal: $0).stringValue } ?? transaction.amount
             kind = transaction.kind
+            debtID = transaction.debtId
             categoryID = transaction.category?.id
             merchant = transaction.merchant ?? ""
             payee = transaction.payee ?? ""
@@ -152,6 +154,12 @@ final class AddTransactionViewModel: ObservableObject {
     func setKind(_ value: TransactionKind, categories: [TransactionCategory]) {
         kind = value
         kindSource = .manual
+        if value == .debt {
+            setCategoryID(nil)
+            setRecurring(false)
+        } else {
+            debtID = nil
+        }
 
         if let categoryID,
            categories.first(where: { $0.id == categoryID })?.kind != value {
@@ -161,6 +169,8 @@ final class AddTransactionViewModel: ObservableObject {
         }
         scheduleCategoryResolution(categories: categories)
     }
+
+    func setDebtID(_ value: UUID?) { debtID = value }
 
     func setCategoryID(_ value: UUID?) {
         categoryTask?.cancel()
@@ -189,8 +199,8 @@ final class AddTransactionViewModel: ObservableObject {
     }
 
     func setRecurring(_ value: Bool) {
-        isRecurring = value
-        if !value {
+        isRecurring = value && kind != .debt
+        if !isRecurring {
             recurrenceEndAt = nil
         }
     }
@@ -216,6 +226,7 @@ final class AddTransactionViewModel: ObservableObject {
     var canSave: Bool {
         accountID != nil &&
             canonicalAmount() != nil &&
+            (kind != .debt || debtID != nil) &&
             !amountConflict &&
             !dateConflict
     }
@@ -224,6 +235,7 @@ final class AddTransactionViewModel: ObservableObject {
         accountID != transaction.accountId ||
             canonicalAmount().flatMap { Decimal(string: $0) } != Decimal(string: transaction.amount) ||
             kind != transaction.kind ||
+            debtID != transaction.debtId ||
             categoryID != transaction.category?.id ||
             merchant.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.merchant ?? "") ||
             payee.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.payee ?? "") ||
@@ -241,6 +253,7 @@ final class AddTransactionViewModel: ObservableObject {
         isResolvingCategory = false
 
         guard
+            kind != .debt,
             categorySource != .manual,
             categoryQuery.contains(where: \.isLetter),
             categoryQuery.filter(\.isLetter).count >= 2

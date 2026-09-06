@@ -1,22 +1,26 @@
 import Foundation
 
-/// App-wide money display: a leading symbol, space grouping, and two comma decimals.
+/// Money display uses a leading symbol and space grouping; totals can opt into whole numbers.
 enum MoneyFormatter {
     static let decimalSeparator = ","
     private static let displayLocale = Locale(identifier: "fr_FR")
     private static let symbolLocale = Locale(identifier: "en_US")
 
-    static func format(_ value: Decimal, currency: String, showPositiveSign: Bool = false) -> String {
+    static func format(_ value: Decimal, currency: String, showPositiveSign: Bool = false, roundToWhole: Bool = false) -> String {
         guard !value.isNaN else { return "Unavailable" }
-        let amount = rounded(value)
+        let amount = rounded(value, places: roundToWhole ? 0 : 2)
         let sign = amount < 0 ? "-" : (showPositiveSign && amount > 0 ? "+" : "")
-        return sign + symbol(for: currency) + number(abs(amount))
+        return sign + symbol(for: currency) + number(abs(amount), roundToWhole: roundToWhole)
     }
 
     static func number(_ value: Decimal) -> String {
+        number(value, roundToWhole: false)
+    }
+
+    static func number(_ value: Decimal, roundToWhole: Bool) -> String {
         guard !value.isNaN else { return "Unavailable" }
-        return rounded(value).formatted(
-            .number.grouping(.automatic).precision(.fractionLength(2)).locale(displayLocale)
+        return rounded(value, places: roundToWhole ? 0 : 2).formatted(
+            .number.grouping(.automatic).precision(.fractionLength(roundToWhole ? 0 : 2)).locale(displayLocale)
         )
         .replacingOccurrences(of: "\u{00A0}", with: " ")
         .replacingOccurrences(of: "\u{202F}", with: " ")
@@ -33,15 +37,15 @@ enum MoneyFormatter {
     }
 
     /// VoiceOver uses the user's language to pronounce currency names and numbers.
-    static func spoken(_ value: Decimal, currency: String, locale: Locale) -> String {
+    static func spoken(_ value: Decimal, currency: String, locale: Locale, roundToWhole: Bool = false) -> String {
         guard !value.isNaN else { return "Unavailable" }
-        return rounded(value).formatted(
+        return rounded(value, places: roundToWhole ? 0 : 2).formatted(
             .currency(code: currency.uppercased()).presentation(.fullName)
-                .precision(.fractionLength(2)).locale(locale)
+                .precision(.fractionLength(roundToWhole ? 0 : 2)).locale(locale)
         )
     }
 
-    /// Editing keeps every stored decimal; two-place rounding is only for display.
+    /// Editing keeps every stored decimal; rounding is only for display.
     static func editingText(_ value: Decimal) -> String {
         NSDecimalNumber(decimal: value).stringValue
             .replacingOccurrences(of: ".", with: decimalSeparator)
@@ -57,10 +61,10 @@ enum MoneyFormatter {
         return value
     }
 
-    private static func rounded(_ value: Decimal) -> Decimal {
+    private static func rounded(_ value: Decimal, places: Int = 2) -> Decimal {
         var source = value
         var result = Decimal()
-        NSDecimalRound(&result, &source, 2, .plain)
+        NSDecimalRound(&result, &source, places, .plain)
         return result == 0 ? .zero : result
     }
 }

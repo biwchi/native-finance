@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MonthlySummaryState {
+    var roundTotals = false
     let monthlyBudget: Decimal
     let amountSpent: Decimal
     let remaining: Decimal
@@ -110,7 +111,7 @@ struct MonthlySummaryState {
 
     private func money(_ value: Decimal, spoken: Bool = false) -> String {
         spoken
-            ? MoneyFormatter.spoken(value, currency: currency, locale: locale)
-            : MoneyFormatter.format(value, currency: currency)
+            ? MoneyFormatter.spoken(value, currency: currency, locale: locale, roundToWhole: roundTotals)
+            : MoneyFormatter.format(value, currency: currency, roundToWhole: roundTotals)
     }
 }

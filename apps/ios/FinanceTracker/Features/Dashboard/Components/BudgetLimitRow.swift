@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct BudgetLimitRow: View {
+    @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
     let progress: BudgetLimitProgress
     let currency: String
     var body: some View {
@@ -23,5 +24,5 @@ struct BudgetLimitRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func money(_ amount: Decimal) -> String { MoneyFormatter.format(amount, currency: currency) }
+    private func money(_ amount: Decimal) -> String { MoneyFormatter.format(amount, currency: currency, roundToWhole: roundTotals) }
 }

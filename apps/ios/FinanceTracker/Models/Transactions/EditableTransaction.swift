@@ -1,6 +1,8 @@
 import Foundation
 
 protocol EditableTransaction {
+    var debt: Debt? { get }
+    var debtId: UUID? { get }
     var accountId: UUID { get }
     var kind: TransactionKind { get }
     var amount: String { get }
@@ -14,12 +16,15 @@ protocol EditableTransaction {
 }
 
 extension EditableTransaction {
+    var debt: Debt? { nil }
+    var debtId: UUID? { debt?.id }
+
     func formattedAmount(showExpenseSign: Bool = true) -> String {
         guard let value = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX")) else {
             return "Unavailable"
         }
         return MoneyFormatter.format(
-            kind == .expense && showExpenseSign ? -value : value,
+            kind != .income && showExpenseSign ? -value : value,
             currency: currency,
             showPositiveSign: kind == .income
         )

@@ -1,3 +1,4 @@
+import type { DebtRepository } from "../../domain/debts/debt.ts";
 import { boundedNextOccurrence } from "../../domain/transactions/recurrence.ts";
 import {
   createTransfer,
@@ -30,6 +31,7 @@ export async function createTransactionBatch(
   dependencies: {
     accounts: AccountRepository;
     categories: CategoryRepository;
+    debts?: DebtRepository;
     transactions: TransactionRepository;
   },
 ): Promise<Result<{ created: number }, string>> {

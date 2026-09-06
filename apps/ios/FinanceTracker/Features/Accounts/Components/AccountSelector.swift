@@ -5,6 +5,7 @@ import UIKit
 
 
 struct AccountSelector: View {
+    @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     // The picker needs all currencies even when the dashboard is showing one account.
@@ -15,6 +16,8 @@ struct AccountSelector: View {
     private var reportingCurrency = AppPreferences.initialCurrency
 
     var compact = false
+    var showsCompactIcon = true
+    var compactWidth: CGFloat? = nil
 
     var body: some View {
         Menu {
@@ -69,11 +72,12 @@ struct AccountSelector: View {
     private var selectorLabel: some View {
         if compact {
             HStack(spacing: 9) {
-                selectedIconBadge
+                if showsCompactIcon { selectedIconBadge }
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(accountStore.selectionTitle)
                         .font(.subheadline.weight(.semibold))
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
@@ -85,6 +89,7 @@ struct AccountSelector: View {
                         .minimumScaleFactor(0.75)
                 }
             }
+            .frame(width: compactWidth.map { max(0, $0 - 16) }, alignment: .leading)
             .padding([.leading, .vertical], 4)
             .padding(.trailing, 12)
             .accountSelectorGlass()
@@ -146,7 +151,8 @@ struct AccountSelector: View {
                 rates: exchangeRateStore.snapshot
             ) {
                 MoneyFormatter.format(
-                    balance, currency: account?.currency ?? reportingCurrency.uppercased()
+                    balance, currency: account?.currency ?? reportingCurrency.uppercased(),
+                    roundToWhole: roundTotals
                 ) + (includesLabel ? " balance" : "")
             } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
                 "Converting balance"

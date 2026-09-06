@@ -3,6 +3,7 @@ import SwiftUI
 struct QuickAccountMenu: View {
     let accounts: [Account]
     let selectedAccountID: UUID?
+    var appearance: CapsuleControlBackground.Appearance = .filled
     let onSelect: (UUID) -> Void
 
     private var title: String {
@@ -27,8 +28,8 @@ struct QuickAccountMenu: View {
             }
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 10)
-            .frame(height: 38)
-            .modifier(CapsuleControlBackground())
+            .frame(minHeight: appearance == .glass ? AppControlSize.minimumTapTarget : 38)
+            .modifier(CapsuleControlBackground(appearance: appearance))
         }
         .buttonStyle(.plain)
         .disabled(accounts.isEmpty)

@@ -10,7 +10,7 @@ app.listen({
 });
 
 console.log(
-  `Finance Tracker API is running at http://${config.host}:${config.port}`,
+  `Finance Tracker API is running at http://${config.host.includes(":") ? `[${config.host}]` : config.host}:${config.port}`,
 );
 
 async function shutdown(): Promise<void> {

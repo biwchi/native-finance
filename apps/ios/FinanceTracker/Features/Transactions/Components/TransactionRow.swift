@@ -12,6 +12,7 @@ struct TransactionRow: View {
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric private var accountIconSize: CGFloat = 20
 
     let transaction: any EditableTransaction
     let account: Account?
@@ -49,7 +50,9 @@ struct TransactionRow: View {
     private var transactionIcon: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if let category = transaction.category {
+                if let debt = transaction.debt {
+                    DebtIcon(debt: debt, size: 42)
+                } else if let category = transaction.category {
                     CategoryIcon(category: category, size: 42)
                 } else {
                     AppIcon(transaction.kind == .income ? "arrow-down-left" : "arrow-up-right", size: 18)
@@ -151,6 +154,11 @@ struct TransactionRow: View {
         HStack(spacing: 5) {
             AppIcon(account?.icon ?? "credit-card", size: 11)
                 .foregroundStyle(account?.iconColor.color ?? Color.secondary)
+                .frame(width: accountIconSize, height: accountIconSize)
+                .background(
+                    (account?.iconColor.color ?? Color.secondary).opacity(0.12),
+                    in: Circle()
+                )
                 .accessibilityHidden(true)
 
             Text(account?.name ?? "Unknown account")
@@ -161,10 +169,10 @@ struct TransactionRow: View {
     }
 
     private var amount: some View {
-        Text(amountText)
-            .font(.subheadline.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(transaction.kind == .income ? AppColor.positive : .primary)
+        TransactionAmountText(
+            amount: amountText,
+            color: transaction.kind == .income ? AppColor.positive : .primary
+        )
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
     }
@@ -192,7 +200,7 @@ struct TransactionRow: View {
     }
 
     private var title: String {
-        titleOverride ?? transaction.category?.name ?? "Uncategorized"
+        titleOverride ?? transaction.debt.map { "Debt · \($0.name)" } ?? transaction.category?.name ?? (transaction.kind == .debt ? "Debt" : "Uncategorized")
     }
 
     private var amountText: String {

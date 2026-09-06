@@ -1,3 +1,4 @@
+import type { Debt } from "../debts/debt.ts";
 import type { Account } from "../accounts/account.ts";
 import type {
   Category,
@@ -13,6 +14,7 @@ export type TransactionRecord = {
   amount: string;
   currency: string;
   categoryId: string | null;
+  debtId?: string | null;
   recurringScheduleId: string | null;
   merchant: string | null;
   payee: string | null;
@@ -34,6 +36,7 @@ export type TransactionResponse = Omit<
   "categoryId" | "recurringScheduleId"
 > & {
   category: CategorySummary | null;
+  debt?: Debt | null;
   recurrence: {
     id: string;
     frequency: RecurrenceFrequency;
@@ -48,6 +51,7 @@ export type TransactionInput = {
   kind: TransactionKind;
   amount: string;
   categoryId?: string | null;
+  debtId?: string | null;
   merchant?: string | null;
   payee?: string | null;
   note?: string | null;
@@ -68,6 +72,9 @@ export type TransactionDraft = {
 
 export type TransactionValidationError =
   | "account_not_found"
+  | "debt_required"
+  | "debt_not_found"
+  | "invalid_debt_transaction"
   | "category_not_found"
   | "category_kind_mismatch"
   | "invalid_occurred_at"
@@ -75,9 +82,18 @@ export type TransactionValidationError =
 
 export function createTransaction(
   input: TransactionInput,
-  context: { account: Account | null; category: Category | null },
+  context: { account: Account | null; category: Category | null; debt?: Debt | null },
 ): Result<TransactionDraft, TransactionValidationError> {
   if (!context.account) return error("account_not_found", "Account not found");
+  if (input.kind === "debt") {
+    if (!input.debtId) return error("debt_required", "Choose a debt recipient");
+    if (!context.debt || context.debt.id !== input.debtId) return error("debt_not_found", "Debt recipient not found");
+    if (input.categoryId || input.recurrence) {
+      return error("invalid_debt_transaction", "Debt transactions cannot have categories or repeat");
+    }
+  } else if (input.debtId) {
+    return error("invalid_debt_transaction", "Only debt transactions can have a debt recipient");
+  }
   if (input.categoryId && !context.category) {
     return error("category_not_found", "Category not found");
   }
@@ -106,6 +122,7 @@ export function createTransaction(
       amount: input.amount,
       currency: context.account.currency,
       categoryId: context.category?.id ?? null,
+      debtId: input.debtId ?? null,
       merchant: cleanOptionalText(input.merchant),
       payee: cleanOptionalText(input.payee),
       note: cleanOptionalText(input.note),

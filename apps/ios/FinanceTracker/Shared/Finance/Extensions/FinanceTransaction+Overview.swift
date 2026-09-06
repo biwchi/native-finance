@@ -15,6 +15,8 @@ extension FinanceTransaction {
             occurredAt: occurredAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            debtId: debtId,
+            debt: debt,
             recurrence: recurrence
         )
     }

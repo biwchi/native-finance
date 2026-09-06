@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct FinanceMonthPickerButton: View {
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
     @Binding var month: Date
     @State private var isShowingPicker = false
 
@@ -8,7 +10,7 @@ struct FinanceMonthPickerButton: View {
         Button {
             isShowingPicker = true
         } label: {
-            Text(month.formatted(.dateTime.month(.wide).year()))
+            Text(FinanceDateFilter(anchor: month).label(calendar: calendar, locale: locale))
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)

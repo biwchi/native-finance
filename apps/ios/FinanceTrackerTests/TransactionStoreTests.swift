@@ -1,8 +1,180 @@
+import SwiftUI
 import XCTest
 @testable import FinanceTracker
 
 @MainActor
 final class TransactionStoreTests: XCTestCase {
+    func testDebtScreensRenderInLightAndDark() async throws {
+        let recipient = Debt(id: UUID(), name: "Alexey", icon: "star", color: .purple)
+        let account = Account(id: UUID(), name: "Main account", type: .checking, currency: "USD",
+            icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
+        var loan = transaction(accountID: account.id, kind: .debt, amount: "125.50")
+        loan.debtId = recipient.id
+        loan.debt = recipient
+        let session = makeSession { request in
+            switch request.url?.lastPathComponent {
+            case "debts": return (200, try self.encode([recipient]))
+            case "categories", "upcoming": return (200, Data("[]".utf8))
+            default: return (200, try self.encode([loan]))
+            }
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        let accounts = AccountStore.preview(accounts: [account])
+        let originalCurrency = UserDefaults.standard.object(forKey: AppPreferences.defaultCurrencyKey)
+        UserDefaults.standard.set("USD", forKey: AppPreferences.defaultCurrencyKey)
+        defer { UserDefaults.standard.set(originalCurrency, forKey: AppPreferences.defaultCurrencyKey) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for scheme in [ColorScheme.light, .dark] {
+            for (name, content) in [
+                ("Debts", AnyView(NavigationStack { DebtsView() })),
+                ("Debt-entry", AnyView(AddTransactionView(transaction: loan))),
+                ("Debt-recipient", AnyView(DebtEditorView(debt: recipient) { _ in })),
+                ("Debt-recipients", AnyView(DebtRecipientsView())),
+            ] {
+                let controller = UIHostingController(rootView: content
+                    .environmentObject(accounts).environmentObject(store).preferredColorScheme(scheme))
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                controller.view.frame = window.bounds
+                try await Task.sleep(for: .milliseconds(300))
+                controller.view.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                    XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "\(name)-\(scheme)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                window.isHidden = true
+            }
+        }
+    }
+
+    func testDebtAppearanceSavesAndUpdatesExistingTransactions() async throws {
+        let original = Debt(id: UUID(), name: "Alexey", icon: "user", color: .blue)
+        let updated = Debt(id: original.id, name: "Alexey", icon: "star", color: .purple)
+        var loan = transaction(accountID: UUID(), kind: .debt, amount: "50")
+        loan.debtId = original.id
+        loan.debt = original
+        let session = makeSession { request in
+            if request.httpMethod == "POST" || request.httpMethod == "PATCH" {
+                let body = try XCTUnwrap(requestBody(request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["icon"] as? String, "star")
+                XCTAssertEqual(json["color"] as? String, "purple")
+                if request.httpMethod == "PATCH" {
+                    XCTAssertEqual(request.url?.lastPathComponent, original.id.uuidString)
+                }
+                return (200, try self.encode(updated))
+            }
+            switch request.url?.lastPathComponent {
+            case "debts": return (200, try self.encode([original]))
+            case "upcoming": return (200, Data("[]".utf8))
+            default: return (200, try self.encode([loan]))
+            }
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: loan.accountId)
+        await store.loadDebts()
+        _ = try await store.updateDebt(original, name: "Alexey", icon: "star", color: .purple)
+        XCTAssertEqual(store.debts, [updated])
+        XCTAssertEqual(store.transactions.first?.debt, updated)
+        XCTAssertEqual(store.allTransactions.first?.debt, updated)
+        XCTAssertEqual(store.outstandingDebt(currency: "USD", rates: nil), 50)
+        let created = try await store.createDebt(name: "Alexey", icon: "star", color: .purple)
+        XCTAssertEqual(created, updated)
+    }
+
+    func testLegacyDebtWithoutAppearanceStillDecodes() throws {
+        let id = UUID()
+        let json = Data("{\"id\":\"\(id.uuidString)\",\"name\":\"Alexey\"}".utf8)
+        let debt = try JSONDecoder().decode(Debt.self, from: json)
+        XCTAssertEqual(debt.id, id)
+        XCTAssertNil(debt.icon)
+        XCTAssertNil(debt.color)
+    }
+
+    func testDebtCreationAndReturnRestoreBalanceAndOutstandingTotal() async throws {
+        let accountID = UUID()
+        let income = transaction(accountID: accountID, kind: .income, amount: "500")
+        let recipient = Debt(id: UUID(), name: "Alexey")
+        var loan = transaction(accountID: accountID, kind: .debt, amount: "125.50")
+        loan.debtId = recipient.id
+        loan.debt = recipient
+        let session = makeSession { request in
+            if request.httpMethod == "DELETE" {
+                XCTAssertEqual(request.url?.lastPathComponent, loan.id.uuidString)
+                return (200, Data(#"{"deleted":true}"#.utf8))
+            }
+            if request.url?.lastPathComponent == "upcoming" { return (200, Data("[]".utf8)) }
+            if request.httpMethod == "POST" {
+                let body = try XCTUnwrap(requestBody(request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["kind"] as? String, "debt")
+                XCTAssertEqual(json["debtId"] as? String, recipient.id.uuidString)
+                return (201, try self.encode(loan))
+            }
+            return (200, try self.encode([income]))
+        }
+        defer { session.invalidateAndCancel() }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session))
+        await store.loadTransactions(accountID: accountID)
+        let request = TransactionRequest(accountId: accountID, kind: .debt, amount: "125.50",
+            categoryId: nil, note: nil, occurredAt: loan.occurredAt, debtId: recipient.id)
+        try await store.createTransaction(request)
+        XCTAssertEqual(store.debtTransactions, [loan])
+        XCTAssertEqual(store.balance(accountID: accountID, currency: "USD", rates: nil), Decimal(string: "374.50"))
+        XCTAssertEqual(store.outstandingDebt(currency: "USD", rates: nil), Decimal(string: "125.50"))
+        XCTAssertEqual(loan.replacingAmount("100", currency: "EUR").debt, recipient)
+        XCTAssertTrue(FinanceOverviewData.matches(loan, query: "Alexey", accounts: []))
+        let insights = DashboardInsights.calculate(transactions: [income, loan], month: loan.occurredAt,
+            now: loan.occurredAt, monthlyLimit: 200)
+        XCTAssertEqual(insights.spent, 0)
+        try await store.deleteTransaction(loan)
+        XCTAssertTrue(store.debtTransactions.isEmpty)
+        XCTAssertEqual(store.balance(accountID: accountID, currency: "USD", rates: nil), 500)
+        XCTAssertEqual(store.outstandingDebt(currency: "USD", rates: nil), 0)
+    }
+
+    func testDebtTotalsIncludeAllAccountsAndRequireCompleteExchangeRates() {
+        let euros = transaction(accountID: UUID(), kind: .debt, amount: "80", currency: "EUR")
+        let dollars = transaction(accountID: UUID(), kind: .debt, amount: "25")
+        let expense = transaction(accountID: dollars.accountId, amount: "900")
+        let store = TransactionStore.preview(transactions: [euros, dollars, expense])
+        let rates = ExchangeRateSnapshot(baseCurrency: "USD", reportingCurrency: "USD", quotes: [
+            ExchangeRateQuote(currency: "USD", rate: "1", effectiveDate: "2026-09-03"),
+            ExchangeRateQuote(currency: "EUR", rate: "0.8", effectiveDate: "2026-09-03"),
+        ], fetchedAt: .now, stale: false)
+        XCTAssertNil(store.outstandingDebt(currency: "USD", rates: nil))
+        XCTAssertEqual(store.outstandingDebt(currency: "USD", rates: rates), 125)
+        XCTAssertEqual(store.outstandingDebtInCurrency("EUR"), 80)
+        XCTAssertEqual(store.outstandingDebtInCurrency("USD"), 25)
+        XCTAssertNil(TransactionStore().outstandingDebt(currency: "USD", rates: nil))
+    }
+
+    func testDebtRecipientIsRequiredAndPreservedWhenEditing() {
+        let recipient = Debt(id: UUID(), name: "Alexey")
+        var loan = transaction(accountID: UUID(), kind: .debt, amount: "50")
+        loan.debtId = recipient.id
+        loan.debt = recipient
+        let model = AddTransactionViewModel(transaction: loan)
+        XCTAssertEqual(QuickTransactionMode(loan), .debt)
+        XCTAssertEqual(model.debtID, recipient.id)
+        XCTAssertTrue(model.canSave)
+        XCTAssertFalse(model.hasChanges(from: loan))
+        model.setDebtID(nil)
+        XCTAssertFalse(model.canSave)
+        XCTAssertTrue(model.hasChanges(from: loan))
+        model.setRecurring(true)
+        XCTAssertFalse(model.isRecurring)
+        model.setKind(.expense, categories: [])
+        XCTAssertNil(model.debtID)
+    }
+
     func testCategoryIconCatalogHasRichDistinctGroups() {
         XCTAssertEqual(CategoryIconCatalog.groups.count, 11)
         XCTAssertTrue(CategoryIconCatalog.groups.allSatisfy { $0.icons.count >= 16 })

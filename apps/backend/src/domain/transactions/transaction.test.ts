@@ -63,3 +63,34 @@ function account(): Account {
     updatedAt: new Date(0),
   };
 }
+
+describe("debt transaction validation", () => {
+  const debt = { id: "alexey", name: "Alexey" };
+  const input = {
+    accountId: "account", kind: "debt" as const, amount: "125.50", debtId: debt.id,
+    occurredAt: "2026-09-05T10:00:00.000Z",
+  };
+  const context = { account: account(), category: null, debt };
+
+  it("associates the recipient and inherits the lending account currency", () => {
+    const result = createTransaction(input, context);
+    expect(result.ok).toBeTrue();
+    if (!result.ok) return;
+    expect(result.value.values).toMatchObject({ debtId: debt.id, kind: "debt", currency: "USD", categoryId: null });
+    expect(result.value.recurrence).toBeNull();
+  });
+
+  it("requires an existing recipient", () => {
+    expect(createTransaction({ ...input, debtId: undefined }, context)).toMatchObject({ ok: false, error: { code: "debt_required" } });
+    expect(createTransaction(input, { ...context, debt: null })).toMatchObject({ ok: false, error: { code: "debt_not_found" } });
+  });
+
+  it("rejects categories, recurrence, and recipients on ordinary transactions", () => {
+    for (const fields of [
+      { categoryId: "food" }, { recurrence: { frequency: "monthly" as const } },
+      { kind: "income" as const }, { kind: "expense" as const },
+    ]) {
+      expect(createTransaction({ ...input, ...fields }, context)).toMatchObject({ ok: false, error: { code: "invalid_debt_transaction" } });
+    }
+  });
+});

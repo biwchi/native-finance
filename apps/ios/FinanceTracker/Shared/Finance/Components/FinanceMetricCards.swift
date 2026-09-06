@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FinanceMetricCards: View {
+    @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
     struct Metric {
         let title: String
         let amount: Decimal
@@ -50,7 +51,7 @@ struct FinanceMetricCards: View {
             Text(metric.title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text(MoneyFormatter.format(metric.amount, currency: currency, showPositiveSign: metric.signed))
+            Text(MoneyFormatter.format(metric.amount, currency: currency, showPositiveSign: metric.signed, roundToWhole: roundTotals))
                 .font(.headline)
                 .foregroundStyle(metric.amountColor)
                 .monospacedDigit()
@@ -66,6 +67,6 @@ struct FinanceMetricCards: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(metric.title)
-        .accessibilityValue(MoneyFormatter.spoken(metric.amount, currency: currency, locale: locale))
+        .accessibilityValue(MoneyFormatter.spoken(metric.amount, currency: currency, locale: locale, roundToWhole: roundTotals))
     }
 }

@@ -1,14 +1,13 @@
 import SwiftUI
 
-struct MainTabView: View {
+struct MainView: View {
     @EnvironmentObject private var accountStore: AccountStore
-    @EnvironmentObject private var budgetStore: BudgetStore
-    @EnvironmentObject private var exchangeRateStore: ExchangeRateStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @AppStorage(AppPreferences.preferSimpleTransactionEntryKey)
     private var preferSimpleTransactionEntry = false
     @AppStorage("lastTransactionAccountID") private var lastTransactionAccountID = ""
 
+    @State private var isCurrencyPickerVisible = false
     @State private var addPresentation: AddTransactionPresentation?
     @State private var isPresentingQuickEntry = false
     @State private var quickEntryText = ""
@@ -20,15 +19,25 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack {
-            MainTabController(
-                accountStore: accountStore,
-                budgetStore: budgetStore,
-                exchangeRateStore: exchangeRateStore,
-                transactionStore: transactionStore
-            ) {
-                presentAddTransaction()
-            }
-            .ignoresSafeArea()
+            DashboardView { isCurrencyPickerVisible = $0 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if !isCurrencyPickerVisible, !isPresentingQuickEntry {
+                        PrimaryIconButton(
+                            "Add transaction",
+                            iconName: "plus",
+                            iconSize: 26,
+                            appearance: .glass,
+                            action: presentAddTransaction
+                        )
+                        .dynamicTypeSize(.large)
+                        .frame(width: 62, height: 62)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppSpacing.small)
+                        .background {
+                            bottomScrollFade
+                        }
+                    }
+                }
 
             if isPresentingQuickEntry {
                 Color.clear
@@ -115,6 +124,32 @@ struct MainTabView: View {
         }
         .task(id: accountStore.selectedAccountID) {
             await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
+        }
+    }
+
+    @ViewBuilder
+    private var bottomScrollFade: some View {
+        if #available(iOS 26.0, *) {
+            GeometryReader { proxy in
+                FinanceToolbarBlurView(transitionHeight: 64, edge: .bottom)
+                    .overlay {
+                        AppColor.groupedBackground
+                            .mask {
+                                LinearGradient(stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: .black.opacity(0.03), location: 0.15),
+                                    .init(color: .black.opacity(0.12), location: 0.3),
+                                    .init(color: .black.opacity(0.38), location: 0.5),
+                                    .init(color: .black.opacity(0.85), location: 1)
+                                ], startPoint: .top, endPoint: .bottom)
+                            }
+                    }
+                    .frame(height: (proxy.size.height + 40) * 2 / 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+            .ignoresSafeArea(.container, edges: .bottom)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 

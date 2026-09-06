@@ -29,6 +29,7 @@ struct AddTransactionView: View {
         draft: QuickEntryDraft? = nil,
         initialCommand: String? = nil,
         initialAccountID: UUID? = nil,
+        initialKind: TransactionKind = .expense,
         onSaveDraft: ((QuickEntryDraft) -> Void)? = nil
     ) {
         self.transaction = transaction
@@ -45,9 +46,11 @@ struct AddTransactionView: View {
         } else {
             original = transaction
         }
-        _viewModel = StateObject(wrappedValue: AddTransactionViewModel(transaction: original))
+        let model = AddTransactionViewModel(transaction: original)
+        if original == nil, initialKind != .expense { model.setKind(initialKind, categories: []) }
+        _viewModel = StateObject(wrappedValue: model)
         _mode = State(
-            initialValue: draft?.mode ?? original.map(QuickTransactionMode.init) ?? .expense
+            initialValue: draft?.mode ?? original.map(QuickTransactionMode.init) ?? (initialKind == .debt ? .debt : initialKind == .income ? .income : .expense)
         )
         _amountExpression = State(
             initialValue: AmountExpression(rawValue: original?.amount ?? "")
@@ -82,7 +85,7 @@ struct AddTransactionView: View {
                             merchant: merchantBinding,
                             payee: payeeBinding,
                             note: noteBinding,
-                            supportsRecurrence: mode != .transfer,
+                            supportsRecurrence: mode != .transfer && mode != .debt,
                             isRecurring: recurringBinding,
                             frequency: recurrenceFrequencyBinding,
                             hasEndDate: hasRecurrenceEndDateBinding,
@@ -100,6 +103,7 @@ struct AddTransactionView: View {
             )
             chooseDestinationIfNeeded()
             await transactionStore.loadCategories()
+            await transactionStore.loadDebts()
             applyInitialCommandIfNeeded()
         }
         .alert(errorAlertTitle, isPresented: errorAlertBinding) {
@@ -129,15 +133,20 @@ struct AddTransactionView: View {
                     chooseDestinationIfNeeded()
                 }
             }
-            TransactionClassificationSelector(
-                mode: mode,
-                destinationItems: destinationAccountCarouselItems,
-                destinationSelection: $destinationAccountID,
-                categoryItems: categoryCarouselItems,
-                expandedCategoryID: expandedCategoryID,
-                expandedCategoryItems: expandedCategory.map(subcategoryCarouselItems),
-                categorySelection: categoryCarouselBinding
-            )
+            if mode == .debt {
+                DebtRecipientPicker(selection: Binding(get: { viewModel.debtID }, set: viewModel.setDebtID))
+                    .frame(height: 84)
+            } else {
+                TransactionClassificationSelector(
+                    mode: mode,
+                    destinationItems: destinationAccountCarouselItems,
+                    destinationSelection: $destinationAccountID,
+                    categoryItems: categoryCarouselItems,
+                    expandedCategoryID: expandedCategoryID,
+                    expandedCategoryItems: expandedCategory.map(subcategoryCarouselItems),
+                    categorySelection: categoryCarouselBinding
+                )
+            }
             TransactionKeypad { key in
                 amountExpression.enter(key)
                 viewModel.setAmountText(amountExpression.canonicalResult ?? "")
@@ -177,10 +186,11 @@ struct AddTransactionView: View {
 
     private var availableModes: [QuickTransactionMode] {
         if quickEntryDraft != nil {
-            return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
+            return accountStore.accounts.count > 1 ? [.income, .expense, .transfer] : [.income, .expense]
         }
-        guard !isEditing else { return [.expense, .income] }
-        return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.expense, .income]
+        if upcomingTransaction != nil || transaction?.recurrence != nil { return [.income, .expense] }
+        if isEditing { return [.income, .expense, .debt] }
+        return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.income, .expense, .debt]
     }
 
     private var isLockedTransferDraft: Bool {
@@ -188,9 +198,10 @@ struct AddTransactionView: View {
     }
 
     private var submitButton: some View {
-        PrimaryActionButton(submitButtonTitle, isLoading: isSaving) {
+        PrimaryActionButton(submitButtonTitle, isLoading: isSaving, appearance: .glass) {
             Task { await save() }
         }
+        .controlSize(.large)
         .disabled(isSubmitDisabled)
         .padding(.top, 20)
         .padding(.bottom, 24)
@@ -205,6 +216,7 @@ struct AddTransactionView: View {
     }
 
     private var isSubmitDisabled: Bool {
+        if mode == .debt && !viewModel.canSave { return true }
         if let quickEntryDraft {
             return isSaving || !hasDraftChanges(from: quickEntryDraft)
         }
@@ -476,7 +488,10 @@ struct AddTransactionView: View {
             viewModel.setKind(.expense, categories: transactionStore.categories)
         case .income:
             viewModel.setKind(.income, categories: transactionStore.categories)
+        case .debt:
+            viewModel.setKind(.debt, categories: transactionStore.categories)
         case .transfer:
+            viewModel.setKind(.expense, categories: transactionStore.categories)
             viewModel.setCategoryID(nil)
             viewModel.setRecurring(false)
             chooseDestinationIfNeeded()
@@ -496,6 +511,10 @@ struct AddTransactionView: View {
         }
         guard let amount = amountExpression.canonicalResult else {
             errorMessage = "Enter an amount greater than zero."
+            return
+        }
+        if mode == .debt && viewModel.debtID == nil {
+            errorMessage = "Choose a debt recipient."
             return
         }
         if mode == .transfer {
@@ -621,6 +640,7 @@ struct AddTransactionView: View {
             payee: optionalText(viewModel.payee),
             note: optionalText(viewModel.note),
             occurredAt: viewModel.occurredAt,
+            debtId: kind == .debt ? viewModel.debtID : nil,
             recurrence: viewModel.isRecurring
                 ? RecurrenceRequest(
                     frequency: viewModel.recurrenceFrequency,

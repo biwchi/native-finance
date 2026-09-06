@@ -1,9 +1,10 @@
 import SwiftUI
 
 struct DashboardView: View {
+    var onCurrencyPickerVisibilityChange: (Bool) -> Void = { _ in }
+
     private enum SummaryCardID: Hashable {
-        case prominent
-        case metrics
+        case summary
     }
 
     private struct SummaryCardBoundsPreferenceKey: PreferenceKey {
@@ -17,118 +18,150 @@ struct DashboardView: View {
         }
     }
 
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @EnvironmentObject private var budgetStore: BudgetStore
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @StateObject private var summaryRates = ExchangeRateStore()
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var reportingCurrency = AppPreferences.initialCurrency
-    @State private var selectedMonth = BudgetMonth.start(of: .now)
+    @AppStorage(AppPreferences.recurringReminderDaysKey)
+    private var recurringReminderDays = AppPreferences.defaultRecurringReminderDays
+    @State private var selectedPeriod = FinanceDateFilter()
     @State private var editingTransaction: FinanceTransaction?
-    @State private var editingUpcomingTransaction: UpcomingTransaction?
-    @State private var transactionSearchText = ""
+    @State private var deletingTransactionID: UUID?
+    @State private var deletionError: String?
 
     var body: some View {
         NavigationStack {
             dashboardContent
-                .leadingAccountSelectorToolbar()
-                .financeMonthPickerToolbar(month: $selectedMonth)
+                .financeOverviewToolbar()
+                .toolbar {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        NavigationLink {
+                            PlanView()
+                        } label: {
+                            AppIcon("percentage-circle")
+                        }
+                        .accessibilityLabel("Budget")
+
+                        NavigationLink {
+                            SettingsView(onCurrencyPickerVisibilityChange: onCurrencyPickerVisibilityChange)
+                        } label: {
+                            AppIcon("settings")
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
                 .refreshable { await reload() }
         }
         .task(id: rateScope) { await loadRates() }
+        .task(id: budgetScope) {
+            if selectedPeriod.preset == .month {
+                await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID)
+            }
+        }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $editingUpcomingTransaction) { transaction in
-            AddTransactionView(upcomingTransaction: transaction)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .alert("Couldn't delete transaction", isPresented: Binding(
+            get: { deletionError != nil },
+            set: { if !$0 { deletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deletionError ?? "")
         }
     }
 
     @ViewBuilder
     private var dashboardContent: some View {
-        if showsEmptyDashboard {
-            dashboardEmptyState
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .financePage()
-        } else {
-            List {
-                Section {
-                    FinancePageHeader(title: "Overview")
-                    if transactionStore.state == .loaded, let insights {
-                        summaryCards(for: insights)
-                    } else {
-                        FinanceSummaryUnavailable(state: transactionStore.state, rateState: summaryRates.state)
-                    }
-                }
-                .modifier(FinanceSectionMargins())
-                recentTransactionsSection.modifier(FinanceSectionMargins())
-                ComingUpSection { editingUpcomingTransaction = $0 }
-                    .modifier(FinanceSectionMargins())
-                FinanceListBottomSpacer()
-            }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.custom(4))
-            .environment(\.defaultMinListRowHeight, 0)
-            .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self) {
-                bounds, proxy in
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            dashboardList(now: context.date)
+        }
+    }
+
+    private func dashboardList(now: Date) -> some View {
+        let reminders = FinanceOverviewData.upcomingReminders(
+            transactionStore.upcomingTransactions, daysBefore: recurringReminderDays,
+            now: now, calendar: calendar
+        )
+        return List {
+            Section {
+                FinancePageHeader(dateSelection: $selectedPeriod)
                 if transactionStore.state == .loaded, let insights {
-                    ZStack {
-                        summaryCardOverlay(for: insights, bounds: bounds, proxy: proxy)
-                    }
-                    .allowsHitTesting(false)
+                    summaryCards(for: insights)
+                } else {
+                    FinanceSummaryUnavailable(state: transactionStore.state, rateState: summaryRates.state)
                 }
+            }
+            .modifier(FinanceSectionMargins())
+            if transactionStore.upcomingState == .loaded, let nearest = reminders.first {
+                Section {
+                    DashboardUpcomingReminder(transaction: nearest, count: reminders.count, now: now)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                .modifier(FinanceSectionMargins(top: AppSpacing.large))
+            }
+            transactionSections
+            // Clear the floating Add button and its padding, then leave a 24-point gap.
+            FinanceListBottomSpacer(height: 62 + AppSpacing.small * 2 + AppSpacing.doubleExtraLarge)
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(AppSpacing.large))
+        .environment(\.defaultMinListRowHeight, 0)
+        .environment(\.defaultMinListHeaderHeight, 0)
+        .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self) {
+            bounds, proxy in
+            if transactionStore.state == .loaded, let insights {
+                ZStack {
+                    summaryCardOverlay(for: insights, bounds: bounds, proxy: proxy)
+                }
+                .allowsHitTesting(false)
             }
         }
     }
 
     private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
-    private var currencies: Set<String> { Set(transactionStore.transactions.map(\.currency)) }
+    private var currencies: Set<String> { Set(transactionStore.transactions.map(\.currency) + [budgetStore.budget?.currency].compactMap { $0 }) }
     private var rateScope: String { "\(currency):\(currencies.sorted().joined(separator: ","))" }
-    private var monthTransactions: [FinanceTransaction] {
-        FinanceOverviewData.transactions(transactionStore.transactions, in: selectedMonth)
+    private var periodTransactions: [FinanceTransaction] {
+        FinanceOverviewData.transactions(transactionStore.transactions, in: selectedPeriod, calendar: calendar)
     }
     private var insights: DashboardInsights? {
         guard let converted = FinanceOverviewData.converted(transactionStore.transactions, to: currency, using: summaryRates) else { return nil }
-        return DashboardInsights.calculate(transactions: converted, month: selectedMonth, monthlyLimit: nil)
+        return DashboardInsights.calculate(transactions: converted, filter: selectedPeriod, calendar: calendar,
+                                           monthlyLimit: convertedBudget?.monthlyLimit.flatMap { Decimal(string: $0) })
     }
-    private var showsEmptyDashboard: Bool {
-        transactionStore.state == .loaded
-            && transactionStore.upcomingState == .loaded
-            && monthTransactions.isEmpty
-            && transactionStore.upcomingTransactions.isEmpty
+    private var budgetScope: String {
+        "\(selectedPeriod.preset.rawValue):\(accountStore.selectedAccountID?.uuidString ?? "all"):\(BudgetMonth.key(for: selectedPeriod.anchor))"
+    }
+    private var convertedBudget: MonthlyBudget? {
+        guard selectedPeriod.preset == .month,
+              budgetStore.isLoaded(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID) else { return nil }
+        return budgetStore.budget?.converted(to: currency, using: summaryRates)
     }
     private var dashboardEmptyState: some View {
         ContentUnavailableView(
             "No activity yet",
             iconName: "calendar-minus",
-            description: Text("Tap + below to add a transaction for this month.")
+            description: Text("No transactions in this period. Choose another period or tap + to add one.")
         )
     }
 
     @ViewBuilder
     private func summaryCards(for insights: DashboardInsights) -> some View {
-        switch DashboardSummaryLayout(insights: insights) {
-        case .empty:
-            EmptyView()
-        case .spentOnly:
-            summaryCardPlaceholder(.prominent) {
-                prominentSummaryCard(title: "Total spent", amount: insights.spent)
-            }
-        case .incomeOnly:
-            summaryCardPlaceholder(.prominent) {
-                prominentSummaryCard(title: "Income", amount: insights.income)
-            }
-        case let .spentAndIncome(showsNet):
-            summaryCardPlaceholder(.prominent) {
-                prominentSummaryCard(title: "Total spent", amount: insights.spent)
-            }
-            summaryCardPlaceholder(.metrics) {
-                metricSummaryCards(for: insights, showsNet: showsNet)
-            }
+        summaryCardPlaceholder(.summary) {
+            summaryCard(for: insights)
         }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -156,24 +189,8 @@ struct DashboardView: View {
         bounds: [SummaryCardID: Anchor<CGRect>],
         proxy: GeometryProxy
     ) -> some View {
-        switch DashboardSummaryLayout(insights: insights) {
-        case .empty:
-            EmptyView()
-        case .spentOnly:
-            positionedSummaryCard(.prominent, bounds: bounds, proxy: proxy) {
-                prominentSummaryCard(title: "Total spent", amount: insights.spent)
-            }
-        case .incomeOnly:
-            positionedSummaryCard(.prominent, bounds: bounds, proxy: proxy) {
-                prominentSummaryCard(title: "Income", amount: insights.income)
-            }
-        case let .spentAndIncome(showsNet):
-            positionedSummaryCard(.prominent, bounds: bounds, proxy: proxy) {
-                prominentSummaryCard(title: "Total spent", amount: insights.spent)
-            }
-            positionedSummaryCard(.metrics, bounds: bounds, proxy: proxy) {
-                metricSummaryCards(for: insights, showsNet: showsNet)
-            }
+        positionedSummaryCard(.summary, bounds: bounds, proxy: proxy) {
+            summaryCard(for: insights)
         }
     }
 
@@ -192,37 +209,29 @@ struct DashboardView: View {
         }
     }
 
-    private func metricSummaryCards(
-        for insights: DashboardInsights,
-        showsNet: Bool
-    ) -> some View {
-        FinanceMetricCards(
-            first: .init(title: "Income", amount: insights.income),
-            second: showsNet
-                ? .init(
-                    title: "Net",
-                    amount: insights.net,
-                    signed: true,
-                    amountColor: AppColor.positive
-                )
-                : nil,
+    private func summaryCard(for insights: DashboardInsights) -> some View {
+        DashboardSummaryCard(
+            insights: insights,
             currency: currency,
-            surface: .glass
+            budgetTimeRemaining: budgetTimeRemaining(for: insights),
+            comparisonDescription: comparisonDescription
         )
     }
 
-    private func prominentSummaryCard(title: String, amount: Decimal) -> some View {
-        MonthlySummaryCard(
-            monthTitle: title,
-            titleColor: AppColor.accent,
-            surface: .glass,
-            gradientTint: AppColor.accent
-        ) {} content: {
-            MonthlySummaryAmount(amount: MoneyFormatter.format(amount, currency: currency))
-        }
-        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 6, trailing: 0))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+    private var comparisonDescription: String {
+        guard let interval = selectedPeriod.comparisonInterval(calendar: calendar),
+              let last = calendar.date(byAdding: .day, value: -1, to: interval.end) else { return "" }
+        let previous = FinanceDateFilter(preset: .custom, anchor: interval.start, customEnd: last)
+        return "Compared with \(previous.label(calendar: calendar, locale: locale))"
+    }
+
+    private func budgetTimeRemaining(for insights: DashboardInsights) -> String? {
+        guard insights.hasBudget, let interval = selectedPeriod.interval(calendar: calendar) else { return nil }
+        return MonthlySummaryState(
+            monthlyBudget: insights.monthlyLimit, amountSpent: insights.spent, currentDate: .now,
+            startOfMonth: interval.start, endOfMonth: interval.end,
+            currency: currency, locale: locale, calendar: calendar
+        )?.timeRemainingText
     }
 
     private func loadRates(force: Bool = false) async {
@@ -230,77 +239,97 @@ struct DashboardView: View {
     }
     private func reload() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
+        if selectedPeriod.preset == .month {
+            await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID, force: true)
+        }
         await loadRates(force: true)
     }
 
-    private var recentTransactionsSection: some View {
-        Section {
-            switch transactionStore.state {
-            case .idle, .loading:
+    private var transactionGroups: [(day: Date, transactions: [FinanceTransaction])] {
+        let groups = Dictionary(grouping: periodTransactions) {
+            calendar.startOfDay(for: $0.occurredAt)
+        }
+        return groups.keys.sorted(by: >).map { (day: $0, transactions: groups[$0] ?? []) }
+    }
+
+    @ViewBuilder
+    private var transactionSections: some View {
+        switch transactionStore.state {
+        case .idle, .loading:
+            Section {
                 ProgressView("Loading transactions")
                     .frame(maxWidth: .infinity)
-            case .loaded:
-                if monthTransactions.isEmpty {
+            }
+            .modifier(FinanceSectionMargins(top: AppSpacing.large))
+        case .loaded:
+            if periodTransactions.isEmpty {
+                Section {
                     dashboardEmptyState
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
-                } else {
-                    ForEach(monthTransactions.prefix(4)) { transaction in
-                        Button {
-                            editingTransaction = transaction
-                        } label: {
-                            TransactionRow(
-                                transaction: transaction,
-                                account: accountStore.accounts.first { $0.id == transaction.accountId },
-                                timestampStyle: .dateAndTime
-                            )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Edit transaction")
-                    }
                 }
-            case .failed:
+                .modifier(FinanceSectionMargins(top: AppSpacing.large))
+            } else {
+                ForEach(transactionGroups, id: \.day) { group in
+                    Section {
+                        ForEach(group.transactions) { transaction in
+                            transactionButton(transaction)
+                        }
+                    } header: {
+                        Text(group.day, format: .dateTime.month(.wide).day().year())
+                            .listRowInsets(EdgeInsets(
+                                top: 0,
+                                leading: AppSpacing.large,
+                                bottom: AppSpacing.small,
+                                trailing: AppSpacing.large
+                            ))
+                    }
+                    .modifier(FinanceSectionMargins(top: AppSpacing.large))
+                }
+            }
+        case .failed:
+            Section {
                 Label("Couldn’t load transactions", icon: "wifi-warning")
                     .foregroundStyle(.secondary)
             }
-        } header: {
-            if transactionStore.state != .loaded || !monthTransactions.isEmpty {
-                FinanceSectionHeader("Recent activity") {
-                    NavigationLink {
-                        TransactionListView(
-                            showsOverview: true,
-                            month: selectedMonth,
-                            searchText: $transactionSearchText
-                        )
-                    } label: {
-                        Text("See all")
-                    }
-                    .accessibilityLabel("See all transactions")
-                }
-                .listRowInsets(EdgeInsets(top: AppSpacing.medium, leading: AppSpacing.large, bottom: 0, trailing: AppSpacing.large))
+            .modifier(FinanceSectionMargins(top: AppSpacing.large))
+        }
+    }
+
+    private func transactionButton(_ transaction: FinanceTransaction) -> some View {
+        Button {
+            editingTransaction = transaction
+        } label: {
+            TransactionRow(
+                transaction: transaction,
+                account: accountStore.accounts.first { $0.id == transaction.accountId },
+                timestampStyle: .time
+            )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Edit transaction")
+        .disabled(deletingTransactionID != nil)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                Task { await delete(transaction) }
+            } label: {
+                Label("Delete", icon: "trash")
             }
+            .disabled(deletingTransactionID != nil)
         }
     }
 
-}
+    private func delete(_ transaction: FinanceTransaction) async {
+        guard deletingTransactionID == nil else { return }
+        deletingTransactionID = transaction.id
+        defer { deletingTransactionID = nil }
 
-enum DashboardSummaryLayout: Equatable {
-    case empty
-    case spentOnly
-    case incomeOnly
-    case spentAndIncome(showsNet: Bool)
-
-    init(insights: DashboardInsights) {
-        switch (insights.spent != .zero, insights.income != .zero) {
-        case (false, false):
-            self = .empty
-        case (true, false):
-            self = .spentOnly
-        case (false, true):
-            self = .incomeOnly
-        case (true, true):
-            self = .spentAndIncome(showsNet: insights.net != .zero)
+        do {
+            try await transactionStore.deleteTransaction(transaction)
+        } catch {
+            deletionError = error.localizedDescription
         }
     }
+
 }

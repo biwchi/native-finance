@@ -1,3 +1,5 @@
+import { createDrizzleAppDataRepository } from "./infrastructure/db/repositories/drizzle-app-data.repository.ts";
+import { createDrizzleDebtRepository } from "./infrastructure/db/repositories/drizzle-debt.repository.ts";
 import { createAccount } from "./application/accounts/create-account.ts";
 import { deleteAccount } from "./application/accounts/delete-account.ts";
 import { listAccounts } from "./application/accounts/list-accounts.ts";
@@ -33,6 +35,7 @@ import { createHttpApp } from "./infrastructure/http/create-http-app.ts";
 import { createFrankfurterExchangeRateProvider } from "./infrastructure/providers/frankfurter-exchange-rate.provider.ts";
 import { createOpenAIQuickEntryInterpreter } from "./infrastructure/providers/openai-quick-entry-interpreter.ts";
 
+const debts = createDrizzleDebtRepository(db);
 const accounts = createDrizzleAccountRepository(db);
 const budgets = createDrizzleBudgetRepository(db);
 const categories = createDrizzleCategoryRepository(db);
@@ -49,6 +52,8 @@ const quickEntryInterpreter = createOpenAIQuickEntryInterpreter({
 });
 
 export const app = createHttpApp({
+  appData: createDrizzleAppDataRepository(db),
+  debts,
   accounts: {
     list: () => listAccounts(undefined, { accounts }),
     create: (input) => createAccount(input, { accounts }),
@@ -85,14 +90,15 @@ export const app = createHttpApp({
   transactions: {
     list: (input) => listTransactions(input, { transactions }),
     upcoming: (input) => listUpcomingTransactions(input, { transactions }),
-    create: (input) => createTransaction(input, { accounts, categories, transactions }),
+    create: (input) => createTransaction(input, { accounts, categories, debts, transactions }),
     transfer: (input) => createTransfer(input, { accounts, transactions }),
-    batch: (input) => createTransactionBatch(input, { accounts, categories, transactions }),
-    update: (input) => updateTransaction(input, { accounts, categories, transactions }),
+    batch: (input) => createTransactionBatch(input, { accounts, categories, debts, transactions }),
+    update: (input) => updateTransaction(input, { accounts, categories, debts, transactions }),
     delete: (input) => deleteTransaction(input, { transactions }),
     updateRecurring: (input) => updateRecurringTransaction(input, {
       accounts,
       categories,
+      debts,
       transactions,
     }),
     deleteRecurring: (input) => deleteRecurringTransaction(input, { transactions }),
