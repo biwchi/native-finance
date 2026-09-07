@@ -61,35 +61,27 @@ struct BudgetSettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                monthlyLimitSection
-                groupsSection
-                categoryLimitsSection
+        Form {
+            monthlyLimitSection
+            groupsSection
+            categoryLimitsSection
 
-                if budget != nil {
-                    Section {
-                        Button("Clear budget", role: .destructive) {
-                            hasMonthlyLimit = false
-                            monthlyLimit = ""
-                            groups = []
-                            standaloneAssignments = []
-                        }
+            if budget != nil {
+                Section {
+                    Button("Clear budget", role: .destructive) {
+                        hasMonthlyLimit = false
+                        monthlyLimit = ""
+                        groups = []
+                        standaloneAssignments = []
                     }
                 }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("\(monthName) budget")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSaving)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                saveBar
-            }
+        }
+        .disabled(isSaving)
+        .scrollDismissesKeyboard(.interactively)
+        .navigationBarBackButtonHidden(isSaving)
+        .safeAreaInset(edge: .bottom) {
+            saveBar
         }
         .task {
             await transactionStore.loadCategories()
@@ -99,7 +91,6 @@ struct BudgetSettingsView: View {
         } message: {
             Text(errorMessage ?? "Check the budget amounts and try again.")
         }
-        .interactiveDismissDisabled(isSaving)
     }
 
     private var monthlyLimitSection: some View {
@@ -329,10 +320,6 @@ struct BudgetSettingsView: View {
 
     private func money(_ value: Decimal) -> String {
         MoneyFormatter.format(value, currency: currency)
-    }
-
-    private var monthName: String {
-        month.formatted(.dateTime.month(.wide))
     }
 
     private var errorAlertBinding: Binding<Bool> {

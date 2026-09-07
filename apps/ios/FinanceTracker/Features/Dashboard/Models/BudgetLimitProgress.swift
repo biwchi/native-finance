@@ -10,17 +10,28 @@ struct BudgetLimitProgress: Identifiable {
     var progress: Double { limit > 0 ? NSDecimalNumber(decimal: spent / limit).doubleValue : 0 }
 
     static func pools(budget: MonthlyBudget, transactions: [FinanceTransaction]) -> [BudgetLimitProgress] {
-        let assignments = Dictionary(uniqueKeysWithValues: budget.categoryAssignments.map { ($0.categoryId, $0) })
         return budget.groups.sorted { $0.sortOrder < $1.sortOrder }.compactMap { group in
             guard let limit = Decimal(string: group.limit), limit > 0 else { return nil }
-            let spent = transactions.reduce(Decimal.zero) { total, transaction in
-                guard transaction.kind == .expense, let category = transaction.category,
-                      let amount = Decimal(string: transaction.amount) else { return total }
-                // A child's explicit allocation takes precedence over its parent's pool.
-                let assignment = assignments[category.id] ?? category.parentId.flatMap { assignments[$0] }
-                return assignment?.groupId == group.id ? total + amount : total
+            let spent = Self.transactions(inPool: group.id, budget: budget, from: transactions).reduce(Decimal.zero) { total, transaction in
+                total + (Decimal(string: transaction.amount) ?? 0)
             }
             return BudgetLimitProgress(id: group.id, name: group.name, limit: limit, spent: spent)
+        }
+    }
+
+    static func transactions(inPool id: UUID, budget: MonthlyBudget, from transactions: [FinanceTransaction]) -> [FinanceTransaction] {
+        let assignments = Dictionary(uniqueKeysWithValues: budget.categoryAssignments.map { ($0.categoryId, $0) })
+        return transactions.filter { transaction in
+            guard transaction.kind == .expense, let category = transaction.category else { return false }
+            // A child's explicit allocation takes precedence over its parent's pool.
+            let assignment = assignments[category.id] ?? category.parentId.flatMap { assignments[$0] }
+            return assignment?.groupId == id
+        }
+    }
+
+    static func transactions(inCategory id: UUID, from transactions: [FinanceTransaction]) -> [FinanceTransaction] {
+        transactions.filter {
+            $0.kind == .expense && ($0.category?.id == id || $0.category?.parentId == id)
         }
     }
 

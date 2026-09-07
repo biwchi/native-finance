@@ -27,7 +27,7 @@ final class AccentControlContrastTests: XCTestCase {
     func testSummaryStatusTextContrastInBothAppearances() {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
-            for token in [AppColor.positiveText, AppColor.destructiveText] {
+            for token in [AppColor.positiveText, AppColor.destructiveText, AppColor.warningText] {
                 let foreground = UIColor(token).resolvedColor(with: traits)
                 let surface = UIColor.secondarySystemGroupedBackground.resolvedColor(with: traits)
                 XCTAssertGreaterThanOrEqual(contrast(luminance(foreground), luminance(surface)), 4.5)
@@ -144,6 +144,7 @@ final class AccentControlContrastTests: XCTestCase {
                     .disabled(true)
                 TransactionMetadataBar(
                     accounts: [account], selectedAccountID: account.id,
+                    accountBalance: "$1,240.00",
                     date: .constant(Date(timeIntervalSince1970: 1_788_600_000)),
                     hasExtraDetails: true, onSelectAccount: { _ in }
                 )
@@ -183,25 +184,48 @@ final class AccentControlContrastTests: XCTestCase {
             Account(id: UUID(), name: name, type: .checking, currency: "USD",
                     icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
         }
+        let now = Date.now
+        let categories = [
+            ("Food & Drink", "cutlery", CategoryColor.orange),
+            ("Groceries", "cart", CategoryColor.green),
+            ("Transport", "car", CategoryColor.blue),
+        ].enumerated().map { index, item in
+            TransactionCategory(
+                id: UUID(), systemKey: nil, name: item.0, kind: .expense,
+                icon: item.1, color: item.2, isSystem: false, examples: nil,
+                sortOrder: index, createdAt: now, updatedAt: now
+            )
+        }
+        let transactions = categories.map { category in
+            FinanceTransaction(
+                id: UUID(), accountId: accounts[0].id, kind: .expense,
+                amount: "24.50", currency: "USD", category: category, note: nil,
+                occurredAt: now, createdAt: now, updatedAt: now
+            )
+        }
         for scheme in [ColorScheme.light, .dark] {
             let content = Color(uiColor: .systemGroupedBackground)
                 .sheet(isPresented: .constant(true)) {
                     AddTransactionView()
-                        .environmentObject(AccountStore.preview(accounts: accounts))
-                        .environmentObject(TransactionStore.preview(transactions: []))
+                        .environmentObject(AccountStore.preview(accounts: accounts, selectedAccountID: accounts[0].id))
+                        .environmentObject(TransactionStore.preview(transactions: transactions))
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
                 }
                 .preferredColorScheme(scheme)
-            try await attachGlassSnapshot(content, name: "Transaction-glass-sheet-\(scheme)")
+            try await attachGlassSnapshot(content, name: "Transaction-glass-sheet-\(scheme)", fullScreen: true)
         }
     }
 
-    private func attachGlassSnapshot<Content: View>(_ content: Content, name: String) async throws {
+    private func attachGlassSnapshot<Content: View>(
+        _ content: Content,
+        name: String,
+        fullScreen: Bool = false
+    ) async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let controller = UIHostingController(rootView: content)
         let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 390, height: 760)
+        window.frame = fullScreen ? scene.coordinateSpace.bounds : CGRect(x: 0, y: 0, width: 390, height: 760)
         window.rootViewController = controller
         window.makeKeyAndVisible()
         defer { window.isHidden = true }

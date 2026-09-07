@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct DashboardView: View {
-    var onCurrencyPickerVisibilityChange: (Bool) -> Void = { _ in }
+    var isPresentingQuickEntry = false
+    var onAddTransaction: () -> Void = {}
 
     private enum SummaryCardID: Hashable {
         case summary
@@ -36,32 +37,57 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             dashboardContent
+                .task(id: budgetScope) {
+                    if selectedPeriod.preset == .month {
+                        await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID)
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if !isPresentingQuickEntry {
+                        addTransactionButton
+                    }
+                }
                 .financeOverviewToolbar()
                 .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        NavigationLink {
-                            PlanView()
-                        } label: {
-                            AppIcon("percentage-circle")
-                        }
-                        .accessibilityLabel("Budget")
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 0) {
+                            NavigationLink {
+                                FinancesView(initialMonth: selectedPeriod.preset == .month ? selectedPeriod.anchor : .now)
+                            } label: {
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: AppSpacing.medium) {
+                                        AppIcon("wallet")
+                                        Text("Finances")
+                                            .font(.subheadline.weight(.semibold))
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.leading, AppSpacing.medium)
+                                    .fixedSize(horizontal: true, vertical: false)
 
-                        NavigationLink {
-                            SettingsView(onCurrencyPickerVisibilityChange: onCurrencyPickerVisibilityChange)
-                        } label: {
-                            AppIcon("settings")
+                                    AppIcon("wallet")
+                                        .frame(width: 44, height: 44)
+                                }
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("Finances")
+                            .accessibilityIdentifier("financesNavigation")
+
+                            NavigationLink {
+                                SettingsView()
+                            } label: {
+                                AppIcon("settings")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("Settings")
                         }
-                        .accessibilityLabel("Settings")
+                        .buttonStyle(.plain)
                     }
                 }
                 .refreshable { await reload() }
         }
         .task(id: rateScope) { await loadRates() }
-        .task(id: budgetScope) {
-            if selectedPeriod.preset == .month {
-                await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID)
-            }
-        }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
@@ -74,6 +100,49 @@ struct DashboardView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deletionError ?? "")
+        }
+    }
+
+    private var addTransactionButton: some View {
+        PrimaryIconButton(
+            "Add transaction",
+            iconName: "plus",
+            iconSize: 26,
+            appearance: .glass,
+            action: onAddTransaction
+        )
+        .dynamicTypeSize(.large)
+        .frame(width: 62, height: 62)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.small)
+        .background {
+            bottomScrollFade
+        }
+    }
+
+    @ViewBuilder
+    private var bottomScrollFade: some View {
+        if #available(iOS 26.0, *) {
+            GeometryReader { proxy in
+                FinanceToolbarBlurView(transitionHeight: 64, edge: .bottom)
+                    .overlay {
+                        AppColor.groupedBackground
+                            .mask {
+                                LinearGradient(stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: .black.opacity(0.03), location: 0.15),
+                                    .init(color: .black.opacity(0.12), location: 0.3),
+                                    .init(color: .black.opacity(0.38), location: 0.5),
+                                    .init(color: .black.opacity(0.85), location: 1)
+                                ], startPoint: .top, endPoint: .bottom)
+                            }
+                    }
+                    .frame(height: (proxy.size.height + 40) * 2 / 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+            .ignoresSafeArea(.container, edges: .bottom)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 

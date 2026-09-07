@@ -5,7 +5,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
     @Binding var selection: ID?
 
     var itemWidth: CGFloat = 74
-    var spacing: CGFloat = 4
+    var spacing: CGFloat = AppSpacing.extraSmall
     var height: CGFloat = 84
     @State private var scrollPosition: ID?
 
@@ -13,7 +13,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
         items: [CenteredSelectionCarouselItem<ID>],
         selection: Binding<ID?>,
         itemWidth: CGFloat = 74,
-        spacing: CGFloat = 4,
+        spacing: CGFloat = AppSpacing.extraSmall,
         height: CGFloat = 84
     ) {
         self.items = items
@@ -33,7 +33,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
                             .id(item.id)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, AppSpacing.small)
                 .scrollTargetLayout()
             }
             .contentMargins(
@@ -90,7 +90,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
                 selection = item.id
             }
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: AppSpacing.extraSmall) {
                 AppIcon(item.iconName, size: 21)
                     .foregroundStyle(item.color)
                     .frame(width: 48, height: 48)

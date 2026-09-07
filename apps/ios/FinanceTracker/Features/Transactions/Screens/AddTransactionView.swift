@@ -5,6 +5,7 @@ struct AddTransactionView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
     @AppStorage("lastTransactionAccountID") private var lastAccountID = ""
+    @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
 
     let transaction: FinanceTransaction?
     let upcomingTransaction: UpcomingTransaction?
@@ -14,6 +15,7 @@ struct AddTransactionView: View {
     let onSaveDraft: ((QuickEntryDraft) -> Void)?
 
     @StateObject private var viewModel: AddTransactionViewModel
+    @StateObject private var exchangeRateStore = ExchangeRateStore()
     @State private var navigationPath = NavigationPath()
     @State private var mode = QuickTransactionMode.expense
     @State private var amountExpression = AmountExpression()
@@ -30,6 +32,7 @@ struct AddTransactionView: View {
         initialCommand: String? = nil,
         initialAccountID: UUID? = nil,
         initialKind: TransactionKind = .expense,
+        initialRecurring: Bool = false,
         onSaveDraft: ((QuickEntryDraft) -> Void)? = nil
     ) {
         self.transaction = transaction
@@ -48,6 +51,7 @@ struct AddTransactionView: View {
         }
         let model = AddTransactionViewModel(transaction: original)
         if original == nil, initialKind != .expense { model.setKind(initialKind, categories: []) }
+        if original == nil, initialRecurring { model.setRecurring(true) }
         _viewModel = StateObject(wrappedValue: model)
         _mode = State(
             initialValue: draft?.mode ?? original.map(QuickTransactionMode.init) ?? (initialKind == .debt ? .debt : initialKind == .income ? .income : .expense)
@@ -106,6 +110,10 @@ struct AddTransactionView: View {
             await transactionStore.loadDebts()
             applyInitialCommandIfNeeded()
         }
+        .task(id: accountBalanceScopeKey) {
+            guard let selectedAccount else { return }
+            await exchangeRateStore.load(currencies: accountCurrencies, reportingCurrency: selectedAccount.currency)
+        }
         .alert(errorAlertTitle, isPresented: errorAlertBinding) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -114,7 +122,19 @@ struct AddTransactionView: View {
     }
 
     private var manualEntryContent: some View {
-        VStack(spacing: 0) {
+        GeometryReader { geometry in
+            ScrollView {
+                entryControls
+                    .frame(minHeight: geometry.size.height)
+            }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .disabled(isSaving)
+    }
+
+    private var entryControls: some View {
+        VStack(spacing: AppSpacing.medium) {
             if !isLockedTransferDraft {
                 TransactionModeSelector(modes: availableModes, selection: $mode)
                     .onChange(of: mode) { _, newMode in
@@ -125,6 +145,7 @@ struct AddTransactionView: View {
             TransactionMetadataBar(
                 accounts: accountStore.accounts,
                 selectedAccountID: viewModel.accountID,
+                accountBalance: accountBalanceSubtitle,
                 date: dateBinding,
                 hasExtraDetails: hasExtraDetails
             ) { accountID in
@@ -133,6 +154,21 @@ struct AddTransactionView: View {
                     chooseDestinationIfNeeded()
                 }
             }
+            classificationSelector
+            TransactionKeypad { key in
+                amountExpression.enter(key)
+                viewModel.setAmountText(amountExpression.canonicalResult ?? "")
+            }
+            submitButton
+        }
+        .padding(.horizontal, AppSpacing.large)
+        .padding(.vertical, AppSpacing.small)
+        .frame(maxWidth: .infinity)
+        .background(.clear)
+    }
+
+    private var classificationSelector: some View {
+        Group {
             if mode == .debt {
                 DebtRecipientPicker(selection: Binding(get: { viewModel.debtID }, set: viewModel.setDebtID))
                     .frame(height: 84)
@@ -147,16 +183,10 @@ struct AddTransactionView: View {
                     categorySelection: categoryCarouselBinding
                 )
             }
-            TransactionKeypad { key in
-                amountExpression.enter(key)
-                viewModel.setAmountText(amountExpression.canonicalResult ?? "")
-            }
-            submitButton
         }
-        .padding(.horizontal, AppSpacing.large)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(.clear)
-        .ignoresSafeArea(.container, edges: .bottom)
+        .padding(.vertical, AppSpacing.extraSmall)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge))
+        .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
     }
 
     private var navigationTitle: String {
@@ -203,9 +233,7 @@ struct AddTransactionView: View {
         }
         .controlSize(.large)
         .disabled(isSubmitDisabled)
-        .padding(.top, 20)
-        .padding(.bottom, 24)
-        .padding(.horizontal, 10)
+        .padding(.top, AppSpacing.extraSmall)
     }
 
     private var submitButtonTitle: String {
@@ -238,6 +266,35 @@ struct AddTransactionView: View {
 
     private var selectedAccount: Account? {
         accountStore.accounts.first { $0.id == viewModel.accountID }
+    }
+
+    private var accountBalanceSubtitle: String {
+        guard let selectedAccount else { return "Choose account" }
+        switch transactionStore.state {
+        case .idle, .loading:
+            return "Loading balance"
+        case .failed:
+            return "Balance unavailable"
+        case .loaded:
+            if let balance = transactionStore.balance(
+                accountID: selectedAccount.id,
+                currency: selectedAccount.currency,
+                rates: exchangeRateStore.snapshot
+            ) {
+                return MoneyFormatter.format(balance, currency: selectedAccount.currency, roundToWhole: roundTotals)
+            }
+            return exchangeRateStore.state == .loading ? "Converting balance" : "Balance unavailable"
+        }
+    }
+
+    private var accountCurrencies: Set<String> {
+        Set(transactionStore.allTransactions.lazy
+            .filter { $0.accountId == viewModel.accountID }
+            .map(\.currency))
+    }
+
+    private var accountBalanceScopeKey: String {
+        "\(selectedAccount?.currency ?? ""):\(accountCurrencies.sorted().joined(separator: ","))"
     }
 
     private var destinationAccount: Account? {

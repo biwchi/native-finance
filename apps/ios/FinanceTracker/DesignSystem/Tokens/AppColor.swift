@@ -10,6 +10,9 @@ enum AppColor {
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let elevatedSurface = Color(uiColor: .secondarySystemGroupedBackground)
     static let controlFill = Color(uiColor: .tertiarySystemFill)
+    static let keypadUtilityFill = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .secondarySystemBackground : .systemGray4
+    })
     static let separator = Color(uiColor: .separator)
 
     static let positive = Color(uiColor: .systemGreen)
@@ -22,5 +25,8 @@ enum AppColor {
     })
     static let destructive = Color(uiColor: .systemRed)
     static let warning = Color(uiColor: .systemOrange)
+    static let warningText = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.68, green: 0.31, blue: 0.02, alpha: 1)
+    })
     static let informative = Color(uiColor: .systemBlue)
 }

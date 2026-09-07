@@ -1,94 +1,139 @@
 import SwiftUI
 
 struct TransactionMetadataBar: View {
-    @State private var dateEditor: DateEditor?
+    @Environment(\.calendar) private var calendar
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var iconBadgeSize = 36
+    @State private var isEditingDate = false
 
     let accounts: [Account]
     let selectedAccountID: UUID?
+    let accountBalance: String
     @Binding var date: Date
     let hasExtraDetails: Bool
     let onSelectAccount: (UUID) -> Void
 
     var body: some View {
         Group {
-            if #available(iOS 26.0, *) {
-                GlassEffectContainer(spacing: AppSpacing.extraSmall) {
-                    controls
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: AppSpacing.small) {
+                    accountMenu
+                    HStack(spacing: AppSpacing.small) {
+                        dateTimeButton
+                        Spacer(minLength: AppSpacing.small)
+                        detailsLink
+                    }
                 }
             } else {
-                controls
+                HStack(spacing: AppSpacing.small) {
+                    accountMenu
+                    Spacer(minLength: 0)
+                    dateTimeButton
+                    Spacer(minLength: 0)
+                    detailsLink
+                }
             }
         }
+        .padding(AppSpacing.small)
         .frame(maxWidth: .infinity)
+        .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
     }
 
-    private var controls: some View {
-        HStack(spacing: AppSpacing.small) {
-            QuickAccountMenu(
-                accounts: accounts,
-                selectedAccountID: selectedAccountID,
-                appearance: .glass,
-                onSelect: onSelectAccount
-            )
-
-            dateButton(.date)
-            dateButton(.time)
-
-            NavigationLink(value: AddTransactionRoute.details) {
-                AppIcon(hasExtraDetails ? "clipboard-check" : "page-plus", size: 17)
-                    .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
-                    .modifier(CapsuleControlBackground(appearance: .glass))
+    private var accountMenu: some View {
+        Menu {
+            Picker("Account", selection: Binding(
+                get: { selectedAccountID },
+                set: { if let accountID = $0 { onSelectAccount(accountID) } }
+            )) {
+                ForEach(accounts) { account in
+                    Label(account.name, icon: account.icon).tag(Optional(account.id))
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Transaction details")
-            .accessibilityValue(hasExtraDetails ? "Details added" : "No extra details")
-        }
-    }
-
-    private func dateButton(_ editor: DateEditor) -> some View {
-        Button {
-            dateEditor = editor
         } label: {
-            Text(date, format: editor == .date ? .dateTime.month(.abbreviated).day() : .dateTime.hour().minute())
-                .font(.subheadline.weight(.medium))
+            HStack(spacing: AppSpacing.small) {
+                AppIcon(selectedAccount?.icon ?? "credit-card", size: 22)
+                    .foregroundStyle(accountColor)
+                    .frame(width: iconBadgeSize, height: iconBadgeSize)
+                    .background(accountColor.opacity(0.14), in: Circle())
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(selectedAccount?.name ?? "Account")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(accountBalance)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
                 .lineLimit(1)
-                .padding(.horizontal, AppSpacing.medium)
-                .frame(minHeight: AppControlSize.minimumTapTarget)
-                .modifier(CapsuleControlBackground(appearance: .glass))
+                .minimumScaleFactor(0.75)
+            }
+            .frame(minHeight: AppControlSize.minimumTapTarget, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .fixedSize()
-        .accessibilityLabel(editor.title)
-        .accessibilityValue(date.formatted(date: editor == .date ? .complete : .omitted, time: editor == .time ? .shortened : .omitted))
-        .popover(isPresented: Binding(
-            get: { dateEditor == editor },
-            set: { if !$0 { dateEditor = nil } }
-        )) {
+        .disabled(accounts.isEmpty)
+        .accessibilityLabel("Account, \(selectedAccount?.name ?? "Choose account")")
+        .accessibilityValue(accountBalance)
+        .accessibilityHint("Opens the account picker")
+    }
+
+    private var dateTimeButton: some View {
+        Button {
+            isEditingDate = true
+        } label: {
+            HStack(spacing: AppSpacing.small) {
+                AppIcon("calendar", size: 22)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(calendar.isDateInToday(date) ? "Today" : date.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.subheadline.weight(.semibold))
+                    Text(date, format: .dateTime.hour().minute())
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .lineLimit(1)
+            }
+            .foregroundStyle(.primary)
+            .frame(minHeight: AppControlSize.minimumTapTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel("Transaction date and time")
+        .accessibilityValue(date.formatted(date: .complete, time: .shortened))
+        .popover(isPresented: $isEditingDate) {
             VStack(spacing: AppSpacing.medium) {
                 HStack {
-                    Text(editor.title).font(.headline)
+                    Text("Date & time").font(.headline)
                     Spacer()
-                    Button("Done") { dateEditor = nil }
+                    Button("Done") { isEditingDate = false }
                 }
-                if editor == .date {
-                    DatePicker("Transaction date", selection: $date, displayedComponents: .date)
-                        .datePickerStyle(.graphical)
-                } else {
-                    DatePicker("Transaction time", selection: $date, displayedComponents: .hourAndMinute)
-                        .datePickerStyle(.wheel)
-                        .labelsHidden()
-                }
+                DatePicker("Transaction date and time", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.graphical)
             }
             .padding(AppSpacing.large)
-            .frame(minWidth: 300)
+            .frame(minWidth: 300, idealWidth: 340)
             .presentationCompactAdaptation(.popover)
         }
     }
 
-    private enum DateEditor {
-        case date
-        case time
+    private var detailsLink: some View {
+        NavigationLink(value: AddTransactionRoute.details) {
+            AppIcon(hasExtraDetails ? "clipboard-check" : "page-plus", size: 22)
+                .foregroundStyle(.primary)
+                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Transaction details")
+        .accessibilityValue(hasExtraDetails ? "Details added" : "No extra details")
+    }
 
-        var title: String { self == .date ? "Transaction date" : "Transaction time" }
+    private var selectedAccount: Account? {
+        accounts.first { $0.id == selectedAccountID }
+    }
+
+    private var accountColor: Color {
+        selectedAccount?.iconColor.color ?? .secondary
     }
 }

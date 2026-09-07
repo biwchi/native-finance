@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct QuickKeyBackground: ViewModifier {
+    let isUtility: Bool
+
     func body(content: Content) -> some View {
         content.background(
-            AppColor.controlFill,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            isUtility ? AppColor.keypadUtilityFill : AppColor.controlFill,
+            in: RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
         )
     }
 }

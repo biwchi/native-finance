@@ -40,7 +40,7 @@ struct PlannedBillsSummary {
                 if date > now && date >= start && !isRecorded { count += 1 }
                 iterations += 1
                 guard iterations < 10_000,
-                      let next = nextOccurrence(after: date, bill: bill), next > date else { return nil }
+                      let next = RecurrenceSchedule.nextOccurrence(after: date, bill: bill), next > date else { return nil }
                 date = next
             }
             if count > 0 {
@@ -62,35 +62,5 @@ struct PlannedBillsSummary {
         NSDecimalRound(&rounded, &daily, 2, .down)
         return PlannedBillsSummary(planned: planned, afterBills: afterBills,
                                    dailyAmount: range == nil ? nil : rounded, dailyRange: range)
-    }
-
-    private static func nextOccurrence(after date: Date, bill: UpcomingTransaction) -> Date? {
-        // Recurring schedules use UTC in the API, even across local daylight-saving changes.
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        switch bill.frequency {
-        case .daily: return calendar.date(byAdding: .day, value: 1, to: date)
-        case .weekly: return calendar.date(byAdding: .day, value: 7, to: date)
-        case .monthly, .yearly:
-            let anchor = calendar.dateComponents([.month, .day, .hour, .minute, .second, .nanosecond],
-                                                  from: bill.startAt ?? bill.occurredAt)
-            var target = calendar.dateComponents([.year, .month], from: date)
-            if bill.frequency == .monthly {
-                guard let month = calendar.date(from: target),
-                      let next = calendar.date(byAdding: .month, value: 1, to: month) else { return nil }
-                target = calendar.dateComponents([.year, .month], from: next)
-            } else {
-                target.year = (target.year ?? 0) + 1
-                target.month = anchor.month
-            }
-            guard let month = calendar.date(from: target),
-                  let days = calendar.range(of: .day, in: .month, for: month) else { return nil }
-            target.day = min(anchor.day ?? 1, days.count)
-            target.hour = anchor.hour
-            target.minute = anchor.minute
-            target.second = anchor.second
-            target.nanosecond = anchor.nanosecond
-            return calendar.date(from: target)
-        }
     }
 }

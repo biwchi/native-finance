@@ -27,8 +27,8 @@ enum QuickTransactionMode: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .expense: AppColor.warning
-        case .income: AppColor.positive
+        case .expense: AppColor.warningText
+        case .income: AppColor.positiveText
         case .transfer: AppColor.informative
         case .debt: AppColor.informative
         }

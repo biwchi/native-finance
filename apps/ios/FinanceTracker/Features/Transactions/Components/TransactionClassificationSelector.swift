@@ -16,7 +16,6 @@ struct TransactionClassificationSelector: View {
                 items: destinationItems,
                 selection: $destinationSelection
             )
-            .padding(.horizontal, -AppSpacing.large)
         } else {
             ZStack {
                 if let expandedCategoryItems {
@@ -36,7 +35,6 @@ struct TransactionClassificationSelector: View {
             }
             .frame(height: 84)
             .clipped()
-            .padding(.horizontal, -AppSpacing.large)
             .animation(.snappy(duration: 0.3), value: expandedCategoryID)
         }
     }

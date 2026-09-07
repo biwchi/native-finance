@@ -22,8 +22,6 @@ struct SettingsView: View {
         }
     }
 
-    var onCurrencyPickerVisibilityChange: (Bool) -> Void = { _ in }
-
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var defaultCurrency = AppPreferences.initialCurrency
 
@@ -47,12 +45,6 @@ struct SettingsView: View {
         Form {
             Section {
                 NavigationLink {
-                    DebtsView()
-                } label: {
-                    Label("Debts", icon: "user")
-                }
-
-                NavigationLink {
                     CategorySettingsView()
                 } label: {
                     Label("Categories", icon: "label")
@@ -64,8 +56,6 @@ struct SettingsView: View {
                         currencyCodes: AppPreferences.currencyCodes
                     )
                     .navigationTitle("Default currency")
-                    .onAppear { onCurrencyPickerVisibilityChange(true) }
-                    .onDisappear { onCurrencyPickerVisibilityChange(false) }
                 } label: {
                     LabeledContent {
                         Text(currencyLabel)

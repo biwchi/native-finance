@@ -47,13 +47,17 @@ The centered account picker loads accounts from the backend. Total is the defaul
 
 Choose **Debt** when adding a transaction, select the account you lend from, and choose or create a recipient (for example, Alexey). Recipients have their own icons and colors. Set them when creating a recipient, or change them from **Debts → Add → Manage recipients** or **Edit recipient** in the transaction recipient picker. Changes appear on existing loans immediately. Debt transactions reduce the account balance but do not count as income or budget spending. They cannot repeat or have expense categories.
 
-Open **Home → Settings → Debts** using the Settings icon in the dashboard toolbar. This screen includes outstanding debt transactions across all accounts and months, and a total in the default display currency. If exchange rates are unavailable, separate currency totals are shown. Swipe a loan and choose **Delete · returned** once the money has been returned to its original account. Deleting removes the outstanding loan and restores the account balance; recipients remain available for future loans.
+Open **Home → Finances → Debts** using the labeled Finances button in the dashboard toolbar. This screen includes outstanding debt transactions across all accounts and months, a total in the default display currency, recipient counts, and a balance for each recipient. Tap a transaction to edit it. If exchange rates are unavailable, separate currency totals are shown. Swipe a loan and choose **Delete · returned** once the money has been returned to its original account. Deleting removes the outstanding loan and restores the account balance; recipients remain available for future loans.
 
 Apply the backend migration with `bun run db:migrate` before using this client with an existing database.
 
 ## Navigation
 
-Home is the main screen. Its trailing toolbar groups **Budget** and **Settings**, with Settings on the far right. Both open with a Back button to return to Home. A single centered Add Transaction button sits at the bottom; the bottom menu and Activity page have been removed.
+Home is the main screen. Its trailing toolbar groups the labeled **Finances** button and **Settings**, with Settings on the far right. Finances opens a permanent directory for **Recurring**, **Debts**, and **Budget**, including when these features have no data. The centered Add Transaction button belongs to the dashboard, so pushed pages cover it along with the dashboard. There is no bottom navigation menu.
+
+**Recurring** shows a centered amount with **Expenses / Income / All** and **Day / Week / Month / Year** selectors, defaulting to Expenses and Month. Day and Week cover the next 1 and 7 days, Month the next 30 days, and Year the next 12 months. All shows net cash flow (income minus expenses). Projections expand actual scheduled dates in UTC, preserve month-end and leap-day anchors, respect end dates, and convert complete totals into the display currency. The type filter also applies to active schedules and recorded transactions. Add opens transaction entry with recurrence enabled and the selected transaction type.
+
+**Budget** opens an overview for the selected account and Home’s selected month (or the current month when Home uses a different period). It shows spent/remaining amounts, progress for each pool and category limit, and category spending when only a shared pool limit exists. Tap a pool or category to see its transactions. The month picker changes the reporting month; the **Settings** icon opens the existing budget editor for that exact month and account. Debt transactions do not count as budget spending.
 
 ## Settings
 

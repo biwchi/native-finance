@@ -5,7 +5,7 @@ struct TransactionAmountPanel: View {
     let formattedAmount: String
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: AppSpacing.extraSmall) {
             if expression.rawValue.contains(where: { "+-*/".contains($0) }) {
                 Text(expression.displayValue)
                     .font(.callout.monospacedDigit())

@@ -5,6 +5,7 @@ private struct FinancePageGradientModifier: ViewModifier {
     let opacity: Double
     let height: CGFloat
     let backgroundColor: Color
+    let usesNativeNavigationTitle: Bool
     @State private var scrollOffset: CGFloat = 0
 
     @ViewBuilder
@@ -26,7 +27,7 @@ private struct FinancePageGradientModifier: ViewModifier {
         ZStack(alignment: .top) {
             pageBackground
 
-            if #available(iOS 26.0, *) {
+            if #available(iOS 26.0, *), !usesNativeNavigationTitle {
                 content
                     .scrollContentBackground(.hidden)
                     .background(Color.clear)
@@ -70,6 +71,7 @@ extension View {
     @ViewBuilder
     func financePage(
         enabled: Bool = true,
+        usesNativeNavigationTitle: Bool = false,
         tint: Color = AppColor.accent,
         opacity: Double = 0.5,
         gradientHeight: CGFloat = 420,
@@ -81,7 +83,8 @@ extension View {
                     tint: tint,
                     opacity: opacity,
                     height: gradientHeight,
-                    backgroundColor: backgroundColor
+                    backgroundColor: backgroundColor,
+                    usesNativeNavigationTitle: usesNativeNavigationTitle
                 )
             )
         } else {
@@ -110,7 +113,8 @@ extension View {
                     tint: tint,
                     opacity: opacity,
                     height: gradientHeight,
-                    backgroundColor: backgroundColor
+                    backgroundColor: backgroundColor,
+                    usesNativeNavigationTitle: false
                 )
             )
         } else {

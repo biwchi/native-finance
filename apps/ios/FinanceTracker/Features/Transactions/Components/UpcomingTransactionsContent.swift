@@ -6,6 +6,7 @@ struct UpcomingTransactionsContent: View {
 
     var limit: Int? = nil
     var allAccounts = false
+    var kindFilter: TransactionKind? = nil
     var isDeleting = false
     let onEdit: (UpcomingTransaction) -> Void
     var onDelete: ((UpcomingTransaction) -> Void)? = nil
@@ -16,7 +17,7 @@ struct UpcomingTransactionsContent: View {
             ProgressView("Loading recurring transactions")
                 .frame(maxWidth: .infinity)
         case .loaded:
-            ForEach((allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions).prefix(limit ?? Int.max)) { transaction in
+            ForEach(transactions.prefix(limit ?? Int.max)) { transaction in
                 transactionButton(transaction)
             }
         case .failed:
@@ -34,6 +35,11 @@ struct UpcomingTransactionsContent: View {
             }
             .padding(.vertical, 8)
         }
+    }
+
+    private var transactions: [UpcomingTransaction] {
+        let transactions = allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions
+        return transactions.filter { kindFilter == nil || $0.kind == kindFilter }
     }
 
     private func transactionButton(_ transaction: UpcomingTransaction) -> some View {
