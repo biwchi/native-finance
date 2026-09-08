@@ -32,9 +32,9 @@ final class MonthlySummaryTests: XCTestCase {
         XCTAssertTrue(summary.accessibilityLabel.contains("Over limit"))
 
         let healthy = try state(spent: 760)
-        XCTAssertEqual(healthy.amountText, "$1 240,00")
+        XCTAssertEqual(healthy.amountText, "$1 240")
         XCTAssertTrue(healthy.accessibilityLabel.contains("September budget"))
-        XCTAssertTrue(healthy.accessibilityLabel.contains("1,240.00 US dollars remaining"))
+        XCTAssertTrue(healthy.accessibilityLabel.contains("1,240 US dollars remaining"))
         XCTAssertTrue(healthy.accessibilityLabel.contains("16 days left"))
     }
 
@@ -91,9 +91,9 @@ final class MonthlySummaryTests: XCTestCase {
         let dinar = try state(budget: 2_000, spent: Decimal(string: "760.125")!, currency: "KWD", locale: "en_US")
         XCTAssertEqual(dinar.amountText, "KWD1 239,88")
         let euro = try state(spent: 760, currency: "EUR", locale: "de_DE")
-        XCTAssertEqual(euro.amountText, "€1 240,00")
+        XCTAssertEqual(euro.amountText, "€1 240")
         let tenge = try state(spent: 760, currency: "KZT", locale: "kk_KZ")
-        XCTAssertEqual(tenge.amountText, "₸1 240,00")
+        XCTAssertEqual(tenge.amountText, "₸1 240")
         XCTAssertFalse(tenge.monthTitle.contains("September"))
         let large = try state(budget: 2_000_000_000_000_000, spent: 760_000_000_000_000)
         XCTAssertEqual(large.remaining, 1_240_000_000_000_000)

@@ -218,29 +218,167 @@ final class FinanceDateFilterTests: XCTestCase {
 
     @MainActor
     func testDateFilterSheetsRenderInLightAndDark() async throws {
+        func firstScrollView(in view: UIView) -> UIScrollView? {
+            if let scrollView = view as? UIScrollView { return scrollView }
+            return view.subviews.lazy.compactMap { firstScrollView(in: $0) }.first
+        }
+
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let scenarios: [(FinanceDateFilter.Preset, CGFloat, DynamicTypeSize)] = [
+            (.month, 390, .large), (.custom, 390, .large), (.allTime, 390, .large),
+            (.last7Days, 390, .large), (.month, 320, .large), (.custom, 320, .large),
+            (.month, 390, .accessibility3), (.custom, 390, .accessibility3)
+        ]
         for scheme in [ColorScheme.light, .dark] {
-            for isCustom in [true, false] {
+            for (preset, width, textSize) in scenarios {
+                let filter = FinanceDateFilter(preset: preset, anchor: now, customEnd: now)
                 let controller = UIHostingController(rootView:
-                    FinanceDateFilterSheet(selection: FinanceDateFilter(anchor: now), isCustom: isCustom, calendar: calendar) { _ in }
-                        .environment(\.calendar, calendar)
-                        .environment(\.locale, locale)
+                    AppColor.groupedBackground
+                        .sheet(isPresented: .constant(true)) {
+                            FinanceDateFilterSheet(selection: filter, calendar: self.calendar) { _, _ in }
+                                .environment(\.calendar, self.calendar)
+                                .environment(\.locale, self.locale)
+                                .environment(\.dynamicTypeSize, textSize)
+                        }
                         .preferredColorScheme(scheme))
                 let window = UIWindow(windowScene: scene)
-                window.frame = CGRect(x: 0, y: 0, width: 390, height: isCustom ? 440 : 750)
+                window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
                 window.rootViewController = controller
                 window.makeKeyAndVisible()
                 controller.view.frame = window.bounds
-                try await Task.sleep(for: .milliseconds(200))
+                try await Task.sleep(for: .milliseconds(650))
                 controller.view.layoutIfNeeded()
+                if !textSize.isAccessibilitySize {
+                    let sheet = try XCTUnwrap(controller.presentedViewController)
+                    let scrollView = try XCTUnwrap(firstScrollView(in: sheet.view))
+                    XCTAssertLessThanOrEqual(scrollView.contentSize.height, scrollView.bounds.height + 1,
+                                             "\(preset.rawValue) must show Apply without scrolling at width \(width)")
+                }
                 let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
                     XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
                 }
                 let attachment = XCTAttachment(image: image)
-                attachment.name = "Date-filter-\(isCustom ? "custom" : "date")-\(scheme)"
+                attachment.name = "Date-filter-\(preset.rawValue)-\(Int(width))-\(textSize)-\(scheme)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                controller.dismiss(animated: false)
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+        }
+    }
+
+    func testQuickFiltersReturnToCurrentPeriodAfterNavigating() {
+        var draft = FinanceDateFilterSheet.Draft(selection: FinanceDateFilter(anchor: now), calendar: calendar)
+        draft.shift(by: -1, now: now, calendar: calendar)
+        XCTAssertEqual(draft.selection.anchor, date("2026-08-01T00:00:00Z"))
+        for preset in FinanceDateFilter.Preset.allCases where preset != .custom {
+            draft.select(preset, now: now, calendar: calendar)
+            XCTAssertEqual(draft.selection.preset, preset)
+            XCTAssertEqual(draft.selection.anchor, now)
+        }
+    }
+
+    func testCustomDraftStartsWithTheDisplayedMonthAndClampsInvalidEndDates() {
+        var draft = FinanceDateFilterSheet.Draft(selection: FinanceDateFilter(anchor: now), calendar: calendar)
+        draft.shift(by: -1, now: now, calendar: calendar)
+        draft.select(.custom, now: now, calendar: calendar)
+        XCTAssertEqual(draft.selection.anchor, date("2026-08-01T00:00:00Z"))
+        XCTAssertEqual(draft.selection.customEnd, date("2026-08-31T00:00:00Z"))
+
+        draft.setStart(date("2026-09-12T18:00:00Z"), calendar: calendar)
+        XCTAssertEqual(draft.selection.anchor, date("2026-09-12T00:00:00Z"))
+        XCTAssertEqual(draft.selection.customEnd, draft.selection.anchor)
+        draft.setEnd(date("2026-09-10T18:00:00Z"), calendar: calendar)
+        XCTAssertEqual(draft.selection.customEnd, draft.selection.anchor)
+    }
+
+    func testCustomDraftSurvivesPresetChangesAndReopening() {
+        var draft = FinanceDateFilterSheet.Draft(selection: FinanceDateFilter(anchor: now), calendar: calendar)
+        draft.select(.custom, now: now, calendar: calendar)
+        draft.setStart(date("2026-08-20T18:00:00Z"), calendar: calendar)
+        draft.setEnd(date("2026-09-05T10:00:00Z"), calendar: calendar)
+        let custom = draft.selection
+        draft.select(.week, now: now, calendar: calendar)
+        draft.select(.custom, now: now, calendar: calendar)
+        XCTAssertEqual(draft.selection, custom)
+        draft.select(.month, now: now, calendar: calendar)
+
+        var reopened = FinanceDateFilterSheet.Draft(selection: draft.selection, savedCustom: draft.savedCustom, calendar: calendar)
+        reopened.select(.custom, now: now, calendar: calendar)
+        XCTAssertEqual(reopened.selection, custom)
+    }
+
+    func testRollingNavigationKeepsQuickModeAndRestoresTheLiveWindow() {
+        var draft = FinanceDateFilterSheet.Draft(selection: FinanceDateFilter(preset: .last7Days, anchor: now), calendar: calendar)
+        draft.shift(by: -1, now: now, calendar: calendar)
+        XCTAssertEqual(draft.selection.preset, .last7Days)
+        XCTAssertEqual(draft.selection.interval(now: now, calendar: calendar)?.start, date("2026-09-02T00:00:00Z"))
+        XCTAssertEqual(draft.selection.interval(now: now, calendar: calendar)?.end, date("2026-09-09T00:00:00Z"))
+        XCTAssertNil(draft.savedCustom)
+        XCTAssertNotEqual(draft.selection.label(now: now, calendar: calendar, locale: locale), "Last 7 Days")
+
+        var reopened = FinanceDateFilterSheet.Draft(selection: draft.selection, calendar: calendar)
+        XCTAssertEqual(reopened.selection.preset, .last7Days)
+        reopened.shift(by: 1, now: now, calendar: calendar)
+        XCTAssertNil(reopened.selection.rollingAnchor)
+        XCTAssertEqual(reopened.selection.label(now: now, calendar: calendar, locale: locale), "Last 7 Days")
+
+        draft.select(.allTime, now: now, calendar: calendar)
+        let allTime = draft.selection
+        draft.shift(by: 1, now: now, calendar: calendar)
+        XCTAssertEqual(draft.selection, allTime)
+    }
+
+    func testNavigatingEveryQuickPresetKeepsDateFieldsInCustomOnly() {
+        for preset in FinanceDateFilter.Preset.allCases where preset != .custom && preset != .allTime {
+            var draft = FinanceDateFilterSheet.Draft(selection: FinanceDateFilter(preset: preset, anchor: now), calendar: calendar)
+            let current = draft.selection.interval(now: now, calendar: calendar)
+            draft.shift(by: -1, now: now, calendar: calendar)
+            XCTAssertEqual(draft.selection.preset, preset)
+            XCTAssertEqual(draft.selection.interval(now: now, calendar: calendar)?.end, current?.start)
+            draft.shift(by: 1, now: now, calendar: calendar)
+            XCTAssertEqual(draft.selection.interval(now: now, calendar: calendar), current)
+            XCTAssertNil(draft.savedCustom)
+        }
+    }
+
+    @MainActor
+    func testCompactDateLabelsRenderAtNarrowWidthAndAccessibilitySizes() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for scheme in [ColorScheme.light, .dark] {
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let content = VStack(spacing: 16) {
+                    FinanceDatePickerButton(selection: .constant(FinanceDateFilter(anchor: now)))
+                    FinanceDatePickerButton(selection: .constant(FinanceDateFilter(preset: .allTime)))
+                        .disabled(true)
+                    FinanceDatePickerButton(selection: .constant(FinanceDateFilter(preset: .custom,
+                        anchor: date("2025-12-29T00:00:00Z"), customEnd: date("2026-09-15T00:00:00Z"))))
+                }
+                .padding(16)
+                .environment(\.calendar, calendar)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, size)
+                .background(AppColor.groupedBackground)
+                .preferredColorScheme(scheme)
+                let controller = UIHostingController(rootView: content)
+                let window = UIWindow(windowScene: scene)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                let measured = controller.sizeThatFits(in: CGSize(width: 320, height: 1200))
+                XCTAssertLessThanOrEqual(measured.width, 320)
+                window.frame = CGRect(origin: .zero, size: measured)
+                controller.view.frame = window.bounds
+                try await Task.sleep(for: .milliseconds(200))
+                let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                    XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "Compact-date-\(scheme)-\(size)"
                 attachment.lifetime = .keepAlways
                 add(attachment)
                 window.isHidden = true
+                window.rootViewController = nil
             }
         }
     }

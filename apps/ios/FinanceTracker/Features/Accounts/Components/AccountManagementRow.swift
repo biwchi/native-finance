@@ -2,7 +2,10 @@ import SwiftUI
 
 struct AccountManagementRow: View {
     let account: Account
+    let balanceSubtitle: String
     let isWorking: Bool
+    let isSelected: Bool
+    let isEditing: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -15,18 +18,24 @@ struct AccountManagementRow: View {
                 Text(account.name)
                     .foregroundStyle(.primary)
 
-                Text("\(account.type.title) · \(account.currency)")
+                Text(balanceSubtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
 
             Spacer()
 
             if isWorking {
                 ProgressView()
-            } else {
+            } else if isEditing {
                 AppIcon("nav-arrow-right", size: 12)
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            } else if isSelected {
+                AppIcon("check", size: 17)
+                    .foregroundStyle(AppColor.accent)
+                    .accessibilityHidden(true)
             }
         }
     }

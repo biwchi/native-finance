@@ -41,7 +41,7 @@ xcodebuild -project FinanceTracker.xcodeproj -scheme FinanceTracker \
 
 Release builds use `API_BASE_URL` when supplied, otherwise the value in `FinanceTracker/Resources/Info.plist`; they never detect a development Mac or add the Debug local-network permissions. Set an HTTPS endpoint for distribution.
 
-The centered account picker loads accounts from the backend. Total is the default and leaves transaction requests unfiltered; selecting an account adds its ID to the request. Its Manage Accounts action opens a sheet for adding, editing, deleting, and reordering accounts.
+The account picker loads accounts from the backend. **All Accounts** is the default and leaves transaction requests unfiltered; selecting an account adds its ID to the request. The menu shows the first four accounts in the saved order. **View Accounts** opens the complete accounts sheet, where each account shows its balance in its currency and **All Accounts** shows the combined balance in the display currency. Tapping an account or **All Accounts** selects it and closes the sheet. Swipe left on an account for **Edit** and **Delete**; deletion requires confirmation. Use the toolbar's **Edit** mode to tap into account details, reorder, or delete accounts. Reordering also changes which four accounts appear in the menu. **Add Account** and account editing open at full sheet height.
 
 ## Debts
 
@@ -53,7 +53,7 @@ Apply the backend migration with `bun run db:migrate` before using this client w
 
 ## Navigation
 
-Home is the main screen. Its trailing toolbar groups the labeled **Finances** button and **Settings**, with Settings on the far right. Finances opens a permanent directory for **Recurring**, **Debts**, and **Budget**, including when these features have no data. The centered Add Transaction button belongs to the dashboard, so pushed pages cover it along with the dashboard. There is no bottom navigation menu.
+Home is the main screen. Its trailing toolbar groups the icon-only **Finances** button with a 2×2 grid icon and **Settings**, with Settings on the far right. Finances opens a permanent directory for **Recurring**, **Debts**, and **Budget**, including when these features have no data. The centered Add Transaction button belongs to the dashboard, so pushed pages cover it along with the dashboard. There is no bottom navigation menu.
 
 **Recurring** shows a centered amount with **Expenses / Income / All** and **Day / Week / Month / Year** selectors, defaulting to Expenses and Month. Day and Week cover the next 1 and 7 days, Month the next 30 days, and Year the next 12 months. All shows net cash flow (income minus expenses). Projections expand actual scheduled dates in UTC, preserve month-end and leap-day anchors, respect end dates, and convert complete totals into the display currency. The type filter also applies to active schedules and recorded transactions. Add opens transaction entry with recurrence enabled and the selected transaction type.
 

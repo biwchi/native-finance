@@ -24,6 +24,8 @@ struct FinanceDateFilter: Equatable {
     var preset: Preset = .month
     var anchor: Date = .now
     var customEnd: Date = .now
+    // Browsing rolling windows fixes their end date without turning the picker into Custom mode.
+    var rollingAnchor: Date? = nil
 
     /// Calendar periods use local midnight boundaries. The custom end date is inclusive.
     func interval(now: Date = .now, calendar: Calendar = .current) -> DateInterval? {
@@ -44,7 +46,7 @@ struct FinanceDateFilter: Equatable {
         case .year:
             return calendar.dateInterval(of: .year, for: day)
         case .last7Days, .last30Days:
-            let today = calendar.startOfDay(for: now)
+            let today = calendar.startOfDay(for: rollingAnchor ?? now)
             let count = preset == .last7Days ? 7 : 30
             let start = calendar.date(byAdding: .day, value: 1 - count, to: today) ?? today
             let end = calendar.date(byAdding: .day, value: 1, to: today) ?? today
@@ -86,6 +88,14 @@ struct FinanceDateFilter: Equatable {
 
     func shifted(by value: Int, now: Date = .now, calendar: Calendar = .current) -> Self {
         guard preset != .allTime else { return self }
+        if preset == .last7Days || preset == .last30Days {
+            let days = preset == .last7Days ? 7 : 30
+            let end = calendar.startOfDay(for: rollingAnchor ?? now)
+            var result = self
+            let shiftedEnd = calendar.date(byAdding: .day, value: days * value, to: end) ?? end
+            result.rollingAnchor = calendar.isDate(shiftedEnd, inSameDayAs: now) ? nil : shiftedEnd
+            return result
+        }
         if !preset.canNavigate {
             guard let interval = interval(now: now, calendar: calendar) else { return self }
             let days = calendar.dateComponents([.day], from: interval.start, to: interval.end).day ?? 1
@@ -110,9 +120,11 @@ struct FinanceDateFilter: Equatable {
             return formatted(anchor, template: sameYear(anchor, now, calendar) ? "LLLL" : "LLLL y", calendar: calendar, locale: locale)
         case .year:
             return formatted(anchor, template: "y", calendar: calendar, locale: locale)
-        case .last7Days, .last30Days, .allTime:
+        case .allTime:
             return preset.rawValue
-        case .week, .biweekly, .custom:
+        case .last7Days where rollingAnchor == nil, .last30Days where rollingAnchor == nil:
+            return preset.rawValue
+        case .week, .biweekly, .custom, .last7Days, .last30Days:
             guard let interval = interval(now: now, calendar: calendar),
                   let last = calendar.date(byAdding: .day, value: -1, to: interval.end) else { return preset.rawValue }
             if calendar.isDate(interval.start, inSameDayAs: last) {

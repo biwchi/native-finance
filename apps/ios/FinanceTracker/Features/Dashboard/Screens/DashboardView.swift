@@ -30,6 +30,9 @@ struct DashboardView: View {
     @AppStorage(AppPreferences.recurringReminderDaysKey)
     private var recurringReminderDays = AppPreferences.defaultRecurringReminderDays
     @State private var selectedPeriod = FinanceDateFilter()
+    @State private var isShowingRecurring = false
+    @State private var isShowingBudget = false
+    @State private var selectedSummaryMetric: DashboardSummaryMetrics.Metric?
     @State private var editingTransaction: FinanceTransaction?
     @State private var deletingTransactionID: UUID?
     @State private var deletionError: String?
@@ -37,6 +40,12 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             dashboardContent
+                .navigationDestination(isPresented: $isShowingRecurring) {
+                    RecurringTransactionsView()
+                }
+                .navigationDestination(isPresented: $isShowingBudget) {
+                    BudgetOverviewView(initialMonth: selectedPeriod.anchor)
+                }
                 .task(id: budgetScope) {
                     if selectedPeriod.preset == .month {
                         await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID)
@@ -54,21 +63,9 @@ struct DashboardView: View {
                             NavigationLink {
                                 FinancesView(initialMonth: selectedPeriod.preset == .month ? selectedPeriod.anchor : .now)
                             } label: {
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(spacing: AppSpacing.medium) {
-                                        AppIcon("wallet")
-                                        Text("Finances")
-                                            .font(.subheadline.weight(.semibold))
-                                            .lineLimit(1)
-                                    }
-                                    .padding(.leading, AppSpacing.medium)
-                                    .fixedSize(horizontal: true, vertical: false)
-
-                                    AppIcon("wallet")
-                                        .frame(width: 44, height: 44)
-                                }
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
+                                AppIcon("view-grid")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Finances")
                             .accessibilityIdentifier("financesNavigation")
@@ -88,6 +85,11 @@ struct DashboardView: View {
                 .refreshable { await reload() }
         }
         .task(id: rateScope) { await loadRates() }
+        .sheet(item: $selectedSummaryMetric) { metric in
+            if let insights {
+                DashboardSummaryMetrics.Detail(metric: metric, amount: metric.amount(in: insights), currency: currency)
+            }
+        }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
@@ -170,10 +172,18 @@ struct DashboardView: View {
             .modifier(FinanceSectionMargins())
             if transactionStore.upcomingState == .loaded, let nearest = reminders.first {
                 Section {
-                    DashboardUpcomingReminder(transaction: nearest, count: reminders.count, now: now)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                    Button {
+                        isShowingRecurring = true
+                    } label: {
+                        DashboardUpcomingReminder(transaction: nearest, count: reminders.count, now: now)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Show recurring transactions")
+                    .accessibilityIdentifier("recurringReminderNavigation")
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
                 .modifier(FinanceSectionMargins(top: AppSpacing.large))
             }
@@ -191,7 +201,6 @@ struct DashboardView: View {
                 ZStack {
                     summaryCardOverlay(for: insights, bounds: bounds, proxy: proxy)
                 }
-                .allowsHitTesting(false)
             }
         }
     }
@@ -283,7 +292,9 @@ struct DashboardView: View {
             insights: insights,
             currency: currency,
             budgetTimeRemaining: budgetTimeRemaining(for: insights),
-            comparisonDescription: comparisonDescription
+            comparisonDescription: comparisonDescription,
+            onViewBudget: { isShowingBudget = true },
+            onViewMetric: { selectedSummaryMetric = $0 }
         )
     }
 

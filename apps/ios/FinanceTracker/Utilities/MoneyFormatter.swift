@@ -1,6 +1,6 @@
 import Foundation
 
-/// Money display uses a leading symbol and space grouping; totals can opt into whole numbers.
+/// Money display uses a leading symbol and space grouping, omitting zero fractions.
 enum MoneyFormatter {
     static let decimalSeparator = ","
     private static let displayLocale = Locale(identifier: "fr_FR")
@@ -13,14 +13,33 @@ enum MoneyFormatter {
         return sign + symbol(for: currency) + number(abs(amount), roundToWhole: roundToWhole)
     }
 
+    /// Summary-only abbreviation. Exact display and editing keep their existing precision.
+    static func compact(_ value: Decimal, currency: String, showPositiveSign: Bool = false,
+                        roundToWhole: Bool = false, significantDigits: Int = 3) -> String {
+        guard !value.isNaN else { return "Unavailable" }
+        let amount = rounded(value, places: roundToWhole ? 0 : 2)
+        guard abs(amount) >= 1_000 else {
+            return format(amount, currency: currency, showPositiveSign: showPositiveSign, roundToWhole: roundToWhole)
+        }
+        let sign = amount < 0 ? "-" : (showPositiveSign ? "+" : "")
+        // Use K/M/B/T with the app's comma decimal separator and leading currency symbol.
+        let number = abs(amount).formatted(
+            .number.notation(.compactName).precision(.significantDigits(1...significantDigits))
+                .locale(symbolLocale)
+        ).replacingOccurrences(of: ".", with: decimalSeparator)
+        return sign + symbol(for: currency) + number
+    }
+
     static func number(_ value: Decimal) -> String {
         number(value, roundToWhole: false)
     }
 
     static func number(_ value: Decimal, roundToWhole: Bool) -> String {
         guard !value.isNaN else { return "Unavailable" }
-        return rounded(value, places: roundToWhole ? 0 : 2).formatted(
-            .number.grouping(.automatic).precision(.fractionLength(roundToWhole ? 0 : 2)).locale(displayLocale)
+        let amount = rounded(value, places: roundToWhole ? 0 : 2)
+        let fractionDigits = amount == rounded(amount, places: 0) ? 0 : 2
+        return amount.formatted(
+            .number.grouping(.automatic).precision(.fractionLength(fractionDigits)).locale(displayLocale)
         )
         .replacingOccurrences(of: "\u{00A0}", with: " ")
         .replacingOccurrences(of: "\u{202F}", with: " ")
@@ -39,9 +58,11 @@ enum MoneyFormatter {
     /// VoiceOver uses the user's language to pronounce currency names and numbers.
     static func spoken(_ value: Decimal, currency: String, locale: Locale, roundToWhole: Bool = false) -> String {
         guard !value.isNaN else { return "Unavailable" }
-        return rounded(value, places: roundToWhole ? 0 : 2).formatted(
+        let amount = rounded(value, places: roundToWhole ? 0 : 2)
+        let fractionDigits = amount == rounded(amount, places: 0) ? 0 : 2
+        return amount.formatted(
             .currency(code: currency.uppercased()).presentation(.fullName)
-                .precision(.fractionLength(roundToWhole ? 0 : 2)).locale(locale)
+                .precision(.fractionLength(fractionDigits)).locale(locale)
         )
     }
 

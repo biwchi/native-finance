@@ -40,14 +40,14 @@ databaseDescribe("monthly budget API", () => {
   it("saves and replaces a layered monthly budget", async () => {
     const groupId = crypto.randomUUID();
     const saveResponse = await request("/api/v1/budgets/monthly", "PUT", {
-      accountId,
+      accountId: accountId.toUpperCase(),
       month: "2026-09",
       currency: "usd",
       monthlyLimit: "3800",
-      groups: [{ id: groupId, name: "Needs", limit: "500" }],
+      groups: [{ id: groupId.toUpperCase(), name: "Needs", limit: "500" }],
       categoryAssignments: [
-        { categoryId: foodId, groupId },
-        { categoryId: transportId, limit: "150" },
+        { categoryId: foodId.toUpperCase(), groupId: groupId.toUpperCase() },
+        { categoryId: transportId.toUpperCase(), limit: "150" },
       ],
     });
     const saved = (await saveResponse.json()) as {
@@ -84,6 +84,37 @@ databaseDescribe("monthly budget API", () => {
     );
     expect(getResponse.status).toBe(200);
     expect(await getResponse.json()).toEqual(saved);
+
+    // Swift re-encodes the loaded UUIDs in uppercase on every edit.
+    const editResponse = await request("/api/v1/budgets/monthly", "PUT", {
+      accountId: accountId.toUpperCase(),
+      month: "2026-09",
+      currency: saved.currency,
+      monthlyLimit: "4200",
+      groups: saved.groups.map((group) => ({
+        id: group.id.toUpperCase(), name: group.name, limit: "600",
+      })),
+      categoryAssignments: saved.categoryAssignments.map((assignment) => ({
+        categoryId: assignment.categoryId.toUpperCase(),
+        groupId: assignment.groupId?.toUpperCase() ?? null,
+        limit: assignment.limit === null ? null : "175",
+      })),
+    });
+    expect(editResponse.status).toBe(200);
+    const edited = await editResponse.json();
+    expect(edited).toMatchObject({
+      id: saved.id,
+      monthlyLimit: "4200.0000",
+      groups: [{ id: groupId, name: "Needs", limit: "600.0000", sortOrder: 0 }],
+      categoryAssignments: expect.arrayContaining([
+        { categoryId: foodId, groupId, limit: null },
+        { categoryId: transportId, groupId: null, limit: "175.0000" },
+      ]),
+    });
+    const editedResponse = await request(
+      `/api/v1/budgets/monthly?month=2026-09&accountId=${accountId}`,
+    );
+    expect(await editedResponse.json()).toEqual(edited);
 
     const clearResponse = await request("/api/v1/budgets/monthly", "PUT", {
       accountId,

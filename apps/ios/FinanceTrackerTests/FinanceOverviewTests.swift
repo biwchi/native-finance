@@ -276,7 +276,9 @@ final class FinanceOverviewTests: XCTestCase {
             ("zero-net", 1276, 1276, nil, 1276, "USD"),
             ("over-budget", 500, 2800, 2400, 1400, "USD"),
             ("budget-empty", 0, 0, 2400, 0, "USD"),
-            ("large-currency", 1800000, 17116, 10000, 19000, "KZT")
+            ("large-currency", 1800000, 17116, 10000, 19000, "KZT"),
+            ("large-ruble", Decimal(string: "18973175.02")!, Decimal(string: "298163.16")!,
+             Decimal(string: "22767.81")!, 0, "RUB")
         ]
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         for roundTotals in [false, true] {
@@ -287,7 +289,8 @@ final class FinanceOverviewTests: XCTestCase {
                         let view = DashboardSummaryCard(
                             insights: DashboardInsights(income: income, spent: spent, previousSpent: previous,
                                                         net: income - spent, monthlyLimit: limit),
-                            currency: currency, budgetTimeRemaining: limit == nil ? nil : "25 days left"
+                            currency: currency, budgetTimeRemaining: limit == nil ? nil : "25 days left",
+                            onViewBudget: {}, onViewMetric: { _ in }
                         )
                         .defaultAppStorage(defaults)
                         .padding(16)
@@ -309,13 +312,15 @@ final class FinanceOverviewTests: XCTestCase {
                         controller.view.frame = window.bounds
                         try await Task.sleep(for: .milliseconds(350))
                         controller.view.layoutIfNeeded()
-                        let image = UIGraphicsImageRenderer(size: size).image { _ in
-                            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                        autoreleasepool {
+                            let image = UIGraphicsImageRenderer(size: size).image { _ in
+                                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                            }
+                            let attachment = XCTAttachment(image: image)
+                            attachment.name = "Unified-\(name)-\(Int(width))-\(scheme)-\(roundTotals ? "rounded" : "decimal")"
+                            attachment.lifetime = .keepAlways
+                            add(attachment)
                         }
-                        let attachment = XCTAttachment(image: image)
-                        attachment.name = "Unified-\(name)-\(Int(width))-\(scheme)-\(roundTotals ? "rounded" : "decimal")"
-                        attachment.lifetime = .keepAlways
-                        add(attachment)
                         window.isHidden = true
                         window.rootViewController = nil
                     }
@@ -331,7 +336,8 @@ final class FinanceOverviewTests: XCTestCase {
             let controller = UIHostingController(rootView: DashboardSummaryCard(
                 insights: DashboardInsights(income: 3540, spent: 1276, previousSpent: 1387,
                                             net: 2264, monthlyLimit: 2400),
-                currency: "USD", budgetTimeRemaining: "25 days left"
+                currency: "USD", budgetTimeRemaining: "25 days left",
+                onViewBudget: {}, onViewMetric: { _ in }
             )
             .padding(16)
             .frame(width: 320)
@@ -360,6 +366,148 @@ final class FinanceOverviewTests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
             window.isHidden = true
+        }
+    }
+
+    private struct SummaryMetricFramesKey: PreferenceKey {
+        static let defaultValue: [DashboardSummaryMetrics.Metric: CGRect] = [:]
+        static func reduce(value: inout [DashboardSummaryMetrics.Metric: CGRect],
+                           nextValue: () -> [DashboardSummaryMetrics.Metric: CGRect]) {
+            value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+        }
+    }
+
+    @MainActor
+    func testSummaryMetricsKeepEqualColumnsAtPhoneWidths() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let insights = DashboardInsights(income: Decimal(string: "18973175.02")!,
+                                         spent: Decimal(string: "298163.16")!, previousSpent: 0,
+                                         net: Decimal(string: "18675011.86")!,
+                                         monthlyLimit: Decimal(string: "22767.81")!)
+        for direction in [LayoutDirection.leftToRight, .rightToLeft] {
+            for width in [CGFloat(248), 256, 329, 356] {
+                var frames: [DashboardSummaryMetrics.Metric: CGRect] = [:]
+                let view = DashboardSummaryMetrics(insights: insights, currency: "RUB")
+                    .overlayPreferenceValue(DashboardSummaryMetrics.BoundsKey.self) { anchors in
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: SummaryMetricFramesKey.self, value: anchors.mapValues {
+                                $0.reduce(CGRect.null) { $0.union(proxy[$1]) }
+                            })
+                        }
+                    }
+                    .onPreferenceChange(SummaryMetricFramesKey.self) { frames = $0 }
+                    .environment(\.layoutDirection, direction)
+                    .environment(\.dynamicTypeSize, .large)
+                    .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .ignoresSafeArea()
+                let controller = UIHostingController(rootView: view)
+                let window = UIWindow(windowScene: scene)
+                window.rootViewController = controller
+                let size = controller.sizeThatFits(in: CGSize(width: width, height: 1000))
+                window.frame = CGRect(origin: .zero, size: size)
+                controller.view.frame = window.bounds
+                window.makeKeyAndVisible()
+                try await Task.sleep(for: .milliseconds(100))
+                controller.view.layoutIfNeeded()
+                if direction == .rightToLeft {
+                    frames = frames.mapValues { CGRect(x: width - $0.maxX, y: $0.minY, width: $0.width, height: $0.height) }
+                }
+                let net = try XCTUnwrap(frames[.net])
+                let income = try XCTUnwrap(frames[.income])
+                let spent = try XCTUnwrap(frames[.spent])
+                XCTAssertLessThan(size.height, 70, "Standard-size metrics must stay in one compact row.")
+                XCTAssertEqual(net.minX, 0, accuracy: 1)
+                XCTAssertEqual(spent.maxX, width, accuracy: 1)
+                XCTAssertEqual(net.minY, income.minY, accuracy: 1)
+                XCTAssertEqual(income.minY, spent.minY, accuracy: 1)
+                XCTAssertEqual(net.width, income.width, accuracy: 1)
+                XCTAssertEqual(income.width, spent.width, accuracy: 1)
+                XCTAssertEqual(income.minX - net.maxX, AppSpacing.large, accuracy: 1)
+                XCTAssertEqual(spent.minX - income.maxX, AppSpacing.large, accuracy: 1)
+                for frame in [net, income, spent] {
+                    XCTAssertGreaterThanOrEqual(frame.width, 44)
+                    XCTAssertGreaterThanOrEqual(frame.height, 44)
+                }
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+        }
+    }
+
+    @MainActor
+    func testDashboardCardWithScreenshotAmountsInContext() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "DashboardCardSpacingTests"))
+        defer { defaults.removePersistentDomain(forName: "DashboardCardSpacingTests") }
+        defaults.set(true, forKey: AppPreferences.roundTotalsKey)
+        let insights = DashboardInsights(income: 100_000_000, spent: 1_571_034, previousSpent: 0,
+                                         net: 98_428_966, monthlyLimit: 5_856_120)
+        let gym = TransactionCategory(id: UUID(), systemKey: nil, name: "Gym", kind: .expense,
+                                      icon: "gym", color: .lime, isSystem: false, examples: nil,
+                                      sortOrder: nil, createdAt: now, updatedAt: now)
+        let reminder = UpcomingTransaction(id: UUID(), accountId: accountID, kind: .expense,
+                                            amount: "20000", currency: "KZT", category: gym,
+                                            merchant: nil, payee: nil, note: "17:35", frequency: .daily,
+                                            occurredAt: now.addingTimeInterval(86_400))
+        let groceries = TransactionCategory(id: UUID(), systemKey: nil, name: "Groceries", kind: .expense,
+                                            icon: "cart", color: .green, isSystem: false, examples: nil,
+                                            sortOrder: nil, createdAt: now, updatedAt: now)
+        let account = Account(id: accountID, name: "T Bank", type: .checking, currency: "RUB",
+                              icon: "bank", iconColor: .orange, createdAt: "", updatedAt: "")
+        let purchase = FinanceTransaction(id: UUID(), accountId: accountID, kind: .expense,
+                                          amount: "286", currency: "RUB", category: groceries,
+                                          note: "Там сям туда сюда туда сюда киреешки Там сям туда сюда туда сюда киреешки",
+                                          occurredAt: now, createdAt: now, updatedAt: now)
+        for scheme in [ColorScheme.light, .dark] {
+            for width in [CGFloat(320), 393] {
+                for enabled in [true, false] {
+                    let view = VStack(alignment: .leading, spacing: AppSpacing.large) {
+                        DashboardSummaryCard(insights: insights, currency: "KZT",
+                                             onViewBudget: {}, onViewMetric: { _ in })
+                            .disabled(!enabled)
+                        DashboardUpcomingReminder(transaction: reminder, count: 1, now: now)
+                        Text("4 September 2026")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, AppSpacing.large)
+                            .padding(.top, AppSpacing.small)
+                        TransactionRow(transaction: purchase, account: account)
+                            .padding(AppSpacing.large)
+                            .background(AppColor.elevatedSurface,
+                                        in: RoundedRectangle(cornerRadius: AppRadius.extraLarge))
+                    }
+                    .padding(AppSpacing.large)
+                    .frame(width: width)
+                    .defaultAppStorage(defaults)
+                    .environment(\.dynamicTypeSize, .large)
+                    .preferredColorScheme(scheme)
+                    .background(LinearGradient(colors: [AppColor.accent.opacity(0.18), AppColor.groupedBackground],
+                                               startPoint: .top, endPoint: .center))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .ignoresSafeArea()
+                    let controller = UIHostingController(rootView: view)
+                    let window = UIWindow(windowScene: scene)
+                    window.rootViewController = controller
+                    window.makeKeyAndVisible()
+                    let size = controller.sizeThatFits(in: CGSize(width: width, height: 2000))
+                    XCTAssertEqual(size.width, width, accuracy: 1)
+                    XCTAssertLessThan(size.height, 700)
+                    window.frame = CGRect(origin: .zero, size: size)
+                    controller.view.frame = window.bounds
+                    try await Task.sleep(for: .milliseconds(350))
+                    controller.view.layoutIfNeeded()
+                    let image = UIGraphicsImageRenderer(size: size).image { _ in
+                        XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "Dashboard-spacing-\(Int(width))-\(scheme)-\(enabled ? "enabled" : "disabled")"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+            }
         }
     }
 

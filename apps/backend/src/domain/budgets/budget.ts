@@ -98,7 +98,7 @@ export function createBudget(
   }
 
   const categoriesById = new Map(
-    context.categories.map((category) => [category.id, category]),
+    context.categories.map((category) => [category.id.toLowerCase(), category]),
   );
   if (categoryIds.some((id) => !categoriesById.has(id))) {
     return error("category_not_found", "Category not found");

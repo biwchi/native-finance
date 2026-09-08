@@ -20,8 +20,8 @@ export function createBudgetCategoryAssignment(
   "unknown_group" | "missing_standalone_limit"
 > {
   const assignment = {
-    categoryId: input.categoryId,
-    groupId: input.groupId ?? null,
+    categoryId: input.categoryId.toLowerCase(),
+    groupId: input.groupId?.toLowerCase() ?? null,
     limit: input.limit ?? null,
   };
   if (assignment.groupId && !groupIds.has(assignment.groupId)) {

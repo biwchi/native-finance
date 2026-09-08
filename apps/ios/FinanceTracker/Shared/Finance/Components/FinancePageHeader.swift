@@ -15,7 +15,7 @@ struct FinancePageHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, AppSpacing.small)
+        .padding(.vertical, dateSelection == nil ? AppSpacing.small : 0)
         .listRowInsets(EdgeInsets(top: AppSpacing.extraSmall, leading: 0, bottom: AppSpacing.small, trailing: 0))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

@@ -24,7 +24,7 @@ struct AccountSelector: View {
             Toggle(isOn: accountSelection(nil)) {
                 accountLabel(
                     title: "All Accounts",
-                    subtitle: balanceSubtitle(for: nil, includesLabel: false),
+                    subtitle: balanceSubtitle(for: nil),
                     iconName: "credit-cards",
                     color: AppColor.accent
                 )
@@ -33,11 +33,11 @@ struct AccountSelector: View {
             if !accountStore.accounts.isEmpty {
                 Divider()
 
-                ForEach(accountStore.accounts) { account in
+                ForEach(accountStore.accounts.prefix(4)) { account in
                     Toggle(isOn: accountSelection(account.id)) {
                         accountLabel(
                             title: account.name,
-                            subtitle: balanceSubtitle(for: account, includesLabel: false),
+                            subtitle: balanceSubtitle(for: account),
                             iconName: account.icon,
                             color: account.iconColor.color
                         )
@@ -50,7 +50,7 @@ struct AccountSelector: View {
             Button {
                 accountStore.isManagingAccounts = true
             } label: {
-                Label("Manage Accounts", icon: "settings")
+                Label("View Accounts", icon: "list")
             }
         } label: {
             selectorLabel
@@ -82,8 +82,8 @@ struct AccountSelector: View {
                         .lineLimit(1)
 
                     Text(selectionSubtitle)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.secondary)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.primary)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -105,8 +105,8 @@ struct AccountSelector: View {
                         .lineLimit(1)
 
                     Text(selectionSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(Color.secondary)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.primary)
                         .monospacedDigit()
                         .lineLimit(1)
                 }
@@ -140,7 +140,7 @@ struct AccountSelector: View {
         balanceSubtitle(for: accountStore.selectedAccount)
     }
 
-    private func balanceSubtitle(for account: Account?, includesLabel: Bool = true) -> String {
+    private func balanceSubtitle(for account: Account?) -> String {
         switch transactionStore.state {
         case .idle, .loading:
             "Loading balance"
@@ -153,7 +153,7 @@ struct AccountSelector: View {
                 MoneyFormatter.format(
                     balance, currency: account?.currency ?? reportingCurrency.uppercased(),
                     roundToWhole: roundTotals
-                ) + (includesLabel ? " balance" : "")
+                )
             } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
                 "Converting balance"
             } else {

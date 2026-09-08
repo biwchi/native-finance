@@ -78,6 +78,7 @@ enum AppIcons {
         "droplet": Hugeicons.droplet,
         "edit-pencil": Hugeicons.pencilEdit01,
         "egg": Hugeicons.egg,
+        "equal": Hugeicons.equalSign,
         "erase": Hugeicons.eraser01,
         "ev-station": Hugeicons.evCharging,
         "eye": Hugeicons.eye,

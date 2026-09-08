@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class AccentControlContrastTests: XCTestCase {
+    func testMetricIconsContrastAgainstTheirBadgesInBothAppearances() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            for (ink, fill) in [(AppColor.tealIcon, AppColor.tealIconBackground),
+                                (AppColor.orangeIcon, AppColor.orangeIconBackground),
+                                (AppColor.blueIcon, AppColor.blueIconBackground)] {
+                XCTAssertGreaterThanOrEqual(
+                    contrast(luminance(UIColor(ink).resolvedColor(with: traits)),
+                             luminance(UIColor(fill).resolvedColor(with: traits))), 3
+                )
+            }
+        }
+    }
+
     func testAccentAssetsContrastInBothAppearances() throws {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)

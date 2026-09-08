@@ -5,6 +5,91 @@ import type { Category } from "../categories/category.ts";
 import { createBudget } from "./budget.ts";
 
 describe("createBudget", () => {
+  const foodId = "abcdef01-2345-4678-9abc-def012345678";
+  const groupId = "bcdef012-3456-4789-abcd-ef0123456789";
+
+  it("accepts iOS uppercase category UUIDs returned lowercase by the database", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      monthlyLimit: "1200",
+      groups: [],
+      categoryAssignments: [{ categoryId: foodId.toUpperCase(), limit: "300" }],
+    }, { account: null, categories: [category(foodId, "expense")] });
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) return;
+    expect(result.value.categoryAssignments).toEqual([
+      { categoryId: foodId, groupId: null, limit: "300" },
+    ]);
+  });
+
+  it("matches pool UUIDs regardless of casing", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      groups: [{ id: groupId.toUpperCase(), name: "Needs", limit: "500" }],
+      categoryAssignments: [{ categoryId: foodId.toUpperCase(), groupId }],
+    }, { account: null, categories: [category(foodId, "expense")] });
+
+    expect(result.ok).toBeTrue();
+    if (!result.ok) return;
+    expect(result.value.groups[0]?.id).toBe(groupId);
+    expect(result.value.categoryAssignments).toEqual([
+      { categoryId: foodId, groupId, limit: null },
+    ]);
+  });
+
+  it("rejects duplicate category UUIDs with different casing", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      groups: [],
+      categoryAssignments: [
+        { categoryId: foodId, limit: "100" },
+        { categoryId: foodId.toUpperCase(), limit: "200" },
+      ],
+    }, { account: null, categories: [category(foodId, "expense")] });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "duplicate_category_assignment" } });
+  });
+
+  it("rejects duplicate pool UUIDs with different casing", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      groups: [
+        { id: groupId, name: "Needs", limit: "500" },
+        { id: groupId.toUpperCase(), name: "Wants", limit: "200" },
+      ],
+      categoryAssignments: [],
+    }, { account: null, categories: [] });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "duplicate_group_id" } });
+  });
+
+  it("still rejects categories that do not exist", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      groups: [],
+      categoryAssignments: [{ categoryId: foodId.toUpperCase(), limit: "100" }],
+    }, { account: null, categories: [] });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "category_not_found" } });
+  });
+
+  it("still rejects income categories with uppercase UUIDs", () => {
+    const result = createBudget({
+      month: "2026-09",
+      currency: "USD",
+      groups: [],
+      categoryAssignments: [{ categoryId: foodId.toUpperCase(), limit: "100" }],
+    }, { account: null, categories: [category(foodId, "income")] });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "income_category" } });
+  });
+
   it("builds normalized groups and category assignments", () => {
     const result = createBudget({
       month: "2026-09",

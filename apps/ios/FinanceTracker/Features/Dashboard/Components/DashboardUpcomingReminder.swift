@@ -41,22 +41,15 @@ struct DashboardUpcomingReminder: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: AppSpacing.small) {
                     details
-                    amount
+                    amountWithChevron
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: AppSpacing.medium) {
-                        details
-                        Spacer(minLength: 0)
-                        amount.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: AppSpacing.small) {
-                        details
-                        amount
-                    }
+                details
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                amountWithChevron
+                    .fixedSize()
             }
         }
         .padding(AppSpacing.medium)
@@ -104,6 +97,15 @@ struct DashboardUpcomingReminder: View {
         }
         .frame(width: 45, height: 45, alignment: .topLeading)
         .accessibilityHidden(true)
+    }
+
+    private var amountWithChevron: some View {
+        HStack(spacing: AppSpacing.small) {
+            amount
+            AppIcon("nav-arrow-right", size: 16)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
     }
 
     private var amount: some View {

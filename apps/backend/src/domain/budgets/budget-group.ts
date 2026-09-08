@@ -16,6 +16,6 @@ export function createBudgetGroup(
 ): Result<BudgetGroup, "empty_group_name"> {
   const name = input.name.trim();
   return name
-    ? ok({ ...input, name, sortOrder })
+    ? ok({ ...input, id: input.id.toLowerCase(), name, sortOrder })
     : error("empty_group_name", "Budget group names cannot be empty");
 }

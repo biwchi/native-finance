@@ -33,6 +33,7 @@ final class AppIconTests: XCTestCase {
             "label": "tag01",
             "arrow-down-left-circle": "circleArrowDownLeft",
             "arrow-up-right-circle": "circleArrowUpRight",
+            "equal": "equalSign",
         ]
         for (identifier, expected) in examples {
             XCTAssertEqual(AppIcons.canonicalName(identifier), identifier)

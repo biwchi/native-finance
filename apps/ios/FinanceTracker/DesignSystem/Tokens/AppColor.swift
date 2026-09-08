@@ -5,6 +5,12 @@ enum AppColor {
     static let accent = Color("AccentColor")
     static let onAccent = Color("OnAccentColor")
     static let summarySurface = Color("SummarySurfaceColor")
+    static let tealIcon = Color("TealIconColor")
+    static let tealIconBackground = Color("TealIconBackgroundColor")
+    static let orangeIcon = Color("OrangeIconColor")
+    static let orangeIconBackground = Color("OrangeIconBackgroundColor")
+    static let blueIcon = Color("BlueIconColor")
+    static let blueIconBackground = Color("BlueIconBackgroundColor")
 
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
