@@ -65,7 +65,6 @@ struct MainView: View {
             AccountManagementView()
                 .environmentObject(accountStore)
                 .environmentObject(transactionStore)
-                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .alert(
@@ -391,7 +390,7 @@ private struct QuickEntryReviewView: View {
                 ForEach(draft.warnings, id: \.self) { warning in
                     Label(warning, icon: "warning")
                         .font(.caption)
-                        .foregroundStyle(AppColor.warning)
+                        .foregroundStyle(AppColor.warningText)
                 }
                 TransactionRow(
                     transaction: draft,

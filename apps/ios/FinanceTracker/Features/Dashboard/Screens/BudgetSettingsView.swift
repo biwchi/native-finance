@@ -77,6 +77,7 @@ struct BudgetSettingsView: View {
                 }
             }
         }
+        .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .disabled(isSaving)
         .scrollDismissesKeyboard(.interactively)
         .navigationBarBackButtonHidden(isSaving)

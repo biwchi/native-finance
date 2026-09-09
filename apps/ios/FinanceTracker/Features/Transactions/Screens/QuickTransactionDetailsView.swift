@@ -51,6 +51,7 @@ struct QuickTransactionDetailsView: View {
                 }
             }
         }
+        .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
     }

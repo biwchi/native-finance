@@ -52,14 +52,24 @@ struct AccentSelectionButton: View {
             Text(title)
                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: 40)
-                .foregroundStyle(isSelected && isEnabled ? AppColor.onAccent : Color.primary)
+                .foregroundStyle(isSelected ? AppColor.onAccent : Color.primary)
                 .background(
                     isSelected ? AppColor.accent : Color.clear,
                     in: RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FilledSelectionStyle())
+    }
+
+    private struct FilledSelectionStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .compositingGroup()
+                .opacity(isEnabled ? (configuration.isPressed ? 0.9 : 1) : 0.45)
+        }
     }
 
     private var glassButton: some View {

@@ -7,6 +7,16 @@ struct DashboardSummaryCard: View {
     var comparisonDescription = "Compared with the previous period"
     var onViewBudget: (() -> Void)? = nil
     var onViewMetric: ((DashboardSummaryMetrics.Metric) -> Void)? = nil
+    var presentationHeight: CGFloat? = nil
+
+    private struct Presentation: Hashable {
+        let hasBudget: Bool
+        let currency: String
+    }
+
+    private var presentation: Presentation {
+        Presentation(hasBudget: insights.hasBudget, currency: currency)
+    }
 
     private struct BudgetNavigationBoundsKey: PreferenceKey {
         static let defaultValue: Anchor<CGRect>? = nil
@@ -20,9 +30,33 @@ struct DashboardSummaryCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .body) private var amountSize = 19
 
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            cardContent
+                .fixedSize(horizontal: false, vertical: true)
+                .transaction { $0.animation = nil }
+                .id(presentation)
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(.easeIn(duration: 0.18).delay(reduceMotion ? 0 : 0.12)),
+                    removal: .opacity.animation(.easeOut(duration: 0.12))
+                ))
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: presentationHeight, alignment: .top)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous))
+        .animation(.linear(duration: 0.3), value: presentation)
+        // The glass has its own stable identity and always fills the displayed height.
+        // Only the content above is replaced and faded when the metric changes.
+        .background {
+            Color.clear
+                .financeCardSurface(.clearGlass, fallbackColor: AppColor.elevatedSurface, cornerRadius: AppRadius.extraLarge)
+        }
+    }
+
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: AppSpacing.large) {
                 summaryHeader
@@ -35,6 +69,8 @@ struct DashboardSummaryCard: View {
                             tint: AppColor.accent
                         )
                         budgetUsage(limit)
+                            .modifier(DashboardNumericAmount(amount: insights.spent))
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: limit)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -50,7 +86,6 @@ struct DashboardSummaryCard: View {
         }
         .padding(AppSpacing.extraLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .financeCardSurface(.clearGlass, fallbackColor: AppColor.elevatedSurface, cornerRadius: AppRadius.extraLarge)
         .accessibilityElement(children: .contain)
         .allowsHitTesting(false)
         .overlayPreferenceValue(BudgetNavigationBoundsKey.self) { anchor in
@@ -190,7 +225,7 @@ struct DashboardSummaryCard: View {
             Text(money(insights.hasBudget ? (insights.remaining ?? 0) : insights.net, signed: !insights.hasBudget))
                 .font(.system(size: amountSize, weight: .semibold))
                 .monospacedDigit()
-                .contentTransition(.numericText())
+                .modifier(DashboardNumericAmount(amount: insights.hasBudget ? (insights.remaining ?? 0) : insights.net))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .ignore)

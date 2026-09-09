@@ -14,6 +14,7 @@ struct AccountManagementView: View {
     @State private var isUpdatingOrder = false
     @State private var deletingAccountID: UUID?
     @State private var editMode: EditMode = .inactive
+    @State private var selectedDetent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -42,14 +43,6 @@ struct AccountManagementView: View {
                         .moveDisabled(isUpdatingOrder || deletingAccountID != nil)
                         .deleteDisabled(isUpdatingOrder || deletingAccountID != nil)
                     }
-                } footer: {
-                    if !accountStore.accounts.isEmpty {
-                        Text(
-                            editMode.isEditing
-                                ? "Tap an account to edit it. Use the row controls to reorder or remove accounts."
-                                : "Tap an account to select it. Swipe left to edit or delete. Use Edit to reorder accounts."
-                        )
-                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -61,6 +54,9 @@ struct AccountManagementView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(editMode.isEditing ? "Done" : "Edit") {
                         withAnimation {
+                            if !editMode.isEditing {
+                                selectedDetent = .large
+                            }
                             editMode = editMode.isEditing ? .inactive : .active
                         }
                     }
@@ -68,22 +64,25 @@ struct AccountManagementView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                    .disabled(isBusy)
-                }
-
-                ToolbarItem(placement: .bottomBar) {
                     Button {
-                        editor = .add
+                        dismiss()
                     } label: {
-                        Label("Add Account", icon: "plus")
+                        AppIcon("xmark", size: 18)
                     }
+                    .accessibilityLabel("Close")
                     .disabled(isBusy)
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                PrimaryActionButton("Add Account") {
+                    editor = .add
+                }
+                .disabled(isBusy)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
         }
+        .presentationDetents([.medium, .large], selection: $selectedDetent)
         .onChange(of: accountStore.accounts.isEmpty) { _, isEmpty in
             if isEmpty {
                 editMode = .inactive

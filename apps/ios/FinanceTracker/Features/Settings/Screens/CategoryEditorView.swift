@@ -74,7 +74,7 @@ struct CategoryEditorView: View {
                 if let errorMessage {
                     Section {
                         Label(errorMessage, icon: "warning-triangle")
-                            .foregroundStyle(AppColor.destructive)
+                            .foregroundStyle(AppColor.destructiveText)
                     }
                 }
             }

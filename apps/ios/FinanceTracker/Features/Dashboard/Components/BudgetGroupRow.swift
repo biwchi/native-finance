@@ -8,7 +8,7 @@ struct BudgetGroupRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.medium) {
             AppIcon("credit-cards", size: 17)
-                .foregroundStyle(tint)
+                .foregroundStyle(AppColor.iconForeground(for: tint))
                 .frame(width: 38, height: 38)
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.small))
 

@@ -90,7 +90,7 @@ struct DashboardUpcomingReminder: View {
             } else {
                 let color = transaction.kind == .income ? AppColor.positive : AppColor.accent
                 AppIcon(transaction.kind == .income ? "arrow-down-left" : "arrow-up-right", size: 18)
-                    .foregroundStyle(color)
+                    .foregroundStyle(AppColor.iconForeground(for: color))
                     .frame(width: 42, height: 42)
                     .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.medium))
             }

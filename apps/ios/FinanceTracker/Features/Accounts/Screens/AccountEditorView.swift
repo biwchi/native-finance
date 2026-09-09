@@ -71,7 +71,7 @@ struct AccountEditorView: View {
                                 icon = choice
                             } label: {
                                 AppIcon(choice, size: 17)
-                                    .foregroundStyle(icon == choice ? .white : iconColor.color)
+                                    .foregroundStyle(icon == choice ? iconColor.foregroundColor : AppColor.iconForeground(for: iconColor.color))
                                     .frame(width: 40, height: 40)
                                     .background(
                                         icon == choice ? iconColor.color : Color.secondary.opacity(0.12),
@@ -101,7 +101,7 @@ struct AccountEditorView: View {
                                     .overlay {
                                         if iconColor == choice {
                                             AppIcon("check", size: 12)
-                                                .foregroundStyle(.white)
+                                                .foregroundStyle(choice.foregroundColor)
                                         }
                                     }
                             }
@@ -116,7 +116,7 @@ struct AccountEditorView: View {
                 if let errorMessage {
                     Section {
                         Label(errorMessage, icon: "warning-triangle")
-                            .foregroundStyle(AppColor.destructive)
+                            .foregroundStyle(AppColor.destructiveText)
                     }
                 }
             }

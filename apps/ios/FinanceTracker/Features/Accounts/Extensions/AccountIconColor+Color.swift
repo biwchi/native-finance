@@ -1,6 +1,10 @@
 import SwiftUI
 
 extension AccountIconColor {
+    var foregroundColor: Color {
+        AppColor.foreground(on: color)
+    }
+
     var color: Color {
         switch self {
         case .blue: .blue

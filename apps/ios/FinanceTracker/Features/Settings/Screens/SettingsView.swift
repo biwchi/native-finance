@@ -135,18 +135,18 @@ struct SettingsView: View {
                     showsDeleteWarning = true
                 } label: {
                     Label("Delete all data", icon: "trash")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppColor.destructiveText)
                 }
                 Button(role: .destructive) {
                     deletionAction = .userAccount
                     showsDeleteWarning = true
                 } label: {
                     Label("Delete user account", icon: "user")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppColor.destructiveText)
                 }
             } header: {
                 Text("Danger zone")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AppColor.destructiveText)
             }
             .tint(.red)
 
@@ -158,6 +158,7 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
             }
         }
+        .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .navigationTitle("Settings")
         .confirmationDialog(deletionAction.title + "?", isPresented: $showsDeleteWarning, titleVisibility: .visible) {
             Button("Continue", role: .destructive) { showsDeleteConfirmation = true }

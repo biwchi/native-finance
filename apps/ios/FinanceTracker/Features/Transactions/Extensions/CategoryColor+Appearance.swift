@@ -30,11 +30,6 @@ extension CategoryColor {
     }
 
     var selectionForegroundColor: Color {
-        switch self {
-        case .amber, .yellow, .lime, .mint, .cyan, .sky, .lavender:
-            Color.black.opacity(0.78)
-        default:
-            .white
-        }
+        AppColor.foreground(on: swiftUIColor)
     }
 }

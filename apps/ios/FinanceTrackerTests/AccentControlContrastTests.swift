@@ -5,6 +5,131 @@ import XCTest
 
 @MainActor
 final class AccentControlContrastTests: XCTestCase {
+    func testSwitchTrackContrastsWithWhiteThumbAndNativeSurfaces() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            for accessibilityContrast in [UIAccessibilityContrast.normal, .high] {
+                let traits = UITraitCollection {
+                    $0.userInterfaceStyle = style
+                    $0.accessibilityContrast = accessibilityContrast
+                }
+                let track = UIColor(AppColor.switchTrack).resolvedColor(with: traits)
+                for adjacentColor in [UIColor.white, .systemBackground, .secondarySystemGroupedBackground] {
+                    XCTAssertGreaterThanOrEqual(
+                        contrast(luminance(track), luminance(adjacentColor.resolvedColor(with: traits))), 3,
+                        "Switch track must remain distinct from its thumb and surface in \(traits)."
+                    )
+                }
+            }
+        }
+    }
+
+    func testPaletteForegroundsContrastWithEveryFillInBothAppearances() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            for accessibilityContrast in [UIAccessibilityContrast.normal, .high] {
+                let traits = UITraitCollection {
+                    $0.userInterfaceStyle = style
+                    $0.accessibilityContrast = accessibilityContrast
+                }
+                let pairs = CategoryColor.allCases.map { ($0.swiftUIColor, $0.selectionForegroundColor) }
+                    + AccountIconColor.allCases.map { ($0.color, $0.foregroundColor) }
+                    + [(AppColor.accent, AppColor.foreground(on: AppColor.accent))]
+                for (fill, foreground) in pairs {
+                    XCTAssertGreaterThanOrEqual(
+                        contrast(luminance(UIColor(fill).resolvedColor(with: traits)),
+                                 luminance(UIColor(foreground).resolvedColor(with: traits))), 4.5,
+                        "Palette labels and checkmarks must contrast with their fill in \(traits)."
+                    )
+                }
+            }
+        }
+    }
+
+    func testDisabledCustomFilledLabelsRemainVisibleInBothAppearances() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            try assertVisibleContent(
+                AccentSelectionButton("MMMM", isSelected: true) {}.disabled(true),
+                scheme: scheme, fillOpacity: 0.45, minimumContrast: 3
+            )
+            try assertVisibleContent(
+                PrimaryActionButton("MMMM") {}.disabled(true),
+                scheme: scheme, fillOpacity: 0.45, minimumContrast: 3
+            )
+        }
+    }
+
+    func testPaletteArtworkContrastsWithNativeAndTintedSurfaces() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let colors = CategoryColor.allCases.map(\.swiftUIColor)
+                + AccountIconColor.allCases.map(\.color) + [AppColor.accent, AppColor.positive]
+            for color in colors {
+                let ink = UIColor(AppColor.iconForeground(for: color)).resolvedColor(with: traits)
+                let tint = UIColor(color).resolvedColor(with: traits)
+                for surface in [UIColor.systemBackground, .secondarySystemGroupedBackground,
+                                .tertiarySystemGroupedBackground] {
+                    let surface = surface.resolvedColor(with: traits)
+                    for background in [surface, blend(tint, over: surface, opacity: 0.14),
+                                       blend(UIColor.secondaryLabel.resolvedColor(with: traits),
+                                             over: surface, opacity: 0.12)] {
+                        XCTAssertGreaterThanOrEqual(contrast(luminance(ink), luminance(background)), 3)
+                    }
+                }
+            }
+        }
+    }
+
+    func testPaletteControlsRenderInBothAppearances() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let controls = VStack(spacing: 20) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 12) {
+                    ForEach(CategoryColor.allCases) { color in
+                        VStack {
+                            HStack(spacing: 4) {
+                                AppIcon("check", size: 14)
+                                    .foregroundStyle(color.selectionForegroundColor)
+                                    .frame(width: 30, height: 30)
+                                    .background(color.swiftUIColor, in: Circle())
+                                AppIcon("tag", size: 14)
+                                    .foregroundStyle(AppColor.iconForeground(for: color.swiftUIColor))
+                                    .frame(width: 30, height: 30)
+                                    .background(color.swiftUIColor.opacity(0.12), in: Circle())
+                            }
+                            Text(color.title).font(.caption2)
+                        }
+                    }
+                }
+                CategoryIconPicker(selection: .constant("cart"), color: .orange)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppColor.elevatedSurface)
+            .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(controls, name: "Palette-controls-\(scheme)")
+        }
+    }
+
+    func testNativeControlsRenderInBothAppearances() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let controls = Form {
+                Section("Switches") {
+                    Toggle("On", isOn: .constant(true))
+                    Toggle("Off", isOn: .constant(false))
+                    Toggle("Disabled on", isOn: .constant(true)).disabled(true)
+                    Toggle("Disabled off", isOn: .constant(false)).disabled(true)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
+                Section("Selected date") {
+                    DatePicker("Date", selection: .constant(Date(timeIntervalSince1970: 1_788_600_000)),
+                               displayedComponents: [.date])
+                        .datePickerStyle(.graphical)
+                }
+            }
+            .tint(AppColor.accent)
+            .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(controls, name: "Native-controls-\(scheme)")
+        }
+    }
+
     func testMetricIconsContrastAgainstTheirBadgesInBothAppearances() {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
@@ -259,6 +384,8 @@ final class AccentControlContrastTests: XCTestCase {
         _ content: Content,
         scheme: ColorScheme,
         sampleSize: Int = 24,
+        fillOpacity: Double = 1,
+        minimumContrast: Double = 4.5,
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws {
@@ -277,7 +404,16 @@ final class AccentControlContrastTests: XCTestCase {
         let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
         let fill = try XCTUnwrap(UIColor(named: "AccentColor"), file: file, line: line)
             .resolvedColor(with: traits)
-        let fillLuminance = luminance(fill)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        fill.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        let surface = scheme == .dark ? 0.0 : 1.0
+        let fillLuminance = luminance(
+            red: Double(red) * fillOpacity + surface * (1 - fillOpacity),
+            green: Double(green) * fillOpacity + surface * (1 - fillOpacity),
+            blue: Double(blue) * fillOpacity + surface * (1 - fillOpacity)
+        )
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let context = try XCTUnwrap(CGContext(
             data: &pixels,
@@ -302,7 +438,7 @@ final class AccentControlContrastTests: XCTestCase {
                     blue: Double(pixels[offset + 2]) / 255
                 )
                 let ratio = contrast(value, fillLuminance)
-                if ratio >= 4.5 { contrastingPixels += 1 }
+                if ratio >= minimumContrast { contrastingPixels += 1 }
                 if ratio < 1.5 { fillPixels += 1 }
             }
         }
@@ -317,6 +453,20 @@ final class AccentControlContrastTests: XCTestCase {
         var blue: CGFloat = 0
         color.getRed(&red, green: &green, blue: &blue, alpha: nil)
         return luminance(red: Double(red), green: Double(green), blue: Double(blue))
+    }
+
+    private func blend(_ foreground: UIColor, over background: UIColor, opacity: Double) -> UIColor {
+        func components(_ color: UIColor) -> [CGFloat] {
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: nil)
+            return [red, green, blue]
+        }
+        let rgb = zip(components(foreground), components(background)).map {
+            $0 * opacity + $1 * (1 - opacity)
+        }
+        return UIColor(red: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1)
     }
 
     private func luminance(red: Double, green: Double, blue: Double) -> Double {

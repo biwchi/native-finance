@@ -78,7 +78,7 @@ struct CategoryIconPicker: View {
             selection = option.symbol
         } label: {
             AppIcon(option.symbol, size: 17)
-                .foregroundStyle(isSelected ? color.selectionForegroundColor : color.swiftUIColor)
+                .foregroundStyle(isSelected ? color.selectionForegroundColor : AppColor.iconForeground(for: color.swiftUIColor))
                 .frame(width: 40, height: 40)
                 .background(
                     isSelected ? color.swiftUIColor : Color.secondary.opacity(0.12),

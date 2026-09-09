@@ -52,7 +52,7 @@ struct TransactionMetadataBar: View {
         } label: {
             HStack(spacing: AppSpacing.small) {
                 AppIcon(selectedAccount?.icon ?? "credit-card", size: 22)
-                    .foregroundStyle(accountColor)
+                    .foregroundStyle(AppColor.iconForeground(for: accountColor))
                     .frame(width: iconBadgeSize, height: iconBadgeSize)
                     .background(accountColor.opacity(0.14), in: Circle())
                 VStack(alignment: .leading, spacing: 0) {

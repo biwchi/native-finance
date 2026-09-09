@@ -92,7 +92,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
         } label: {
             VStack(spacing: AppSpacing.extraSmall) {
                 AppIcon(item.iconName, size: 21)
-                    .foregroundStyle(item.color)
+                    .foregroundStyle(AppColor.iconForeground(for: item.color))
                     .frame(width: 48, height: 48)
                     .background(
                         item.color.opacity(0.12),
@@ -102,7 +102,7 @@ struct CenteredSelectionCarousel<ID: Hashable>: View {
                         if isSelected,
                            let accessoryIcon = item.selectedAccessoryIcon {
                             AppIcon(accessoryIcon, size: 9)
-                                .foregroundStyle(AppColor.background)
+                                .foregroundStyle(AppColor.foreground(on: item.color))
                                 .frame(width: 18, height: 18)
                                 .background(item.color, in: Circle())
                                 .overlay {

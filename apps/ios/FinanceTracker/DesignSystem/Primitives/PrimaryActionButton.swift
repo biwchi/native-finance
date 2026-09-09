@@ -64,7 +64,8 @@ struct PrimaryActionButton: View {
     }
 
     private var foreground: Color {
-        if isLoading && appearance == .capsule { return AppColor.onAccent }
+        // The custom capsule retains its accent fill when disabled or loading.
+        if appearance == .capsule { return AppColor.onAccent }
         if !isEnabled || (isLoading && appearance != .capsule) { return .primary }
         return AppColor.onAccent
     }
@@ -77,6 +78,7 @@ struct PrimaryActionButton: View {
             configuration.label
                 .background(AppColor.accent, in: Capsule())
                 .contentShape(Capsule())
+                .compositingGroup()
                 .opacity(isEnabled || isLoading ? (configuration.isPressed ? 0.9 : 1) : 0.45)
         }
     }

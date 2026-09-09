@@ -10,7 +10,7 @@ struct AccountManagementRow: View {
     var body: some View {
         HStack(spacing: 12) {
             AppIcon(account.icon, size: 17)
-                .foregroundStyle(.white)
+                .foregroundStyle(account.iconColor.foregroundColor)
                 .frame(width: 36, height: 36)
                 .background(account.iconColor.color, in: Circle())
 

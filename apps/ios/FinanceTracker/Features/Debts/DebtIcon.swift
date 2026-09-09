@@ -6,7 +6,7 @@ struct DebtIcon: View {
 
     var body: some View {
         AppIcon(debt.icon ?? "user", size: size * 0.43)
-            .foregroundStyle((debt.color ?? .blue).swiftUIColor)
+            .foregroundStyle(AppColor.iconForeground(for: (debt.color ?? .blue).swiftUIColor))
             .frame(width: size, height: size)
             .background((debt.color ?? .blue).swiftUIColor.opacity(0.12),
                 in: RoundedRectangle(cornerRadius: size * 0.28))

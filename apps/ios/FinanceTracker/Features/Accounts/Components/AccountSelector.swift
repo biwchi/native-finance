@@ -130,7 +130,7 @@ struct AccountSelector: View {
 
     private var selectedIconBadge: some View {
         AppIcon(selectedIcon, size: 24)
-            .foregroundStyle(selectedColor)
+            .foregroundStyle(AppColor.iconForeground(for: selectedColor))
             .frame(width: iconBadgeSize, height: iconBadgeSize)
             .background(selectedColor.opacity(0.14), in: Circle())
             .accessibilityHidden(true)
@@ -202,7 +202,7 @@ struct AccountSelector: View {
         if let color, let image = AppIcons.uiImage(named: iconName) {
             Image(
                 uiImage: image.withTintColor(
-                    UIColor(color),
+                    UIColor(AppColor.iconForeground(for: color)),
                     renderingMode: .alwaysOriginal
                 )
             )

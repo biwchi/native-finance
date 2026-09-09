@@ -48,7 +48,7 @@ struct CategorySettingsView: View {
             if let message = transactionStore.categoryErrorMessage ?? errorMessage {
                 Section {
                     Label(message, icon: "warning-triangle")
-                        .foregroundStyle(AppColor.destructive)
+                        .foregroundStyle(AppColor.destructiveText)
                 }
             }
         }

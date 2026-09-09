@@ -8,6 +8,26 @@ struct DashboardView: View {
         case summary
     }
 
+    private struct TransactionResultsScope: Equatable {
+        let period: FinanceDateFilter
+        let accountID: UUID?
+        let isLoaded: Bool
+    }
+
+    private struct AnimatedSummaryHeight<Content: View>: View, Animatable {
+        var height: CGFloat
+        @ViewBuilder var content: (CGFloat?) -> Content
+
+        var animatableData: CGFloat {
+            get { height }
+            set { height = newValue }
+        }
+
+        var body: some View {
+            content(height > 0 ? height : nil)
+        }
+    }
+
     private struct SummaryCardBoundsPreferenceKey: PreferenceKey {
         static let defaultValue: [SummaryCardID: Anchor<CGRect>] = [:]
 
@@ -21,6 +41,7 @@ struct DashboardView: View {
 
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var budgetStore: BudgetStore
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
@@ -36,6 +57,8 @@ struct DashboardView: View {
     @State private var editingTransaction: FinanceTransaction?
     @State private var deletingTransactionID: UUID?
     @State private var deletionError: String?
+    @State private var summaryCardHeight: CGFloat?
+    @State private var animatesSummaryHeight = false
 
     var body: some View {
         NavigationStack {
@@ -151,11 +174,28 @@ struct DashboardView: View {
     @ViewBuilder
     private var dashboardContent: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            dashboardList(now: context.date)
+            // Drive the row and detached glass with the same displayed height on every
+            // frame. Native List resize animations can crossfade self-sizing cells.
+            AnimatedSummaryHeight(height: summaryCardHeight ?? 0) { height in
+                KeyframeAnimator(initialValue: 1.0, trigger: transactionResultsScope) { opacity in
+                    dashboardList(now: context.date, transactionOpacity: opacity,
+                                  summaryHeight: height)
+                } keyframes: { _ in
+                    MoveKeyframe(0)
+                    LinearKeyframe(1, duration: 0.2)
+                }
+            }
+            .animation(animatesSummaryHeight && !reduceMotion ? .easeInOut(duration: 0.3) : nil,
+                       value: summaryCardHeight)
         }
     }
 
-    private func dashboardList(now: Date) -> some View {
+    private var transactionResultsScope: TransactionResultsScope {
+        TransactionResultsScope(period: selectedPeriod, accountID: accountStore.selectedAccountID,
+                                isLoaded: transactionStore.state == .loaded)
+    }
+
+    private func dashboardList(now: Date, transactionOpacity: Double, summaryHeight: CGFloat?) -> some View {
         let reminders = FinanceOverviewData.upcomingReminders(
             transactionStore.upcomingTransactions, daysBefore: recurringReminderDays,
             now: now, calendar: calendar
@@ -164,7 +204,7 @@ struct DashboardView: View {
             Section {
                 FinancePageHeader(dateSelection: $selectedPeriod)
                 if transactionStore.state == .loaded, let insights {
-                    summaryCards(for: insights)
+                    summaryCards(for: insights, height: summaryHeight)
                 } else {
                     FinanceSummaryUnavailable(state: transactionStore.state, rateState: summaryRates.state)
                 }
@@ -187,7 +227,9 @@ struct DashboardView: View {
                 }
                 .modifier(FinanceSectionMargins(top: AppSpacing.large))
             }
-            transactionSections
+            transactionSections(opacity: transactionOpacity)
+                // Filtering replaces the results without animating individual row moves.
+                .transaction { $0.animation = nil }
             // Clear the floating Add button and its padding, then leave a 24-point gap.
             FinanceListBottomSpacer(height: 62 + AppSpacing.small * 2 + AppSpacing.doubleExtraLarge)
         }
@@ -203,6 +245,7 @@ struct DashboardView: View {
                 }
             }
         }
+        .transaction { $0.animation = nil }
     }
 
     private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
@@ -233,8 +276,8 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
-    private func summaryCards(for insights: DashboardInsights) -> some View {
-        summaryCardPlaceholder(.summary) {
+    private func summaryCards(for insights: DashboardInsights, height: CGFloat?) -> some View {
+        summaryCardPlaceholder(.summary, height: height) {
             summaryCard(for: insights)
         }
         .listRowInsets(EdgeInsets())
@@ -245,20 +288,34 @@ struct DashboardView: View {
     @ViewBuilder
     private func summaryCardPlaceholder<Content: View>(
         _ id: SummaryCardID,
+        height: CGFloat?,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        if #available(iOS 26.0, *) {
-            content()
-                .hidden()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .anchorPreference(
-                    key: SummaryCardBoundsPreferenceKey.self,
-                    value: .bounds
-                ) { [id: $0] }
-        } else {
-            content()
+        Group {
+            if #available(iOS 26.0, *) {
+                content()
+                    .transaction { $0.disablesAnimations = true }
+                    .hidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            } else {
+                content()
+            }
         }
+        // Measure the natural content before constraining the row. The new budget
+        // height can arrive after the mode-change transaction has already finished.
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+            guard height > 0, height.isFinite, summaryCardHeight != height else { return }
+            withTransaction(Transaction(animation: nil)) {
+                animatesSummaryHeight = summaryCardHeight != nil
+                summaryCardHeight = height
+            }
+        }
+        .frame(height: height, alignment: .top)
+        .clipped()
+        // Both the detached card and the following sections use this animated frame.
+        .anchorPreference(key: SummaryCardBoundsPreferenceKey.self, value: .bounds) { [id: $0] }
     }
 
     @ViewBuilder
@@ -267,8 +324,8 @@ struct DashboardView: View {
         bounds: [SummaryCardID: Anchor<CGRect>],
         proxy: GeometryProxy
     ) -> some View {
-        positionedSummaryCard(.summary, bounds: bounds, proxy: proxy) {
-            summaryCard(for: insights)
+        positionedSummaryCard(.summary, bounds: bounds, proxy: proxy) { height in
+            summaryCard(for: insights, height: height)
         }
     }
 
@@ -277,24 +334,25 @@ struct DashboardView: View {
         _ id: SummaryCardID,
         bounds: [SummaryCardID: Anchor<CGRect>],
         proxy: GeometryProxy,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: (CGFloat) -> Content
     ) -> some View {
         if let anchor = bounds[id] {
             let frame = proxy[anchor]
-            content()
-                .frame(width: frame.width, height: frame.height)
+            content(frame.height)
+                .frame(width: frame.width, height: frame.height, alignment: .top)
                 .position(x: frame.midX, y: frame.midY)
         }
     }
 
-    private func summaryCard(for insights: DashboardInsights) -> some View {
+    private func summaryCard(for insights: DashboardInsights, height: CGFloat? = nil) -> some View {
         DashboardSummaryCard(
             insights: insights,
             currency: currency,
             budgetTimeRemaining: budgetTimeRemaining(for: insights),
             comparisonDescription: comparisonDescription,
             onViewBudget: { isShowingBudget = true },
-            onViewMetric: { selectedSummaryMetric = $0 }
+            onViewMetric: { selectedSummaryMetric = $0 },
+            presentationHeight: height
         )
     }
 
@@ -333,7 +391,7 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
-    private var transactionSections: some View {
+    private func transactionSections(opacity: Double) -> some View {
         switch transactionStore.state {
         case .idle, .loading:
             Section {
@@ -345,6 +403,7 @@ struct DashboardView: View {
             if periodTransactions.isEmpty {
                 Section {
                     dashboardEmptyState
+                        .opacity(opacity)
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                 }
@@ -354,9 +413,11 @@ struct DashboardView: View {
                     Section {
                         ForEach(group.transactions) { transaction in
                             transactionButton(transaction)
+                                .opacity(opacity)
                         }
                     } header: {
                         Text(group.day, format: .dateTime.month(.wide).day().year())
+                            .opacity(opacity)
                             .listRowInsets(EdgeInsets(
                                 top: 0,
                                 leading: AppSpacing.large,

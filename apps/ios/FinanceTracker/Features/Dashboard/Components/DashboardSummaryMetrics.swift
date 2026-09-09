@@ -125,7 +125,7 @@ struct DashboardSummaryMetrics: View {
             .foregroundStyle(metric == .net && value != 0
                              ? (value > 0 ? AppColor.positiveText : AppColor.destructiveText) : .primary)
             .monospacedDigit()
-            .contentTransition(.numericText())
+            .modifier(DashboardNumericAmount(amount: value))
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .anchorPreference(key: BoundsKey.self, value: .bounds) { [metric: [$0]] }

@@ -6,7 +6,7 @@ struct CategoryIcon: View {
 
     var body: some View {
         AppIcon(category.displayIcon, size: size * 0.43)
-            .foregroundStyle(category.displayColor)
+            .foregroundStyle(AppColor.iconForeground(for: category.displayColor))
             .frame(width: size, height: size)
             .background(
                 category.displayColor.opacity(0.12),

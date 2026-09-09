@@ -19,6 +19,9 @@ Lower layers must not depend on higher layers. In particular, the design system 
 - Keep one primary type per Swift file and name the file after that type.
 - Put a view in `DesignSystem` only when it is generic. Put finance-wide presentation in `Shared/Finance`; otherwise keep it inside the owning feature.
 - Keep state transitions, persistence, and navigation in screens or view models rather than generic primitives.
+- Apply `SwitchToggleStyle(tint: AppColor.switchTrack)` to forms with switches. The native white thumb needs a separate track color from the app accent in dark mode.
+- Use `AppColor.foreground(on:)` for labels and checkmarks on opaque palette fills, and `AppColor.iconForeground(for:)` for colored artwork on native surfaces or translucent badges.
+- Composite custom filled controls before applying disabled or pressed opacity so the label and background fade together.
 
 ## Verification
 

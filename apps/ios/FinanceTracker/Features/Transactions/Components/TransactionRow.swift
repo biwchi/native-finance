@@ -56,7 +56,7 @@ struct TransactionRow: View {
                     CategoryIcon(category: category, size: 42)
                 } else {
                     AppIcon(transaction.kind == .income ? "arrow-down-left" : "arrow-up-right", size: 18)
-                        .foregroundStyle(iconColor)
+                        .foregroundStyle(AppColor.iconForeground(for: iconColor))
                         .frame(width: 42, height: 42)
                         .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.medium))
                 }
@@ -153,7 +153,7 @@ struct TransactionRow: View {
     private var accountLabel: some View {
         HStack(spacing: 5) {
             AppIcon(account?.icon ?? "credit-card", size: 11)
-                .foregroundStyle(account?.iconColor.color ?? Color.secondary)
+                .foregroundStyle(AppColor.iconForeground(for: account?.iconColor.color ?? Color.secondary))
                 .frame(width: accountIconSize, height: accountIconSize)
                 .background(
                     (account?.iconColor.color ?? Color.secondary).opacity(0.12),
