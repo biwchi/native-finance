@@ -65,14 +65,23 @@ struct AddTransactionView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             manualEntryContent
-                .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            dismiss()
+                    if #available(iOS 26.0, *) {
+                        ToolbarItem(placement: .cancellationAction) {
+                            closeButton
                         }
-                        .disabled(isSaving)
+                        .sharedBackgroundVisibility(.hidden)
+                    } else {
+                        ToolbarItem(placement: .cancellationAction) {
+                            closeButton
+                        }
+                    }
+                    ToolbarItem(placement: .principal) {
+                        if !isLockedTransferDraft {
+                            TransactionModeSelector(modes: availableModes, selection: $mode)
+                                .disabled(isSaving)
+                        }
                     }
                 }
                 .interactiveDismissDisabled(isSaving)
@@ -98,6 +107,9 @@ struct AddTransactionView: View {
                     }
                 }
         }
+        .onChange(of: mode) { _, newMode in
+            handleModeChange(newMode)
+        }
         .task {
             await accountStore.loadAccounts()
             viewModel.configureAccount(
@@ -121,6 +133,21 @@ struct AddTransactionView: View {
         }
     }
 
+    private var closeButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            AppIcon("xmark", size: 18)
+                .foregroundStyle(.primary)
+                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(TransactionGlassSurface(shape: Circle()))
+        .accessibilityLabel("Close")
+        .disabled(isSaving)
+    }
+
     private var manualEntryContent: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -135,13 +162,8 @@ struct AddTransactionView: View {
 
     private var entryControls: some View {
         VStack(spacing: AppSpacing.medium) {
-            if !isLockedTransferDraft {
-                TransactionModeSelector(modes: availableModes, selection: $mode)
-                    .onChange(of: mode) { _, newMode in
-                        handleModeChange(newMode)
-                    }
-            }
             TransactionAmountPanel(expression: amountExpression, formattedAmount: displayAmount)
+                .modifier(TransactionModeSwipe(modes: availableModes, selection: $mode, isActive: !isLockedTransferDraft))
             TransactionMetadataBar(
                 accounts: accountStore.accounts,
                 selectedAccountID: viewModel.accountID,
@@ -187,13 +209,6 @@ struct AddTransactionView: View {
         .padding(.vertical, AppSpacing.extraSmall)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge))
         .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
-    }
-
-    private var navigationTitle: String {
-        if quickEntryDraft != nil { return "Edit draft" }
-        if upcomingTransaction != nil { return "Edit recurring transaction" }
-        if transaction != nil { return "Edit transaction" }
-        return initialCommand == nil ? "New transaction" : "Review transaction"
     }
 
     private func applyInitialCommandIfNeeded() {

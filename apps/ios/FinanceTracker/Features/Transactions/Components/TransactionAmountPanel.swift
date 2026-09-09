@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TransactionAmountPanel: View {
+    @Environment(\.transactionSwipeOffset) private var swipeOffset
     let expression: AmountExpression
     let formattedAmount: String
 
@@ -26,6 +27,7 @@ struct TransactionAmountPanel: View {
                 .contentTransition(.numericText(value: animationValue))
                 .animation(.snappy(duration: 0.24), value: animationValue)
         }
+        .offset(x: swipeOffset)
         .frame(maxWidth: .infinity, minHeight: 98, maxHeight: .infinity)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

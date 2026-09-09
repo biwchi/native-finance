@@ -3,16 +3,15 @@ import SwiftUI
 struct TransactionModeSelector: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Namespace private var selectionAnimation
     let modes: [QuickTransactionMode]
     @Binding var selection: QuickTransactionMode
 
     var body: some View {
         buttons
-            .padding(AppSpacing.extraSmall)
-            .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
-            .frame(maxWidth: .infinity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: selection)
+            .padding(.horizontal, AppSpacing.extraSmall)
+            .frame(height: AppControlSize.minimumTapTarget)
+            .modifier(TransactionGlassSurface(shape: Capsule()))
+            .modifier(TransactionModeSwipe(modes: modes, selection: $selection))
             .sensoryFeedback(.selection, trigger: selection)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Transaction type")
@@ -21,65 +20,100 @@ struct TransactionModeSelector: View {
     private var buttons: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                expandedButtons
+                modeMenu
             } else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: AppSpacing.extraSmall) { modeButtons }
-                        .fixedSize(horizontal: true, vertical: false)
-                    expandedButtons
+                    inlineButtons
+                    modeMenu
                 }
             }
         }
     }
 
-    private var modeButtons: some View {
-        ForEach(modes) { mode in
-            modeButton(mode)
+    private var inlineButtons: some View {
+        // Measure a constant outer width independently of the animated buttons.
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: CGFloat(modes.count) * AppControlSize.minimumTapTarget,
+                       height: AppControlSize.minimumTapTarget)
+            modeTitle(selection)
+                .padding(.trailing, AppSpacing.small)
         }
-    }
-
-    private var expandedButtons: some View {
-        VStack(spacing: AppSpacing.extraSmall) {
-            modeButton(selection)
-            HStack(spacing: AppSpacing.extraSmall) {
-                ForEach(modes.filter { $0 != selection }) { mode in
-                    modeButton(mode)
+        .fixedSize(horizontal: true, vertical: false)
+        .hidden()
+        .overlay {
+            GeometryReader { geometry in
+                let titleWidth = max(0, geometry.size.width - CGFloat(modes.count) * AppControlSize.minimumTapTarget)
+                HStack(spacing: 0) {
+                    ForEach(modes) { mode in
+                        modeButton(mode, titleWidth: titleWidth)
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: selection)
             }
         }
     }
 
-    private func modeButton(_ mode: QuickTransactionMode) -> some View {
+    private var modeMenu: some View {
+        Menu {
+            Picker("Transaction type", selection: $selection) {
+                ForEach(modes) { mode in
+                    Label(mode.title, icon: mode.iconName)
+                        .tag(mode)
+                }
+            }
+        } label: {
+            HStack(spacing: AppSpacing.compact) {
+                AppIcon(selection.iconName, size: 16)
+                    .foregroundStyle(selection.color)
+                modeTitle(selection)
+                AppIcon("nav-arrow-down", size: 12)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, AppSpacing.small)
+            .frame(minHeight: AppControlSize.minimumTapTarget)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel("Transaction type")
+        .accessibilityValue(selection.title)
+    }
+
+    private func modeButton(_ mode: QuickTransactionMode, titleWidth: CGFloat) -> some View {
         Button {
             selection = mode
         } label: {
-            HStack(spacing: AppSpacing.small) {
-                AppIcon(mode.iconName, size: 20)
+            HStack(spacing: 0) {
+                AppIcon(mode.iconName, size: 16)
                     .foregroundStyle(mode.color)
-                if selection == mode {
-                    Text(mode.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .transition(.opacity)
-                }
+                    .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                // Keep every label alive and reveal it horizontally, without fading or reparenting icons.
+                Text(mode.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: selection == mode ? titleWidth : 0, alignment: .leading)
+                    .clipped()
             }
-            .padding(.horizontal, selection == mode ? AppSpacing.medium : AppSpacing.small)
-            .frame(minWidth: AppControlSize.minimumTapTarget, minHeight: AppControlSize.minimumTapTarget)
-            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? AppSpacing.small : 0)
-            .background {
-                if selection == mode {
-                    Capsule()
-                        .fill(AppColor.controlFill)
-                        .matchedGeometryEffect(id: "selected-kind", in: selectionAnimation)
-                }
-            }
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(ModeButtonStyle())
         .accessibilityLabel(mode.title)
         .accessibilityAddTraits(selection == mode ? .isSelected : [])
+    }
+
+    private func modeTitle(_ mode: QuickTransactionMode) -> some View {
+        // Reserve the widest title so switching modes cannot resize the toolbar.
+        ZStack {
+            ForEach(modes) { candidate in
+                Text(candidate.title)
+                    .hidden()
+            }
+            Text(mode.title)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
     }
 
     private struct ModeButtonStyle: ButtonStyle {
@@ -89,5 +123,52 @@ struct TransactionModeSelector: View {
             configuration.label
                 .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
         }
+    }
+}
+
+struct TransactionModeSwipe: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.3, dampingFraction: 0.85)))
+    private var dragOffset: CGFloat = 0
+    let modes: [QuickTransactionMode]
+    @Binding var selection: QuickTransactionMode
+    var isActive = true
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.transactionSwipeOffset, dragOffset)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10)
+                    .updating($dragOffset) { value, offset, transaction in
+                        guard isEnabled, isActive, !reduceMotion,
+                              modes.count > 1, modes.contains(selection),
+                              abs(value.translation.width) > abs(value.translation.height) * 1.5 else {
+                            offset = 0
+                            return
+                        }
+                        transaction.animation = nil
+                        // Rubber-band resistance approaches 24 points, even on a long drag.
+                        let distance = value.translation.width
+                        offset = 24 * distance / (abs(distance) + 72)
+                    }
+                    .onEnded { value in
+                        guard isEnabled, isActive,
+                              let next = selection.selectionAfterSwipe(value.translation, among: modes) else { return }
+                        selection = next
+                    }
+            )
+    }
+}
+
+private struct TransactionSwipeOffsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var transactionSwipeOffset: CGFloat {
+        get { self[TransactionSwipeOffsetKey.self] }
+        set { self[TransactionSwipeOffsetKey.self] = newValue }
     }
 }

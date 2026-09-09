@@ -3,6 +3,39 @@ import XCTest
 
 @MainActor
 final class AddTransactionViewModelTests: XCTestCase {
+    func testTransactionModeSwipesCycleInBothDirectionsAndWrap() {
+        let modes = QuickTransactionMode.allCases
+        var selection = QuickTransactionMode.income
+        for expected in [QuickTransactionMode.expense, .transfer, .debt, .income] {
+            let next = selection.selectionAfterSwipe(CGSize(width: -80, height: 8), among: modes)
+            XCTAssertEqual(next, expected)
+            selection = next ?? selection
+        }
+        for expected in [QuickTransactionMode.debt, .transfer, .expense, .income] {
+            let next = selection.selectionAfterSwipe(CGSize(width: 80, height: -8), among: modes)
+            XCTAssertEqual(next, expected)
+            selection = next ?? selection
+        }
+    }
+
+    func testTransactionModeSwipesRespectAvailableModes() {
+        let modes: [QuickTransactionMode] = [.income, .expense]
+        XCTAssertEqual(QuickTransactionMode.expense.selectionAfterSwipe(CGSize(width: -100, height: 0), among: modes), .income)
+        XCTAssertEqual(QuickTransactionMode.income.selectionAfterSwipe(CGSize(width: 100, height: 0), among: modes), .expense)
+        XCTAssertNil(QuickTransactionMode.transfer.selectionAfterSwipe(CGSize(width: 100, height: 0), among: modes))
+        XCTAssertNil(QuickTransactionMode.income.selectionAfterSwipe(CGSize(width: 100, height: 0), among: [.income]))
+        XCTAssertNil(QuickTransactionMode.income.selectionAfterSwipe(CGSize(width: 100, height: 0), among: []))
+    }
+
+    func testTransactionModeSwipesIgnoreShortAndVerticalDrags() {
+        for translation in [CGSize(width: 15, height: 0), CGSize(width: -40, height: 0),
+                            CGSize(width: 60, height: 0), CGSize(width: -79, height: 0),
+                            CGSize(width: 79, height: 0), CGSize(width: 50, height: 100),
+                            CGSize(width: -100, height: 60), CGSize(width: 100, height: 50)] {
+            XCTAssertNil(QuickTransactionMode.expense.selectionAfterSwipe(translation, among: QuickTransactionMode.allCases))
+        }
+    }
+
     func testAmountExpressionCalculatesAsKeysAreEntered() {
         var expression = AmountExpression()
         ["1", "2", "+", "4", "*", "3"].forEach { expression.enter($0) }

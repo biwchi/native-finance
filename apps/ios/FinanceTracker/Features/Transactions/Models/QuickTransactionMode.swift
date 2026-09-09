@@ -16,10 +16,20 @@ enum QuickTransactionMode: String, CaseIterable, Identifiable {
         rawValue.capitalized
     }
 
+    func selectionAfterSwipe(_ translation: CGSize, among modes: [Self]) -> Self? {
+        guard modes.count > 1,
+              abs(translation.width) >= 80,
+              abs(translation.width) > abs(translation.height) * 2,
+              let index = modes.firstIndex(of: self) else { return nil }
+
+        let step = translation.width < 0 ? 1 : -1
+        return modes[(index + step + modes.count) % modes.count]
+    }
+
     var iconName: String {
         switch self {
-        case .expense: "arrow-up-right-circle"
-        case .income: "arrow-down-left-circle"
+        case .expense: "arrow-up-right"
+        case .income: "arrow-down-left"
         case .transfer: "coins-swap"
         case .debt: "user"
         }
