@@ -2,15 +2,16 @@ import SwiftUI
 
 extension View {
     @ViewBuilder
-    func accountSelectorGlass() -> some View {
+    func accountSelectorGlass(isToolbarItem: Bool = false) -> some View {
         if #available(iOS 26.0, *) {
-            glassEffect(.regular.interactive(), in: Capsule())
+            if isToolbarItem {
+                // The toolbar supplies the same glass background as its other controls.
+                self
+            } else {
+                glassEffect(.clear.interactive(), in: Capsule())
+            }
         } else {
-            background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(0.10), lineWidth: 1)
-                }
+            modifier(LegacyGlassSurface(shape: Capsule()))
         }
     }
 }

@@ -100,6 +100,7 @@ export async function updateRecurringTransaction(
       lastOccurrenceAt: recorded
         ? values.occurredAt
         : schedule.lastOccurrenceAt,
+      nextScheduledFor: recorded ? null : schedule.nextScheduledFor ?? expectedOccurredAt,
       nextOccurrenceAt: recurrence.endAt && nextOccurrenceAt > recurrence.endAt
         ? null
         : nextOccurrenceAt,

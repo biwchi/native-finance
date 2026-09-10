@@ -36,6 +36,7 @@ export async function deleteRecurringTransaction(
     }
 
     if (input.action === "occurrence") {
+      await store.excludeOccurrence?.(schedule.id, (recorded as { scheduledFor?: Date } | null)?.scheduledFor ?? (isNext ? schedule.nextScheduledFor : null) ?? input.occurredAt);
       if (recorded) await store.deleteTransaction(recorded.id);
       if (isNext) {
         const next = nextRecurrenceDate(
@@ -44,7 +45,7 @@ export async function deleteRecurringTransaction(
           schedule.frequency,
         );
         await store.updateSchedule(schedule.id, {
-          lastOccurrenceAt: input.occurredAt,
+          lastOccurrenceAt: input.occurredAt, nextScheduledFor: null,
           nextOccurrenceAt: schedule.endAt && next > schedule.endAt ? null : next,
           updatedAt: now,
         });

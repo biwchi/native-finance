@@ -106,7 +106,7 @@ final class FinancesOverviewTests: XCTestCase {
         let pool = UUID()
         let otherPool = UUID()
         let now = date("2026-09-07T10:00:00Z")
-        let budget = MonthlyBudget(id: UUID(), accountId: nil, month: "2026-09", currency: "USD", monthlyLimit: "500",
+        let budget = MonthlyBudget(id: UUID(), accountId: nil, currency: "USD", monthlyLimit: "500",
             groups: [BudgetGroup(id: pool, name: "Needs", limit: "200", sortOrder: 0),
                      BudgetGroup(id: otherPool, name: "Shopping", limit: "50", sortOrder: 1)],
             categoryAssignments: [BudgetCategoryAssignment(categoryId: parent.id, groupId: pool, limit: nil),
@@ -134,7 +134,7 @@ final class FinancesOverviewTests: XCTestCase {
         let groceries = category("Groceries")
         let recipient = Debt(id: UUID(), name: "Alexey", icon: "user", color: .blue)
         let pool = UUID()
-        let budget = MonthlyBudget(id: UUID(), accountId: nil, month: BudgetMonth.key(for: now), currency: "USD",
+        let budget = MonthlyBudget(id: UUID(), accountId: nil, currency: "USD",
             monthlyLimit: "1200", groups: [BudgetGroup(id: pool, name: "Essentials", limit: "600", sortOrder: 0)],
             categoryAssignments: [BudgetCategoryAssignment(categoryId: groceries.id, groupId: pool, limit: "250")],
             createdAt: now, updatedAt: now)
@@ -150,18 +150,8 @@ final class FinancesOverviewTests: XCTestCase {
         var income = FinanceTransaction(id: UUID(), accountId: account.id, kind: .income, amount: "1800", currency: "USD",
             category: nil, payee: "Salary", note: nil, occurredAt: now.addingTimeInterval(-120), createdAt: now, updatedAt: now)
         income.recurrence = salary.recurrence
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [PreviewProtocol.self]
-        PreviewProtocol.responses = ["transactions": try encode([expense, income, loan]), "upcoming": try encode([schedule, salary]),
-            "debts": try encode([recipient]), "categories": try encode([groceries]), "monthly": try encode(budget)]
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel(); PreviewProtocol.responses = [:] }
-        let api = APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
-        let store = TransactionStore(apiClient: api)
-        await store.loadTransactions(accountID: nil)
-        await store.loadCategories()
-        let budgets = BudgetStore(apiClient: api)
-        await budgets.loadBudget(month: now, accountID: nil)
+        let store = TransactionStore.preview(transactions: [expense, income, loan], upcomingTransactions: [schedule, salary])
+        let budgets = BudgetStore.preview(budget)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "FinancesOverviewRenderTests"))
         defaults.set("USD", forKey: AppPreferences.defaultCurrencyKey)
         defer { defaults.removePersistentDomain(forName: "FinancesOverviewRenderTests") }

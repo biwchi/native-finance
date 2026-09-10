@@ -16,27 +16,24 @@ struct TransactionMetadataBar: View {
     var body: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: AppSpacing.small) {
-                    accountMenu
-                    HStack(spacing: AppSpacing.small) {
+                HStack(alignment: .top, spacing: AppSpacing.small) {
+                    VStack(alignment: .leading, spacing: AppSpacing.small) {
+                        accountMenu
                         dateTimeButton
-                        Spacer(minLength: AppSpacing.small)
-                        detailsLink
                     }
+                    Spacer(minLength: 0)
+                    detailsLink
                 }
             } else {
                 HStack(spacing: AppSpacing.small) {
                     accountMenu
-                    Spacer(minLength: 0)
                     dateTimeButton
                     Spacer(minLength: 0)
                     detailsLink
                 }
             }
         }
-        .padding(AppSpacing.small)
         .frame(maxWidth: .infinity)
-        .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
     }
 
     private var accountMenu: some View {
@@ -68,7 +65,10 @@ struct TransactionMetadataBar: View {
                 .minimumScaleFactor(0.75)
             }
             .frame(minHeight: AppControlSize.minimumTapTarget, alignment: .leading)
-            .contentShape(Rectangle())
+            .padding(.horizontal, AppSpacing.small)
+            .padding(.vertical, AppSpacing.extraSmall)
+            .contentShape(Capsule())
+            .modifier(TransactionGlassSurface(shape: Capsule(), isInteractive: true))
         }
         .buttonStyle(.plain)
         .disabled(accounts.isEmpty)
@@ -95,7 +95,10 @@ struct TransactionMetadataBar: View {
             }
             .foregroundStyle(.primary)
             .frame(minHeight: AppControlSize.minimumTapTarget)
-            .contentShape(Rectangle())
+            .padding(.horizontal, AppSpacing.medium)
+            .padding(.vertical, AppSpacing.extraSmall)
+            .contentShape(Capsule())
+            .modifier(TransactionGlassSurface(shape: Capsule(), isInteractive: true))
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
@@ -122,7 +125,9 @@ struct TransactionMetadataBar: View {
             AppIcon(hasExtraDetails ? "clipboard-check" : "page-plus", size: 22)
                 .foregroundStyle(.primary)
                 .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
-                .contentShape(Rectangle())
+                .padding(AppSpacing.extraSmall)
+                .contentShape(Circle())
+                .modifier(TransactionGlassSurface(shape: Circle(), isInteractive: true))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Transaction details")

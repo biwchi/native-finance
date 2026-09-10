@@ -1,7 +1,7 @@
 import Foundation
 
 
-struct APIClient: Sendable {
+struct APIClient: SyncTransport, RateTransport {
     let baseURL: URL
     let session: URLSession
 
@@ -292,12 +292,12 @@ struct APIClient: Sendable {
         return try await send(request)
     }
 
-    func monthlyBudget(month: String, accountID: UUID?) async throws -> MonthlyBudget? {
+    func monthlyBudget(accountID: UUID?) async throws -> MonthlyBudget? {
         var components = URLComponents(
             url: apiURL.appending(path: "budgets").appending(path: "monthly"),
             resolvingAgainstBaseURL: false
         )
-        var queryItems = [URLQueryItem(name: "month", value: month)]
+        var queryItems: [URLQueryItem] = []
         if let accountID {
             queryItems.append(URLQueryItem(name: "accountId", value: accountID.uuidString))
         }
@@ -318,6 +318,13 @@ struct APIClient: Sendable {
         request.httpBody = try Self.jsonEncoder.encode(budget)
         return try await send(request)
     }
+
+    func syncBootstrap() async throws -> SyncSnapshot { try await get(url: apiURL.appending(path: "sync/bootstrap")) }
+    func syncPush(_ mutation: SyncMutation) async throws -> SyncResult { try await post(mutation, to: apiURL.appending(path: "sync/push")) }
+    func syncChanges(cursor: String, generation: Int) async throws -> SyncSnapshot {
+        try await get(url: apiURL.appending(path: "sync/changes").appending(queryItems: [URLQueryItem(name: "cursor", value: cursor), URLQueryItem(name: "generation", value: String(generation))]))
+    }
+    func fullExchangeRateTable() async throws -> ExchangeRateSnapshot { try await get(url: apiURL.appending(path: "exchange-rates/latest")) }
 
     private var apiURL: URL {
         baseURL

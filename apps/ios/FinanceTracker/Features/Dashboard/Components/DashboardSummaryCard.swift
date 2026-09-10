@@ -8,6 +8,8 @@ struct DashboardSummaryCard: View {
     var onViewBudget: (() -> Void)? = nil
     var onViewMetric: ((DashboardSummaryMetrics.Metric) -> Void)? = nil
     var presentationHeight: CGFloat? = nil
+    var showsMetrics = true
+    var spendingTitle = "Spent this month"
 
     private struct Presentation: Hashable {
         let hasBudget: Bool
@@ -66,7 +68,7 @@ struct DashboardSummaryCard: View {
                         BudgetProgressBar(
                             budgetProgress: NSDecimalNumber(decimal: insights.budgetProgress ?? 0).doubleValue,
                             monthProgress: nil,
-                            tint: AppColor.accent
+                            tint: !showsMetrics && (insights.remaining ?? 0) < 0 ? BudgetStatus.overLimit.tint : AppColor.accent
                         )
                         budgetUsage(limit)
                             .modifier(DashboardNumericAmount(amount: insights.spent))
@@ -78,11 +80,18 @@ struct DashboardSummaryCard: View {
                         trend
                     }
                 }
+                if !showsMetrics, !insights.hasBudget {
+                    Text("No overall monthly limit")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
-            Divider()
-                .padding(.top, AppSpacing.extraLarge)
-                .padding(.bottom, AppSpacing.large)
-            DashboardSummaryMetrics(insights: insights, currency: currency, isInteractive: onViewMetric != nil)
+            if showsMetrics {
+                Divider()
+                    .padding(.top, AppSpacing.extraLarge)
+                    .padding(.bottom, AppSpacing.large)
+                DashboardSummaryMetrics(insights: insights, currency: currency, isInteractive: onViewMetric != nil)
+            }
         }
         .padding(AppSpacing.extraLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,7 +164,9 @@ struct DashboardSummaryCard: View {
     @ViewBuilder
     private var headerAccessory: some View {
         if insights.hasBudget {
-            budgetNavigationLabel
+            if showsMetrics {
+                budgetNavigationLabel
+            }
         } else {
             trend
         }
@@ -219,18 +230,33 @@ struct DashboardSummaryCard: View {
 
     private var headline: some View {
         VStack(alignment: .leading, spacing: AppSpacing.extraSmall) {
-            Text(insights.hasBudget ? "Budget left" : "Net")
+            Text(headlineTitle)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text(money(insights.hasBudget ? (insights.remaining ?? 0) : insights.net, signed: !insights.hasBudget))
+            Text(money(headlineAmount, signed: showsMetrics && !insights.hasBudget))
                 .font(.system(size: amountSize, weight: .semibold))
+                .foregroundStyle(!showsMetrics && (insights.remaining ?? 0) < 0 ? BudgetStatus.overLimit.tint : .primary)
                 .monospacedDigit()
-                .modifier(DashboardNumericAmount(amount: insights.hasBudget ? (insights.remaining ?? 0) : insights.net))
+                .modifier(DashboardNumericAmount(amount: headlineAmount))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(insights.hasBudget ? "Budget left" : "Net")
-        .accessibilityValue(spoken(insights.hasBudget ? (insights.remaining ?? 0) : insights.net))
+        .accessibilityLabel(headlineTitle)
+        .accessibilityValue(spoken(headlineAmount))
+    }
+
+    private var headlineTitle: String {
+        if insights.hasBudget {
+            return !showsMetrics && (insights.remaining ?? 0) < 0 ? "Over budget" : "Budget left"
+        }
+        return showsMetrics ? "Net" : spendingTitle
+    }
+
+    private var headlineAmount: Decimal {
+        if let remaining = insights.remaining, insights.hasBudget {
+            return showsMetrics ? remaining : abs(remaining)
+        }
+        return showsMetrics ? insights.net : insights.spent
     }
 
     @ViewBuilder

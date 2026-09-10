@@ -72,15 +72,16 @@ struct AddTransactionView: View {
                             closeButton
                         }
                         .sharedBackgroundVisibility(.hidden)
+                        ToolbarItem(placement: .principal) {
+                            transactionModeSelector
+                        }
+                        .sharedBackgroundVisibility(.hidden)
                     } else {
                         ToolbarItem(placement: .cancellationAction) {
                             closeButton
                         }
-                    }
-                    ToolbarItem(placement: .principal) {
-                        if !isLockedTransferDraft {
-                            TransactionModeSelector(modes: availableModes, selection: $mode)
-                                .disabled(isSaving)
+                        ToolbarItem(placement: .principal) {
+                            transactionModeSelector
                         }
                     }
                 }
@@ -107,6 +108,7 @@ struct AddTransactionView: View {
                     }
                 }
         }
+        .legacySheetAppearance()
         .onChange(of: mode) { _, newMode in
             handleModeChange(newMode)
         }
@@ -130,6 +132,14 @@ struct AddTransactionView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Try again.")
+        }
+    }
+
+    @ViewBuilder
+    private var transactionModeSelector: some View {
+        if !isLockedTransferDraft {
+            TransactionModeSelector(modes: availableModes, selection: $mode)
+                .disabled(isSaving)
         }
     }
 
@@ -157,6 +167,7 @@ struct AddTransactionView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
         }
+        .scrollEdgeFades()
         .disabled(isSaving)
     }
 
@@ -208,7 +219,10 @@ struct AddTransactionView: View {
         }
         .padding(.vertical, AppSpacing.extraSmall)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge))
-        .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
+        .background {
+            Color.clear
+                .modifier(TransactionGlassSurface(shape: RoundedRectangle(cornerRadius: AppRadius.extraLarge)))
+        }
     }
 
     private func applyInitialCommandIfNeeded() {
@@ -243,7 +257,7 @@ struct AddTransactionView: View {
     }
 
     private var submitButton: some View {
-        PrimaryActionButton(submitButtonTitle, isLoading: isSaving, appearance: .glass) {
+        PrimaryActionButton(submitButtonTitle, appearance: .glass) {
             Task { await save() }
         }
         .controlSize(.large)
@@ -285,21 +299,14 @@ struct AddTransactionView: View {
 
     private var accountBalanceSubtitle: String {
         guard let selectedAccount else { return "Choose account" }
-        switch transactionStore.state {
-        case .idle, .loading:
-            return "Loading balance"
-        case .failed:
-            return "Balance unavailable"
-        case .loaded:
-            if let balance = transactionStore.balance(
-                accountID: selectedAccount.id,
-                currency: selectedAccount.currency,
-                rates: exchangeRateStore.snapshot
-            ) {
-                return MoneyFormatter.format(balance, currency: selectedAccount.currency, roundToWhole: roundTotals)
-            }
-            return exchangeRateStore.state == .loading ? "Converting balance" : "Balance unavailable"
+        if let balance = transactionStore.balance(
+            accountID: selectedAccount.id,
+            currency: selectedAccount.currency,
+            rates: exchangeRateStore.snapshot
+        ) {
+            return MoneyFormatter.format(balance, currency: selectedAccount.currency, roundToWhole: roundTotals)
         }
+        return "Balance unavailable"
     }
 
     private var accountCurrencies: Set<String> {
@@ -577,6 +584,7 @@ struct AddTransactionView: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
         guard let accountID = viewModel.accountID else {
             errorMessage = "Choose an account."
             return

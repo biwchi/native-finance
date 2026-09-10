@@ -199,7 +199,7 @@ final class FinanceOverviewTests: XCTestCase {
         let parent = category("Food")
         let child = category("Groceries", parentID: parent.id)
         let poolID = UUID()
-        let budget = MonthlyBudget(id: UUID(), accountId: nil, month: "2026-09", currency: "USD", monthlyLimit: nil,
+        let budget = MonthlyBudget(id: UUID(), accountId: nil, currency: "USD", monthlyLimit: nil,
             groups: [BudgetGroup(id: poolID, name: "Essentials", limit: "500", sortOrder: 0)],
             categoryAssignments: [BudgetCategoryAssignment(categoryId: parent.id, groupId: poolID, limit: "400"),
                                   BudgetCategoryAssignment(categoryId: child.id, groupId: poolID, limit: "200")],
@@ -211,7 +211,7 @@ final class FinanceOverviewTests: XCTestCase {
         XCTAssertTrue(limits.allSatisfy { $0.spent == 75 })
 
         let childPoolID = UUID()
-        let splitBudget = MonthlyBudget(id: budget.id, accountId: nil, month: budget.month, currency: budget.currency,
+        let splitBudget = MonthlyBudget(id: budget.id, accountId: nil, currency: budget.currency,
             monthlyLimit: nil, groups: budget.groups + [BudgetGroup(id: childPoolID, name: "Groceries", limit: "100", sortOrder: 1)],
             categoryAssignments: [BudgetCategoryAssignment(categoryId: parent.id, groupId: poolID, limit: nil),
                                   BudgetCategoryAssignment(categoryId: child.id, groupId: childPoolID, limit: nil)],
@@ -586,7 +586,7 @@ extension FinanceOverviewTests {
         }
         let accounts = AccountStore.preview(accounts: [account])
         let store = TransactionStore.preview(transactions: transactions)
-        let budget = BudgetStore.preview(MonthlyBudget(id: UUID(), accountId: nil, month: BudgetMonth.key(for: .now), currency: currency, monthlyLimit: "3000", groups: [], categoryAssignments: [], createdAt: .now, updatedAt: .now))
+        let budget = BudgetStore.preview(MonthlyBudget(id: UUID(), accountId: nil, currency: currency, monthlyLimit: "3000", groups: [], categoryAssignments: [], createdAt: .now, updatedAt: .now))
         func scrollView(in view: UIView) -> UIScrollView? {
             if let scroll = view as? UIScrollView { return scroll }
             return view.subviews.lazy.compactMap { scrollView(in: $0) }.first

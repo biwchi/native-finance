@@ -13,13 +13,13 @@ struct DeleteDataConfirmationView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
+            AppForm {
+                AppSection {
                     Text(explanation)
                     Text("This cannot be undone.")
                         .fontWeight(.semibold)
                 }
-                Section {
+                AppSection {
                     TextField("confirm", text: $confirmation)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -32,11 +32,11 @@ struct DeleteDataConfirmationView: View {
                     Text("Enter the exact word confirm in lowercase.")
                 }
                 if let errorMessage {
-                    Section {
+                    AppSection {
                         Text(errorMessage).foregroundStyle(AppColor.destructiveText)
                     }
                 }
-                Section {
+                AppSection {
                     Button(role: .destructive) {
                         guard confirmation == "confirm", !isDeleting else { return }
                         isDeleting = true
@@ -47,7 +47,6 @@ struct DeleteDataConfirmationView: View {
                         HStack {
                             Text(title)
                             Spacer()
-                            if isDeleting { ProgressView().tint(.secondary) }
                         }
                     }
                     .disabled(confirmation != "confirm" || isDeleting)
@@ -57,7 +56,10 @@ struct DeleteDataConfirmationView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(isDeleting)
+                    Group {
+                        Button("Cancel") { dismiss() }.disabled(isDeleting)
+                    }
+                    .legacyToolbarControl()
                 }
             }
             .interactiveDismissDisabled(isDeleting)

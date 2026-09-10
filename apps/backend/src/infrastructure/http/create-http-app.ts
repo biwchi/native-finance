@@ -1,5 +1,7 @@
 import type { AppDataRepository } from "../../application/settings/app-data.repository.ts";
 import { createSettingsRouter } from "./routes/settings.router.ts";
+import { createSyncRouter } from "./routes/sync.router.ts";
+import type { SyncRepository } from "../../application/sync/sync.repository.ts";
 import type { DebtRepository } from "../../domain/debts/debt.ts";
 import { createDebtsRouter } from "./routes/debts.router.ts";
 import { cors } from "@elysiajs/cors";
@@ -31,6 +33,7 @@ import {
 } from "./routes/transactions.router.ts";
 
 export type HttpControllers = {
+  sync?: SyncRepository;
   appData?: AppDataRepository;
   debts?: DebtRepository;
   accounts: AccountController;
@@ -52,6 +55,7 @@ export function createHttpApp(
       status: "ok" as const,
     }))
     .group("/api/v1", (api) => api
+      .use(controllers.sync ? createSyncRouter(controllers.sync) : new Elysia())
       .use(controllers.appData ? createSettingsRouter(controllers.appData) : new Elysia())
       .use(controllers.debts ? createDebtsRouter(controllers.debts) : new Elysia())
       .use(createAccountsRouter(controllers.accounts))

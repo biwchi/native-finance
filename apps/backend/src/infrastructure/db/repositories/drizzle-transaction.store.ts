@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, ne } from "drizzle-orm";
+import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 
 import type { TransactionStore } from "../../../application/transactions/transaction.repository.ts";
 import type { Database } from "../client.ts";
@@ -6,6 +6,8 @@ import { debts } from "../schema/debt.schema.ts";
 import { categories } from "../schema/category.schema.ts";
 import { recurringSchedules } from "../schema/recurring-schedule.schema.ts";
 import { transactions } from "../schema/transaction.schema.ts";
+import { recurrenceExclusions } from "../schema/sync.schema.ts";
+import { occurrenceId } from "../../../domain/transactions/occurrence-id.ts";
 import {
   toTransactionResponse,
   transactionSelection,
@@ -41,7 +43,8 @@ export function createDrizzleTransactionStore(
     },
 
     async insertTransaction(values) {
-      const [transaction] = await client.insert(transactions).values(values).returning();
+      const scheduled = values.recurringScheduleId ? { id: occurrenceId(values.recurringScheduleId, values.occurredAt), scheduledFor: values.occurredAt } : {};
+      const [transaction] = await client.insert(transactions).values({ ...values, ...scheduled }).returning();
       if (!transaction) throw new Error("Transaction insert did not return a row");
       return transaction;
     },
@@ -51,12 +54,18 @@ export function createDrizzleTransactionStore(
     },
 
     async updateTransaction(id, values) {
+      if (values.recurringScheduleId) {
+        const [existing] = await client.select().from(transactions).where(eq(transactions.id, id));
+        if (existing && !existing.scheduledFor) Object.assign(values, { scheduledFor: values.occurredAt ?? existing.occurredAt });
+      }
       const [transaction] = await client.update(transactions).set(values)
         .where(eq(transactions.id, id)).returning({ id: transactions.id });
       return Boolean(transaction);
     },
 
     async deleteTransaction(id) {
+      const [record] = await client.select().from(transactions).where(eq(transactions.id, id));
+      if (record?.recurringScheduleId) await client.insert(recurrenceExclusions).values({ id: occurrenceId(record.recurringScheduleId, record.scheduledFor ?? record.occurredAt), scheduleId: record.recurringScheduleId, scheduledFor: record.scheduledFor ?? record.occurredAt }).onConflictDoNothing();
       const [transaction] = await client.delete(transactions)
         .where(eq(transactions.id, id)).returning({ id: transactions.id });
       return Boolean(transaction);
@@ -111,9 +120,18 @@ export function createDrizzleTransactionStore(
       ));
     },
 
+    async excludeOccurrence(scheduleId, scheduledFor) {
+      await client.insert(recurrenceExclusions).values({ id: occurrenceId(scheduleId, scheduledFor), scheduleId, scheduledFor }).onConflictDoNothing();
+    },
     async insertOccurrences(schedule, dates) {
       if (dates.length === 0) return;
-      await client.insert(transactions).values(dates.map((occurredAt) => ({
+      const skipped = new Set((await client.select().from(recurrenceExclusions).where(eq(recurrenceExclusions.scheduleId, schedule.id))).map((row) => row.scheduledFor.toISOString()));
+      const slot = (date: Date) => date.getTime() === schedule.nextOccurrenceAt?.getTime() ? schedule.nextScheduledFor ?? date : date;
+      const included = dates.filter((date) => !skipped.has(slot(date).toISOString()));
+      if (!included.length) return;
+      await client.insert(transactions).values(included.map((occurredAt) => ({
+        id: occurrenceId(schedule.id, slot(occurredAt)),
+        scheduledFor: slot(occurredAt),
         accountId: schedule.accountId,
         kind: schedule.kind,
         amount: schedule.amount,

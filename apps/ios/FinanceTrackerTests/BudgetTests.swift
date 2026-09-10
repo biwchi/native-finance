@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import FinanceTracker
 
 final class BudgetTests: XCTestCase {
@@ -26,7 +27,7 @@ final class BudgetTests: XCTestCase {
     }
 
     @MainActor
-    func testExchangeRateStoreRequestsReportingAndAccountCurrencies() async throws {
+    func testLegacyRateEndpointStillAcceptsCurrencyFilters() async throws {
         let response = ExchangeRateSnapshot(
             baseCurrency: "USD",
             reportingCurrency: "KZT",
@@ -44,20 +45,15 @@ final class BudgetTests: XCTestCase {
                 resolvingAgainstBaseURL: false
             )?.queryItems
             XCTAssertEqual(items?.first { $0.name == "reportingCurrency" }?.value, "KZT")
-            XCTAssertEqual(items?.first { $0.name == "currencies" }?.value, "EUR,KZT")
+            XCTAssertEqual(items?.first { $0.name == "currencies" }?.value, "EUR")
             return (200, try self.encode(response))
         }
         defer { session.invalidateAndCancel() }
 
-        let store = ExchangeRateStore(
-            apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
-        )
-        await store.load(currencies: ["EUR"], reportingCurrency: "KZT")
-
-        XCTAssertEqual(store.state, .loaded)
-        XCTAssertTrue(store.supports(["EUR", "KZT"], reportingCurrency: "KZT"))
+        let result = try await APIClient(baseURL: URL(string: "https://test.invalid")!, session: session).latestExchangeRates(currencies: ["EUR"], reportingCurrency: "KZT")
+        XCTAssertTrue(result.supports(["EUR", "KZT"], reportingCurrency: "KZT"))
         XCTAssertEqual(
-            store.convert(100, from: "EUR", to: "KZT"),
+            result.convert(100, from: "EUR", to: "KZT"),
             response.convert(100, from: "EUR", to: "KZT")
         )
     }
@@ -96,8 +92,75 @@ final class BudgetTests: XCTestCase {
         )
     }
 
+    func testSummaryUsesPoolsAndStandaloneLimitsWithoutCountingPooledCapsTwice() {
+        let poolID = UUID()
+        let saved = summaryBudget(groups: [
+            .init(id: poolID, name: "Needs", limit: "100.25", sortOrder: 0),
+            .init(id: UUID(), name: "Fun", limit: "50.50", sortOrder: 1)
+        ], assignments: [
+            .init(categoryId: UUID(), groupId: poolID, limit: "80"),
+            .init(categoryId: UUID(), groupId: poolID, limit: nil),
+            .init(categoryId: UUID(), groupId: nil, limit: "30.75")
+        ])
+
+        XCTAssertEqual(saved.summaryLimit(), Decimal(string: "181.50"))
+        XCTAssertNil(saved.summaryLimit(useAllocatedBudget: false))
+        XCTAssertNil(saved.monthlyLimit, "The calculated total must not become a saved monthly limit")
+    }
+
+    func testSummarySupportsASinglePoolOrCategoryAndKeepsEmptyBudgetsHidden() {
+        XCTAssertEqual(summaryBudget(groups: [
+            .init(id: UUID(), name: "Needs", limit: "100", sortOrder: 0)
+        ]).summaryLimit(), 100)
+        XCTAssertEqual(summaryBudget(assignments: [
+            .init(categoryId: UUID(), groupId: nil, limit: "75")
+        ]).summaryLimit(), 75)
+        XCTAssertNil(summaryBudget().summaryLimit())
+        XCTAssertNil(summaryBudget(assignments: [
+            .init(categoryId: UUID(), groupId: nil, limit: nil)
+        ]).summaryLimit())
+    }
+
+    func testExplicitMonthlyLimitTakesPrecedenceWithEitherSummaryPreference() {
+        let saved = summaryBudget(monthlyLimit: "500", groups: [
+            .init(id: UUID(), name: "Needs", limit: "100", sortOrder: 0)
+        ], assignments: [.init(categoryId: UUID(), groupId: nil, limit: "75")])
+        XCTAssertEqual(saved.summaryLimit(), 500)
+        XCTAssertEqual(saved.summaryLimit(useAllocatedBudget: false), 500)
+    }
+
     @MainActor
-    func testBudgetStoreSavesLayeredBudgetPayload() async throws {
+    func testAllocatedSummaryUsesConvertedAmountsAndRemainsMonthly() async throws {
+        let repository = try LocalTestData.repository()
+        let service = DailyRateService(repository: repository, transport: TestRateTransport())
+        await service.refreshIfNeeded(now: LocalTestData.now)
+        let rates = ExchangeRateStore(repository: repository, service: service)
+        let saved = summaryBudget(groups: [
+            .init(id: UUID(), name: "Needs", limit: "100", sortOrder: 0)
+        ], assignments: [.init(categoryId: UUID(), groupId: nil, limit: "25")])
+        let converted = saved.converted(to: "KZT", using: rates)
+        let limit = try XCTUnwrap(converted?.summaryLimit())
+        XCTAssertEqual(limit, 62_500)
+        let now = LocalTestData.now
+        let transactions = [transaction(accountID: UUID(), kind: .expense, amount: "70000", date: now)]
+        let monthly = DashboardInsights.calculate(transactions: transactions, month: now, now: now, monthlyLimit: limit)
+        XCTAssertTrue(monthly.hasBudget)
+        XCTAssertEqual(monthly.remaining, -7_500)
+        XCTAssertGreaterThan(try XCTUnwrap(monthly.budgetProgress), 1)
+        let weekly = DashboardInsights.calculate(transactions: transactions,
+            filter: FinanceDateFilter(preset: .week, anchor: now), now: now, monthlyLimit: limit)
+        XCTAssertFalse(weekly.hasBudget)
+    }
+
+    private func summaryBudget(
+        monthlyLimit: String? = nil, groups: [BudgetGroup] = [], assignments: [BudgetCategoryAssignment] = []
+    ) -> MonthlyBudget {
+        MonthlyBudget(id: UUID(), accountId: nil, currency: "USD", monthlyLimit: monthlyLimit,
+            groups: groups, categoryAssignments: assignments, createdAt: .now, updatedAt: .now)
+    }
+
+    @MainActor
+    func testLegacyBudgetEndpointAcceptsLayeredBudgetPayload() async throws {
         let accountID = UUID()
         let groupID = UUID()
         let categoryID = UUID()
@@ -111,7 +174,7 @@ final class BudgetTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/api/v1/budgets/monthly")
             let body = try XCTUnwrap(requestBody(request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            XCTAssertEqual(json["month"] as? String, "2026-09")
+            XCTAssertNil(json["month"])
             XCTAssertEqual(json["accountId"] as? String, accountID.uuidString)
             XCTAssertEqual(json["monthlyLimit"] as? String, "3800")
 
@@ -127,12 +190,9 @@ final class BudgetTests: XCTestCase {
         }
         defer { session.invalidateAndCancel() }
 
-        let store = BudgetStore(
-            apiClient: APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
-        )
-        let saved = try await store.saveBudget(
+        let client = APIClient(baseURL: URL(string: "https://test.invalid")!, session: session)
+        let saved = try await client.saveMonthlyBudget(
             MonthlyBudgetRequest(
-                month: "2026-09",
                 accountId: accountID,
                 currency: "USD",
                 monthlyLimit: "3800",
@@ -148,15 +208,79 @@ final class BudgetTests: XCTestCase {
         )
 
         XCTAssertEqual(saved, responseBudget)
-        XCTAssertEqual(store.budget, responseBudget)
-        XCTAssertEqual(store.state, .loaded)
+    }
+
+    @MainActor
+    func testOneBudgetMeasuresCurrentPreviousAndFutureMonthsIndependently() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let category = try repository.edit { try $0.saveCategory(name: "Food", kind: .expense, parentID: nil, icon: "tag", color: .blue) }
+        let groupID = UUID()
+        let store = BudgetStore(repository: repository)
+        let savedResult = try await store.saveBudget(MonthlyBudgetRequest(accountId: account.id, currency: "USD", monthlyLimit: "500", groups: [BudgetGroupRequest(id: groupID, name: "Needs", limit: "300")], categoryAssignments: [BudgetCategoryAssignmentRequest(categoryId: category.id, groupId: groupID, limit: "200")]))
+        let saved = try XCTUnwrap(savedResult)
+        for (time, amount) in [("2026-08-05T12:00:00Z", "250"), ("2026-09-05T12:00:00Z", "100")] {
+            _ = try repository.edit { try $0.saveTransaction(request: LocalTestData.transaction(account.id, amount: amount, categoryID: category.id, occurredAt: LocalTestData.date(time))) }
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        for (month, expected) in [("2026-08-15T12:00:00Z", Decimal(250)), ("2026-09-15T12:00:00Z", Decimal(100)), ("2026-10-15T12:00:00Z", Decimal(0))] {
+            let budget = try XCTUnwrap(store.budget(accountID: account.id))
+            XCTAssertEqual(budget.id, saved.id)
+            let expenses = FinanceOverviewData.transactions(repository.snapshot.detailedTransactions, in: LocalTestData.date(month), calendar: calendar)
+            XCTAssertEqual(expenses.reduce(Decimal.zero) { $0 + (Decimal(string: $1.amount) ?? 0) }, expected)
+            XCTAssertEqual(BudgetLimitProgress.pools(budget: budget, transactions: expenses).first?.remaining, 300 - expected)
+            XCTAssertEqual(BudgetLimitProgress.categories(budget: budget, transactions: expenses, categories: [category]).first?.remaining, 200 - expected)
+        }
+        XCTAssertEqual(repository.snapshot.budgets.count, 1)
+    }
+
+    @MainActor
+    func testBudgetOverviewAndSettingsRenderForPreviousMonths() async throws {
+        let saved = budget(accountID: UUID(), groupID: UUID(), categoryID: UUID())
+        let repository = try LocalTestData.repository()
+        let budgets = BudgetStore(repository: repository)
+        _ = try await budgets.saveBudget(MonthlyBudgetRequest(accountId: nil, currency: "USD", monthlyLimit: saved.monthlyLimit, groups: [], categoryAssignments: []))
+        let accountStore = AccountStore.preview(accounts: [])
+        let transactions = TransactionStore.preview(transactions: [])
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "GlobalBudgetRenderTests"))
+        defaults.set("USD", forKey: AppPreferences.defaultCurrencyKey)
+        defer { defaults.removePersistentDomain(forName: "GlobalBudgetRenderTests") }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for scheme in [ColorScheme.light, .dark] {
+            for (name, page) in [
+                ("August", AnyView(BudgetOverviewView(initialMonth: LocalTestData.date("2026-08-15T12:00:00Z")))),
+                ("September", AnyView(BudgetOverviewView(initialMonth: LocalTestData.date("2026-09-15T12:00:00Z")))),
+                ("Settings", AnyView(BudgetSettingsView(accountID: nil, currency: "USD", budget: budgets.budget(accountID: nil)).navigationTitle("Edit budget")))
+            ] {
+                let content = NavigationStack { page }
+                    .environmentObject(accountStore).environmentObject(transactions).environmentObject(budgets)
+                    .defaultAppStorage(defaults).preferredColorScheme(scheme)
+                let controller = UIHostingController(rootView: content)
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                controller.view.frame = window.bounds
+                try await Task.sleep(for: .milliseconds(300))
+                controller.view.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                    XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "GlobalBudget-\(name)-\(scheme)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+        }
     }
 
     private func budget(accountID: UUID, groupID: UUID, categoryID: UUID) -> MonthlyBudget {
         MonthlyBudget(
             id: UUID(),
             accountId: accountID,
-            month: "2026-09",
             currency: "USD",
             monthlyLimit: "3800.0000",
             groups: [BudgetGroup(id: groupID, name: "Needs", limit: "500.0000", sortOrder: 0)],

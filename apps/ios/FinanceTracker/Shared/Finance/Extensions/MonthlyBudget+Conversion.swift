@@ -64,7 +64,6 @@ extension MonthlyBudget {
         return MonthlyBudget(
             id: id,
             accountId: accountId,
-            month: month,
             currency: currency,
             monthlyLimit: convertedLimit,
             groups: convertedGroups,

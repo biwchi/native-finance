@@ -10,7 +10,7 @@ export function createFrankfurterExchangeRateProvider(
   return async (quoteCurrencies) => {
     const url = new URL("/v2/rates", baseUrl);
     url.searchParams.set("base", canonicalBaseCurrency);
-    url.searchParams.set("quotes", quoteCurrencies.join(","));
+    if (quoteCurrencies.length) url.searchParams.set("quotes", quoteCurrencies.join(","));
 
     const response = await request(url, {
       headers: { Accept: "application/json" },
@@ -30,7 +30,7 @@ export function createFrankfurterExchangeRateProvider(
       const rate = typeof value.rate === "number" ? value.rate : Number.NaN;
       if (
         base !== canonicalBaseCurrency ||
-        !requested.has(quote) ||
+        (requested.size > 0 && !requested.has(quote)) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
         !Number.isFinite(rate) ||
         rate <= 0
@@ -40,7 +40,7 @@ export function createFrankfurterExchangeRateProvider(
       return [{ quoteCurrency: quote, rate: rate.toString(), effectiveDate: date }];
     });
 
-    if (requested.size !== new Set(parsed.map((rate) => rate.quoteCurrency)).size) {
+    if (parsed.length === 0 || requested.size > 0 && requested.size !== new Set(parsed.map((rate) => rate.quoteCurrency)).size) {
       throw new Error("Frankfurter did not return every requested currency");
     }
     return parsed;

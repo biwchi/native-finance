@@ -5,7 +5,7 @@ extension BudgetStatus {
         switch self {
         case .onTrack: AppColor.accent
         case .watchSpending, .nearLimit: AppColor.warning
-        case .overLimit: AppColor.destructive
+        case .overLimit: AppColor.warningText
         }
     }
 }

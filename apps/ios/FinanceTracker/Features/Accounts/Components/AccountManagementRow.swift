@@ -26,9 +26,7 @@ struct AccountManagementRow: View {
 
             Spacer()
 
-            if isWorking {
-                ProgressView()
-            } else if isEditing {
+            if isEditing {
                 AppIcon("nav-arrow-right", size: 12)
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)

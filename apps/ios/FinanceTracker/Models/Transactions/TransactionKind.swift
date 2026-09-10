@@ -1,6 +1,6 @@
 import Foundation
 
-enum TransactionKind: String, Codable, CaseIterable, Identifiable {
+enum TransactionKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case expense
     case income
     case debt

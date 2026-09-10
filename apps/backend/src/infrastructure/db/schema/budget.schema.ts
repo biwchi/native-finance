@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
   check,
-  date,
   index,
   integer,
   numeric,
@@ -20,18 +19,17 @@ export const budgetPlans = pgTable(
   {
     id: uuid().defaultRandom().primaryKey(),
     accountId: uuid().references(() => accounts.id, { onDelete: "cascade" }),
-    month: date({ mode: "string" }).notNull(),
     currency: varchar({ length: 3 }).notNull(),
     monthlyLimit: numeric({ precision: 19, scale: 4 }),
     createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("budget_plans_account_month_unique")
-      .on(table.accountId, table.month)
+    uniqueIndex("budget_plans_account_unique")
+      .on(table.accountId)
       .where(sql`${table.accountId} is not null`),
-    uniqueIndex("budget_plans_all_accounts_month_unique")
-      .on(table.month)
+    uniqueIndex("budget_plans_all_accounts_unique")
+      .on(sql`(true)`)
       .where(sql`${table.accountId} is null`),
     check(
       "budget_plans_monthly_limit_positive",

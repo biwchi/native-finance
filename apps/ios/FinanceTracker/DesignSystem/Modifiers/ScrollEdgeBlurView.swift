@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-@available(iOS 26.0, *)
-struct FinanceToolbarBlurView: UIViewRepresentable {
+struct ScrollEdgeBlurView: UIViewRepresentable {
     let transitionHeight: CGFloat
     var edge: VerticalEdge = .top
 

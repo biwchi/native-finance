@@ -5,7 +5,6 @@ struct BudgetSettingsView: View {
     @EnvironmentObject private var budgetStore: BudgetStore
     @EnvironmentObject private var transactionStore: TransactionStore
 
-    let month: Date
     let accountID: UUID?
     let currency: String
     let budget: MonthlyBudget?
@@ -18,12 +17,10 @@ struct BudgetSettingsView: View {
     @State private var errorMessage: String?
 
     init(
-        month: Date,
         accountID: UUID?,
         currency: String,
         budget: MonthlyBudget?
     ) {
-        self.month = month
         self.accountID = accountID
         self.currency = currency
         self.budget = budget
@@ -61,13 +58,13 @@ struct BudgetSettingsView: View {
     }
 
     var body: some View {
-        Form {
+        AppForm {
             monthlyLimitSection
             groupsSection
             categoryLimitsSection
 
             if budget != nil {
-                Section {
+                AppSection {
                     Button("Clear budget", role: .destructive) {
                         hasMonthlyLimit = false
                         monthlyLimit = ""
@@ -77,6 +74,8 @@ struct BudgetSettingsView: View {
                 }
             }
         }
+        .animateListChanges(value: groups.map(\.id))
+        .animateListChanges(value: limitedAssignments.map(\.id))
         .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .disabled(isSaving)
         .scrollDismissesKeyboard(.interactively)
@@ -95,7 +94,7 @@ struct BudgetSettingsView: View {
     }
 
     private var monthlyLimitSection: some View {
-        Section("Monthly budget") {
+        AppSection {
             Toggle(isOn: $hasMonthlyLimit.animation(.snappy)) {
                 Label("Monthly limit", icon: "calendar")
             }
@@ -108,11 +107,15 @@ struct BudgetSettingsView: View {
                 )
                 .transition(.opacity)
             }
+        } header: {
+            Text("Monthly budget")
+        } footer: {
+            Text("These limits apply to every month. Changes also apply when viewing previous months.")
         }
     }
 
     private var groupsSection: some View {
-        Section("Spending pools") {
+        AppSection("Spending pools") {
             ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                 groupRow(group, index: index)
             }
@@ -149,17 +152,16 @@ struct BudgetSettingsView: View {
         } label: {
             BudgetGroupRow(name: group.name, formattedLimit: money(limit), tint: tint)
         }
-        .swipeActions {
-            Button(role: .destructive) {
+        .circleSwipeActions {
+            CircleSwipeAction.delete {
                 removeGroup(group)
-            } label: {
-                Label("Delete", icon: "trash")
+                return true
             }
         }
     }
 
     private var categoryLimitsSection: some View {
-        Section("Category limits") {
+        AppSection("Category limits") {
             ForEach(limitedAssignments) { reference in
                 categoryLimitRow(reference)
             }
@@ -205,17 +207,16 @@ struct BudgetSettingsView: View {
                 formattedLimit: money(BudgetAmountParser.parse(reference.limit) ?? 0)
             )
         }
-        .swipeActions {
-            Button(role: .destructive) {
+        .circleSwipeActions {
+            CircleSwipeAction.delete {
                 removeLimit(reference)
-            } label: {
-                Label("Delete", icon: "trash")
+                return true
             }
         }
     }
 
     private var saveBar: some View {
-        PrimaryActionButton("Save budget", isLoading: isSaving) {
+        PrimaryActionButton("Save budget") {
             Task { await save() }
         }
         .disabled(isSaving)
@@ -331,6 +332,7 @@ struct BudgetSettingsView: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
         do {
             let request = try makeRequest()
             isSaving = true
@@ -407,7 +409,6 @@ struct BudgetSettingsView: View {
         }
 
         return MonthlyBudgetRequest(
-            month: BudgetMonth.key(for: month),
             accountId: accountID,
             currency: currency,
             monthlyLimit: totalLimit,

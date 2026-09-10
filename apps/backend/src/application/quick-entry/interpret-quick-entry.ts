@@ -1,3 +1,5 @@
+import type { Account } from "../../domain/accounts/account.ts";
+import type { Category } from "../../domain/categories/category.ts";
 import type { AccountRepository } from "../accounts/account.repository.ts";
 import type { CategoryRepository } from "../categories/category.repository.ts";
 import type { ExchangeRateProvider } from "../exchange-rates/exchange-rate-provider.ts";
@@ -65,6 +67,10 @@ export async function interpretQuickEntry(
     defaultAccountId: string;
     locale: string;
     timeZone: string;
+    context?: {
+      accounts: Pick<Account, "id" | "name" | "type" | "currency" | "icon" | "iconColor">[];
+      categories: (Pick<Category, "id" | "name" | "kind"> & Partial<Pick<Category, "parentId" | "icon" | "color" | "examples">>)[];
+    };
   },
   dependencies: {
     accounts: AccountRepository;
@@ -78,16 +84,16 @@ export async function interpretQuickEntry(
   const text = input.text.trim();
   if (!text) return error("empty_quick_entry", "Quick entry cannot be empty");
 
-  const [accounts, categories] = await Promise.all([
-    dependencies.accounts.list(),
-    dependencies.categories.list(),
-  ]);
+  const referenceNow = (dependencies.now ?? (() => new Date()))();
+  const [accounts, categories]: [Account[], Category[]] = input.context ? [
+    input.context.accounts.map((a, sortOrder) => ({ ...a, id: canonicalId(a.id), currency: normalizeCurrency(a.currency), sortOrder, createdAt: referenceNow, updatedAt: referenceNow })),
+    input.context.categories.map((c, sortOrder) => ({ icon: null, color: null, examples: [], ...c, parentId: c.parentId ? canonicalId(c.parentId) : null, id: canonicalId(c.id), systemKey: null, isSystem: false, sortOrder, createdAt: referenceNow, updatedAt: referenceNow })),
+  ] : await Promise.all([dependencies.accounts.list(), dependencies.categories.list()]);
   const defaultAccount = accounts.find(
     (account) => canonicalId(account.id) === canonicalId(input.defaultAccountId),
   );
   if (!defaultAccount) return error("account_not_found", "Default account not found");
 
-  const referenceNow = (dependencies.now ?? (() => new Date()))();
   let interpreted;
   try {
     interpreted = await dependencies.interpreter.interpret({

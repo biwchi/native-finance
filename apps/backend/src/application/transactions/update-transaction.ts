@@ -41,7 +41,7 @@ export async function updateTransaction(
     currency: existing.accountId === input.transaction.accountId
       ? existing.currency
       : prepared.value.values.currency,
-    updatedAt: new Date(),
+    updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime())),
   };
 
   const scheduleId = await dependencies.transactions.atomically(async (store) => {

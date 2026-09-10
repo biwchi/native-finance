@@ -33,6 +33,7 @@ export const recurringSchedules = pgTable(
     frequency: recurrenceFrequency().notNull(),
     startAt: timestamp({ withTimezone: true }).notNull(),
     lastOccurrenceAt: timestamp({ withTimezone: true }).notNull(),
+    nextScheduledFor: timestamp("next_scheduled_for", { withTimezone: true }),
     nextOccurrenceAt: timestamp({ withTimezone: true }),
     endAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),

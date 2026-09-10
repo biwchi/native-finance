@@ -3,497 +3,124 @@ import Foundation
 
 @MainActor
 final class TransactionStore: ObservableObject {
-    enum State: Equatable {
-        case idle
-        case loading
-        case loaded
-        case failed(String)
-    }
-
-    @Published private(set) var state: State = .idle
+    enum State: Equatable { case idle, loading, loaded, failed(String) }
+    @Published private(set) var state: State = .loaded
     @Published private(set) var transactions: [FinanceTransaction] = []
     @Published private(set) var allTransactions: [FinanceTransaction] = []
-    @Published private(set) var upcomingState: State = .idle
+    @Published private(set) var upcomingState: State = .loaded
     @Published private(set) var upcomingTransactions: [UpcomingTransaction] = []
     @Published private(set) var allUpcomingTransactions: [UpcomingTransaction] = []
     @Published private(set) var categories: [TransactionCategory] = []
     @Published private(set) var isLoadingCategories = false
     @Published private(set) var categoryErrorMessage: String?
-
     @Published private(set) var debts: [Debt] = []
     @Published private(set) var debtErrorMessage: String?
     @Published private(set) var isLoadingDebts = false
-
-    var debtTransactions: [FinanceTransaction] {
-        allTransactions.filter { $0.kind == .debt }
-    }
-
-    func outstandingDebtInCurrency(_ currency: String) -> Decimal? {
-        var total = Decimal.zero
-        for transaction in debtTransactions where transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
-            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-            total += amount
-        }
-        return total
-    }
-
-    func outstandingDebt(currency: String, rates: ExchangeRateSnapshot?) -> Decimal? {
-        guard state == .loaded, hasLoadedTransactions else { return nil }
-        var total = Decimal.zero
-        for transaction in debtTransactions {
-            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-            if transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
-                total += amount
-            } else {
-                guard let converted = rates?.convert(amount, from: transaction.currency, to: currency) else { return nil }
-                total += converted
-            }
-        }
-        return total
-    }
-
-    func loadDebts() async {
-        isLoadingDebts = true
-        debtErrorMessage = nil
-        defer { isLoadingDebts = false }
-        do {
-            debts = try await apiClient.debts()
-        } catch {
-            debtErrorMessage = error.localizedDescription
-        }
-    }
-
-    func createDebt(name: String, icon: String = "user", color: CategoryColor = .blue) async throws -> Debt {
-        let debt = try await apiClient.createDebt(name: name.trimmingCharacters(in: .whitespacesAndNewlines), icon: icon, color: color)
-        debts.append(debt)
-        debts.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return debt
-    }
-
-    func updateDebt(_ existing: Debt, name: String, icon: String, color: CategoryColor) async throws -> Debt {
-        let debt = try await apiClient.updateDebt(id: existing.id,
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines), icon: icon, color: color)
-        debts.removeAll { $0.id == debt.id }
-        debts.append(debt)
-        debts.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        for index in allTransactions.indices where allTransactions[index].debtId == debt.id || allTransactions[index].debt?.id == debt.id {
-            allTransactions[index].debt = debt
-        }
-        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
-        return debt
-    }
-
+    private let repository: LocalFinanceRepository
     private let apiClient: APIClient
     private var currentAccountID: UUID?
-    private var upcomingRequestID = UUID()
-    private var hasLoadedCategories = false
-    private var hasLoadedTransactions = false
-
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
+    private var isPreview = false
+    private var subscription: AnyCancellable?
+    init(apiClient: APIClient = APIClient(), repository: LocalFinanceRepository? = nil) {
+        self.apiClient = apiClient; self.repository = repository ?? .shared
+        apply(self.repository.snapshot)
+        subscription = self.repository.$snapshot.sink { [weak self] in self?.apply($0) }
     }
-
-#if DEBUG
-    static func preview(
-        transactions: [FinanceTransaction],
-        upcomingTransactions: [UpcomingTransaction] = []
-    ) -> TransactionStore {
-        let store = TransactionStore()
-        store.transactions = transactions
-        store.allTransactions = transactions
-        store.hasLoadedTransactions = true
-        store.categories = Array(Set(transactions.compactMap(\.category)))
-        store.hasLoadedCategories = true
-        store.state = .loaded
-        store.upcomingTransactions = upcomingTransactions
-        store.allUpcomingTransactions = upcomingTransactions
-        store.upcomingState = .loaded
-        return store
+    private func apply(_ snapshot: LocalSnapshot) {
+        allTransactions = snapshot.detailedTransactions
+        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
+        categories = Array(snapshot.categories.values)
+        debts = snapshot.debts.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        allUpcomingTransactions = snapshot.upcoming(now: .now)
+        upcomingTransactions = allUpcomingTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
     }
-#endif
-
-    func loadTransactions(accountID: UUID?) async {
-        upcomingRequestID = UUID()
-        upcomingState = .loading
-        if currentAccountID != accountID {
-            upcomingTransactions = []
-        }
-        currentAccountID = accountID
-        state = .loading
-
-        do {
-            // Keep every account available for the balance picker while the dashboard
-            // displays only the selected account's transactions.
-            let transactions = try await apiClient.transactions(accountID: nil)
-            guard !Task.isCancelled, currentAccountID == accountID else { return }
-
-            allTransactions = transactions
-            hasLoadedTransactions = true
-            self.transactions = transactions.filter { accountID == nil || $0.accountId == accountID }
-            state = .loaded
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, currentAccountID == accountID else { return }
-            state = .failed(error.localizedDescription)
-        }
-
-        await loadUpcomingTransactions(accountID: accountID)
-    }
-
-    func loadUpcomingTransactions(accountID: UUID?) async {
-        let requestID = UUID()
-        upcomingRequestID = requestID
-        upcomingState = .loading
-
-        do {
-            let upcoming = try await apiClient.upcomingTransactions(accountID: nil)
-            guard !Task.isCancelled, upcomingRequestID == requestID else { return }
-            allUpcomingTransactions = upcoming
-            upcomingTransactions = upcoming.filter { accountID == nil || $0.accountId == accountID }
-            upcomingState = .loaded
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, upcomingRequestID == requestID else { return }
-            upcomingState = .failed(error.localizedDescription)
-        }
-    }
-
-    func loadCategories(force: Bool = false) async {
-        guard force || !hasLoadedCategories else { return }
-
-        isLoadingCategories = true
-        categoryErrorMessage = nil
-        defer { isLoadingCategories = false }
-
-        do {
-            categories = try await apiClient.categories()
-            hasLoadedCategories = true
-        } catch {
-            hasLoadedCategories = false
-            categoryErrorMessage = error.localizedDescription
-        }
-    }
-
+    func transactions(for accountID: UUID?) -> [FinanceTransaction] { allTransactions.filter { accountID == nil || $0.accountId == accountID } }
+    func upcomingTransactions(for accountID: UUID?) -> [UpcomingTransaction] { allUpcomingTransactions.filter { accountID == nil || $0.accountId == accountID } }
+    func loadTransactions(accountID: UUID?) async { currentAccountID = accountID; if isPreview { transactions = transactions(for: accountID); return }; apply(repository.snapshot) }
+    func loadUpcomingTransactions(accountID: UUID?) async { currentAccountID = accountID; if isPreview { upcomingTransactions = upcomingTransactions(for: accountID); return }; apply(repository.snapshot) }
+    func loadCategories(force: Bool = false) async { guard !isPreview else { return }; categories = Array(repository.snapshot.categories.values) }
+    func loadDebts() async { guard !isPreview else { return }; apply(repository.snapshot) }
     func categories(for kind: TransactionKind) -> [TransactionCategory] {
-        categories
-            .filter { $0.kind == kind }
-            .sorted {
-                let leftOrder = $0.sortOrder ?? 1_000
-                let rightOrder = $1.sortOrder ?? 1_000
-                if leftOrder != rightOrder {
-                    return leftOrder < rightOrder
-                }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+        categories.filter { $0.kind == kind }.sorted { ($0.sortOrder ?? 1000, $0.name.lowercased()) < ($1.sortOrder ?? 1000, $1.name.lowercased()) }
     }
-
-    func rootCategories(for kind: TransactionKind) -> [TransactionCategory] {
-        categories(for: kind).filter { $0.parentId == nil }
-    }
-
-    func subcategories(of category: TransactionCategory) -> [TransactionCategory] {
-        categories(for: category.kind).filter { $0.parentId == category.id }
-    }
-
+    func rootCategories(for kind: TransactionKind) -> [TransactionCategory] { categories(for: kind).filter { $0.parentId == nil } }
+    func subcategories(of category: TransactionCategory) -> [TransactionCategory] { categories(for: category.kind).filter { $0.parentId == category.id } }
     func categoryPath(_ category: TransactionCategory) -> String {
-        guard let parentID = category.parentId,
-              let parent = categories.first(where: { $0.id == parentID }) else {
-            return category.name
-        }
+        guard let parent = categories.first(where: { $0.id == category.parentId }) else { return category.name }
         return "\(parent.name) › \(category.name)"
     }
-
+    func createDebt(name: String, icon: String = "user", color: CategoryColor = .blue) async throws -> Debt { try repository.edit { try $0.saveDebt(name: name, icon: icon, color: color) } }
+    func updateDebt(_ debt: Debt, name: String, icon: String, color: CategoryColor) async throws -> Debt { try repository.edit { try $0.saveDebt(id: debt.id, name: name, icon: icon, color: color) } }
     @discardableResult
-    func createCategory(
-        name: String,
-        kind: TransactionKind,
-        parentID: UUID? = nil,
-        icon: String = "label",
-        color: CategoryColor = .gray
-    ) async throws -> TransactionCategory {
-        let category = try await apiClient.createCategory(
-            CreateCategoryRequest(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                kind: kind,
-                parentId: parentID,
-                icon: icon,
-                color: color
-            )
-        )
-
-        categories.append(category)
-        hasLoadedCategories = true
-        return category
+    func createCategory(name: String, kind: TransactionKind, parentID: UUID? = nil, icon: String = "label", color: CategoryColor = .gray) async throws -> TransactionCategory {
+        try repository.edit { try $0.saveCategory(name: name, kind: kind, parentID: parentID, icon: icon, color: color) }
     }
-
     @discardableResult
-    func updateCategory(
-        _ existingCategory: TransactionCategory,
-        name: String,
-        parentID: UUID?,
-        icon: String,
-        color: CategoryColor
-    ) async throws -> TransactionCategory {
-        let category = try await apiClient.updateCategory(
-            id: existingCategory.id,
-            with: UpdateCategoryRequest(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                parentId: parentID,
-                icon: icon,
-                color: color
-            )
-        )
-
-        if let index = categories.firstIndex(where: { $0.id == category.id }) {
-            categories[index] = category
-        }
-        allTransactions = allTransactions.map { transaction in
-            guard transaction.category?.id == category.id else { return transaction }
-            return transaction.replacingCategory(with: category)
-        }
-        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
-        for index in upcomingTransactions.indices where upcomingTransactions[index].category?.id == category.id {
-            upcomingTransactions[index].category = category
-        }
-        for index in allUpcomingTransactions.indices where allUpcomingTransactions[index].category?.id == category.id {
-            allUpcomingTransactions[index].category = category
-        }
-        return category
+    func updateCategory(_ category: TransactionCategory, name: String, parentID: UUID?, icon: String, color: CategoryColor) async throws -> TransactionCategory {
+        try repository.edit { try $0.saveCategory(id: category.id, name: name, kind: category.kind, parentID: parentID, icon: icon, color: color) }
     }
-
-    func deleteCategory(_ category: TransactionCategory) async throws {
-        let removedIDs = Set(
-            [category.id] + categories
-                .filter { $0.parentId == category.id }
-                .map(\.id)
-        )
-        _ = try await apiClient.deleteCategory(id: category.id)
-        categories.removeAll { removedIDs.contains($0.id) }
-        allTransactions = allTransactions.map { transaction in
-            guard let categoryID = transaction.category?.id,
-                  removedIDs.contains(categoryID) else { return transaction }
-            return transaction.replacingCategory(with: nil)
-        }
-        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
-        for index in upcomingTransactions.indices {
-            if let categoryID = upcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
-                upcomingTransactions[index].category = nil
-            }
-        }
-        for index in allUpcomingTransactions.indices {
-            if let categoryID = allUpcomingTransactions[index].category?.id, removedIDs.contains(categoryID) {
-                allUpcomingTransactions[index].category = nil
-            }
-        }
+    func deleteCategory(_ category: TransactionCategory) async throws { try repository.edit { try $0.deleteCategory(category) } }
+    func categorySuggestions(description: String, kind: TransactionKind) async throws -> [CategorySuggestion] { LocalHistoryMatcher.suggestions(description: description, kind: kind, transactions: allTransactions) }
+    @discardableResult
+    func createTransaction(_ request: TransactionRequest) async throws -> FinanceTransaction { try repository.edit { try $0.saveTransaction(request: request) } }
+    @discardableResult
+    func updateTransaction(id: UUID, with request: TransactionRequest) async throws -> FinanceTransaction { try repository.edit { try $0.saveTransaction(id: id, request: request) } }
+    @discardableResult
+    func createTransfer(_ request: TransferRequest) async throws -> TransferResponse { try repository.edit { try $0.transfer(request) } }
+    func updateRecurringTransaction(_ transaction: UpcomingTransaction, with request: TransactionRequest) async throws { try repository.edit { try $0.updateUpcoming(transaction, request: request) } }
+    func deleteUpcomingTransaction(_ transaction: UpcomingTransaction, action: RecurringDeletionAction) async throws { try repository.edit { try $0.deleteOccurrence(scheduleID: transaction.id, date: transaction.occurredAt, action: action) } }
+    func deleteTransaction(_ transaction: FinanceTransaction, action: RecurringDeletionAction = .occurrence) async throws { try repository.edit { try $0.deleteTransaction(transaction, action: action) } }
+    func interpretQuickEntry(text: String, defaultAccountID: UUID, locale: String = Locale.current.identifier, timeZone: String = TimeZone.current.identifier) async throws -> QuickEntryReviewPresentation {
+        try repository.saveValue(text, key: "quickEntryText")
+        let epoch = try repository.value(Int.self, key: "localEpoch") ?? 0
+        let response = try await apiClient.interpretQuickEntry(QuickEntryRequest(text: text, defaultAccountId: defaultAccountID, locale: locale, timeZone: timeZone,
+            context: QuickEntryLocalContext(accounts: repository.snapshot.sortedAccounts, categories: categories)))
+        guard (try repository.value(Int.self, key: "localEpoch") ?? 0) == epoch else { throw CancellationError() }
+        let presentation = QuickEntryReviewPresentation(prompt: text, drafts: response.transactions.map { payload in QuickEntryDraft(payload: payload, category: categories.first { $0.id == payload.categoryId }) }, unparsedText: response.unparsedText)
+        try repository.saveValue(presentation, key: "quickEntryReview"); return presentation
     }
-
-    func categorySuggestions(
-        description: String,
-        kind: TransactionKind
-    ) async throws -> [CategorySuggestion] {
-        try await apiClient
-            .categorySuggestions(description: description, kind: kind)
-            .suggestions
-    }
-
-    func interpretQuickEntry(
-        text: String,
-        defaultAccountID: UUID,
-        locale: String = Locale.current.identifier,
-        timeZone: String = TimeZone.current.identifier
-    ) async throws -> QuickEntryReviewPresentation {
-        await loadCategories()
-        if let categoryErrorMessage {
-            throw QuickEntryStoreError.categoriesUnavailable(categoryErrorMessage)
-        }
-
-        let response = try await apiClient.interpretQuickEntry(
-            QuickEntryRequest(
-                text: text,
-                defaultAccountId: defaultAccountID,
-                locale: locale,
-                timeZone: timeZone
-            )
-        )
-        let drafts = response.transactions.map { payload in
-            QuickEntryDraft(
-                payload: payload,
-                category: categories.first { $0.id == payload.categoryId }
-            )
-        }
-        return QuickEntryReviewPresentation(
-            prompt: text,
-            drafts: drafts,
-            unparsedText: response.unparsedText
-        )
-    }
-
     @discardableResult
     func commitQuickEntryDrafts(_ drafts: [QuickEntryDraft]) async throws -> Int {
-        let items = try drafts.map { draft -> TransactionBatchItem in
-            if draft.mode == .transfer {
-                guard let destinationAccountID = draft.destinationAccountId else {
-                    throw QuickEntryStoreError.invalidTransfer
+        try repository.edit { editor in
+            guard !drafts.isEmpty, drafts.count <= 100 else { throw LocalDataError(message: "Review between 1 and 100 transactions.") }
+            for draft in drafts {
+                if draft.mode == .transfer {
+                    guard let destinationID = draft.destinationAccountId else { throw LocalDataError(message: "Choose a destination for every transfer.") }
+                    _ = try editor.transfer(TransferRequest(fromAccountId: draft.accountId, toAccountId: destinationID, amount: draft.amount, merchant: draft.merchant, payee: draft.payee, note: draft.note, occurredAt: draft.occurredAt))
+                } else {
+                    _ = try editor.saveTransaction(request: TransactionRequest(accountId: draft.accountId, kind: draft.kind, amount: draft.amount, categoryId: draft.category?.id,
+                        merchant: draft.merchant, payee: draft.payee, note: draft.note, occurredAt: draft.occurredAt,
+                        recurrence: draft.isRecurring ? RecurrenceRequest(frequency: draft.recurrenceFrequency, endAt: draft.recurrenceEndAt) : nil))
                 }
-                return .transfer(TransferRequest(
-                    fromAccountId: draft.accountId,
-                    toAccountId: destinationAccountID,
-                    amount: Self.normalizedAmount(draft.amount),
-                    merchant: draft.merchant,
-                    payee: draft.payee,
-                    note: draft.note,
-                    occurredAt: draft.occurredAt
-                ))
             }
-            return .transaction(TransactionRequest(
-                accountId: draft.accountId,
-                kind: draft.kind,
-                amount: Self.normalizedAmount(draft.amount),
-                categoryId: draft.category?.id,
-                merchant: draft.merchant,
-                payee: draft.payee,
-                note: draft.note,
-                occurredAt: draft.occurredAt,
-                recurrence: draft.isRecurring ? RecurrenceRequest(
-                    frequency: draft.recurrenceFrequency,
-                    endAt: draft.recurrenceEndAt
-                ) : nil
-            ))
+            editor.metadataChanges["quickEntryReview"] = .null
+            editor.metadataChanges["quickEntryText"] = .string("")
         }
-        let result = try await apiClient.createTransactionBatch(
-            TransactionBatchRequest(transactions: items)
-        )
-        await loadTransactions(accountID: currentAccountID)
-        return result.created
+        return drafts.count
     }
-
-    @discardableResult
-    func createTransaction(
-        _ request: TransactionRequest
-    ) async throws -> FinanceTransaction {
-        let transaction = try await apiClient.createTransaction(request)
-        if request.recurrence != nil {
-            await loadTransactions(accountID: currentAccountID)
-        } else {
-            apply(transaction)
+    func savedQuickEntryText() -> String { (try? repository.value(String.self, key: "quickEntryText")) ?? "" }
+    func savedQuickEntryReview() -> QuickEntryReviewPresentation? { try? repository.value(QuickEntryReviewPresentation.self, key: "quickEntryReview") }
+    func saveQuickEntryText(_ text: String) throws { try repository.saveValue(text, key: "quickEntryText") }
+    func saveQuickEntryReview(_ review: QuickEntryReviewPresentation?) throws { try repository.saveValue(review, key: "quickEntryReview") }
+    var debtTransactions: [FinanceTransaction] { allTransactions.filter { $0.kind == .debt } }
+    func outstandingDebtInCurrency(_ currency: String) -> Decimal? {
+        total(debtTransactions.filter { $0.currency.caseInsensitiveCompare(currency) == .orderedSame }, currency: currency, rates: nil, signed: false)
+    }
+    func outstandingDebt(currency: String, rates: ExchangeRateSnapshot?) -> Decimal? { total(debtTransactions, currency: currency, rates: rates, signed: false) }
+    func balance(accountID: UUID?, currency: String, rates: ExchangeRateSnapshot?) -> Decimal? { total(allTransactions.filter { accountID == nil || $0.accountId == accountID }, currency: currency, rates: rates, signed: true) }
+    private func total(_ records: [FinanceTransaction], currency: String, rates: ExchangeRateSnapshot?, signed: Bool) -> Decimal? {
+        var result = Decimal.zero
+        for t in records {
+            guard let value = Decimal(string: t.amount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+            guard let converted = t.currency.caseInsensitiveCompare(currency) == .orderedSame ? value : rates?.convert(value, from: t.currency, to: currency) else { return nil }
+            result += signed && t.kind != .income ? -converted : converted
         }
-        return transaction
+        return result
     }
-
-    @discardableResult
-    func createTransfer(_ request: TransferRequest) async throws -> TransferResponse {
-        let transfer = try await apiClient.createTransfer(request)
-        apply(transfer.source)
-        apply(transfer.destination)
-        return transfer
+#if DEBUG
+    static func preview(transactions: [FinanceTransaction], upcomingTransactions: [UpcomingTransaction] = []) -> TransactionStore {
+        let store = TransactionStore(); store.subscription = nil; store.isPreview = true; store.debts = Array(Dictionary(transactions.compactMap { $0.debt }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }).values); store.transactions = transactions; store.allTransactions = transactions
+        store.categories = Array(Set(transactions.compactMap(\.category))); store.upcomingTransactions = upcomingTransactions; store.allUpcomingTransactions = upcomingTransactions; return store
     }
-
-    @discardableResult
-    func updateTransaction(id: UUID, with request: TransactionRequest) async throws -> FinanceTransaction {
-        let wasRecurring = transactions.first { $0.id == id }?.recurrence != nil
-        let transaction = try await apiClient.updateTransaction(id: id, with: request)
-        if wasRecurring || request.recurrence != nil {
-            await loadTransactions(accountID: currentAccountID)
-        } else {
-            apply(transaction)
-        }
-        return transaction
-    }
-
-    func updateRecurringTransaction(_ transaction: UpcomingTransaction, with request: TransactionRequest) async throws {
-        _ = try await apiClient.updateRecurringTransaction(transaction, with: request)
-        await loadTransactions(accountID: currentAccountID)
-    }
-
-    func deleteUpcomingTransaction(_ transaction: UpcomingTransaction, action: RecurringDeletionAction) async throws {
-        _ = try await apiClient.deleteUpcomingTransaction(transaction, action: action)
-        await loadTransactions(accountID: currentAccountID)
-    }
-
-    func deleteTransaction(_ transaction: FinanceTransaction, action: RecurringDeletionAction = .occurrence) async throws {
-        _ = try await apiClient.deleteTransaction(id: transaction.id, action: action)
-        if transaction.recurrence != nil {
-            await loadTransactions(accountID: currentAccountID)
-        } else {
-            allTransactions.removeAll { $0.id == transaction.id }
-            transactions.removeAll { $0.id == transaction.id }
-            state = .loaded
-        }
-    }
-
-    private func apply(_ transaction: FinanceTransaction) {
-        allTransactions.removeAll { $0.id == transaction.id }
-        allTransactions.append(transaction)
-        allTransactions.sort {
-            if $0.occurredAt != $1.occurredAt {
-                return $0.occurredAt > $1.occurredAt
-            }
-            return $0.createdAt > $1.createdAt
-        }
-        transactions = allTransactions.filter { currentAccountID == nil || $0.accountId == currentAccountID }
-        state = .loaded
-    }
-
-    func balance(accountID: UUID?, currency: String, rates: ExchangeRateSnapshot?) -> Decimal? {
-        guard state == .loaded, hasLoadedTransactions else { return nil }
-
-        var balance = Decimal.zero
-        for transaction in allTransactions where accountID == nil || transaction.accountId == accountID {
-            guard let amount = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX")) else {
-                return nil
-            }
-            let converted: Decimal?
-            if transaction.currency.caseInsensitiveCompare(currency) == .orderedSame {
-                converted = amount
-            } else {
-                converted = rates?.convert(amount, from: transaction.currency, to: currency)
-            }
-            guard let converted else { return nil }
-            balance += transaction.kind == .income ? converted : -converted
-        }
-        return balance
-    }
-
-    private static func normalizedAmount(_ amount: String) -> String {
-        amount
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-    }
-}
-
-private enum QuickEntryStoreError: LocalizedError {
-    case categoriesUnavailable(String)
-    case invalidTransfer
-
-    var errorDescription: String? {
-        switch self {
-        case let .categoriesUnavailable(message): message
-        case .invalidTransfer: "Choose a destination account for every transfer"
-        }
-    }
-}
-
-private extension FinanceTransaction {
-    func replacingCategory(with category: TransactionCategory?) -> FinanceTransaction {
-        FinanceTransaction(
-            id: id,
-            accountId: accountId,
-            kind: kind,
-            amount: amount,
-            currency: currency,
-            category: category,
-            merchant: merchant,
-            payee: payee,
-            note: note,
-            occurredAt: occurredAt,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            debtId: debtId,
-            debt: debt,
-            recurrence: recurrence
-        )
-    }
+#endif
 }

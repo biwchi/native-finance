@@ -11,21 +11,21 @@ struct QuickTransactionDetailsView: View {
     @Binding var endDate: Date
 
     var body: some View {
-        Form {
-            Section("People and places") {
+        AppForm {
+            AppSection("People and places") {
                 TextField("Merchant", text: $merchant)
                     .textContentType(.organizationName)
                 TextField("Payee", text: $payee)
                     .textContentType(.name)
             }
 
-            Section("Details") {
+            AppSection("Details") {
                 TextField("Note", text: $note, axis: .vertical)
                     .lineLimit(2...6)
             }
 
             if supportsRecurrence {
-                Section("Recurring transaction") {
+                AppSection("Recurring transaction") {
                     Toggle("Repeat", isOn: $isRecurring)
 
                     if isRecurring {

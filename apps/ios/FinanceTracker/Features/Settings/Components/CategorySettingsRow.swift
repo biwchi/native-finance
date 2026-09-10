@@ -26,13 +26,11 @@ struct CategorySettingsRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .circleSwipeActions {
             if !category.isSystem {
-                Button("Delete", role: .destructive, action: onDelete)
+                CircleSwipeAction(title: "Delete", icon: "trash", action: onDelete)
             }
-
-            Button("Edit", action: onEdit)
-                .tint(.gray)
+            CircleSwipeAction(title: "Edit", icon: "edit-pencil", tint: .gray, action: onEdit)
         }
     }
 }

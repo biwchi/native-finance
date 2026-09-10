@@ -21,18 +21,18 @@ struct DebtEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
+            AppForm {
+                AppSection {
                     TextField("Name, for example Alexey", text: $name)
                         .textContentType(.name)
                         .submitLabel(.done)
                 } footer: {
                     Text("Choose this recipient whenever you lend them money.")
                 }
-                Section("Icon") {
+                AppSection("Icon") {
                     CategoryIconPicker(selection: $icon, color: color)
                 }
-                Section("Color") {
+                AppSection("Color") {
                     CategoryColorPicker(selection: $color)
                 }
                 if let errorMessage {
@@ -44,16 +44,18 @@ struct DebtEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(isSaving)
+                    Group {
+                        Button("Cancel") { dismiss() }.disabled(isSaving)
+                    }
+                    .legacyToolbarControl()
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                PrimaryActionButton(debt == nil ? "Create recipient" : "Save changes", isLoading: isSaving) {
+                PrimaryActionButton(debt == nil ? "Create recipient" : "Save changes") {
                     Task { await save() }
                 }
                 .disabled(isSaving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 200)
                 .padding()
-                .background(.bar)
             }
             .interactiveDismissDisabled(isSaving)
         }

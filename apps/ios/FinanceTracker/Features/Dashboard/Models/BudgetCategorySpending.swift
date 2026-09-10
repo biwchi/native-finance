@@ -6,6 +6,7 @@ struct BudgetCategorySpending: Identifiable {
     let spent: Decimal
     let limit: Decimal?
     let poolName: String?
+    var category: TransactionCategory? = nil
 
     var progress: BudgetLimitProgress? {
         guard let limit, limit > 0 else { return nil }
@@ -23,7 +24,8 @@ struct BudgetCategorySpending: Identifiable {
             return BudgetCategorySpending(
                 id: assignment.categoryId, name: category?.name ?? "Category unavailable",
                 spent: spent, limit: assignment.limit.flatMap { Decimal(string: $0) },
-                poolName: budget.groups.first { $0.id == assignment.groupId }?.name
+                poolName: budget.groups.first { $0.id == assignment.groupId }?.name,
+                category: category
             )
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

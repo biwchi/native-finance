@@ -18,14 +18,14 @@ struct AccountManagementView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            AppList {
                 if !editMode.isEditing {
-                    Section {
+                    AppSection {
                         allAccountsButton
                     }
                 }
 
-                Section {
+                AppSection {
                     if accountStore.accounts.isEmpty {
                         ContentUnavailableView(
                             "No accounts",
@@ -45,6 +45,7 @@ struct AccountManagementView: View {
                     }
                 }
             }
+            .animateListChanges(value: accountStore.accounts.map(\.id))
             .listStyle(.insetGrouped)
             .environment(\.editMode, $editMode)
             .navigationTitle("Accounts")
@@ -52,25 +53,31 @@ struct AccountManagementView: View {
             .interactiveDismissDisabled(isBusy)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(editMode.isEditing ? "Done" : "Edit") {
-                        withAnimation {
-                            if !editMode.isEditing {
-                                selectedDetent = .large
+                    Group {
+                        Button(editMode.isEditing ? "Done" : "Edit") {
+                            withAnimation {
+                                if !editMode.isEditing {
+                                    selectedDetent = .large
+                                }
+                                editMode = editMode.isEditing ? .inactive : .active
                             }
-                            editMode = editMode.isEditing ? .inactive : .active
                         }
+                        .disabled(accountStore.accounts.isEmpty || isBusy)
                     }
-                    .disabled(accountStore.accounts.isEmpty || isBusy)
+                    .legacyToolbarControl()
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        AppIcon("xmark", size: 18)
+                    Group {
+                        Button {
+                            dismiss()
+                        } label: {
+                            AppIcon("xmark", size: 18)
+                        }
+                        .accessibilityLabel("Close")
+                        .disabled(isBusy)
                     }
-                    .accessibilityLabel("Close")
-                    .disabled(isBusy)
+                    .legacyToolbarControl()
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -151,22 +158,12 @@ struct AccountManagementView: View {
         .accessibilityHint(
             editMode.isEditing ? "Edit account details" : "Select account and close"
         )
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if !editMode.isEditing {
-                Button(role: .destructive) {
-                    presentedAlert = .confirmDeletion(account)
-                } label: {
-                    Label("Delete", icon: "trash")
-                }
-                .disabled(isBusy)
-
-                Button {
-                    editor = .edit(account)
-                } label: {
-                    Label("Edit", icon: "edit-pencil")
-                }
-                .tint(.gray)
-                .disabled(isBusy)
+        .circleSwipeActions(isEnabled: !isBusy && !editMode.isEditing) {
+            CircleSwipeAction(title: "Delete", icon: "trash") {
+                presentedAlert = .confirmDeletion(account)
+            }
+            CircleSwipeAction(title: "Edit", icon: "edit-pencil", tint: .gray) {
+                editor = .edit(account)
             }
         }
     }
@@ -211,25 +208,17 @@ struct AccountManagementView: View {
     }
 
     private func balanceSubtitle(for account: Account?) -> String {
-        switch transactionStore.state {
-        case .idle, .loading:
-            "Loading balance"
-        case .loaded:
-            if let balance = transactionStore.balance(
-                accountID: account?.id,
-                currency: account?.currency ?? reportingCurrency.uppercased(),
-                rates: exchangeRateStore.snapshot
-            ) {
-                MoneyFormatter.format(
-                    balance, currency: account?.currency ?? reportingCurrency.uppercased(),
-                    roundToWhole: roundTotals
-                )
-            } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
-                "Converting balance"
-            } else {
-                "Balance unavailable"
-            }
-        case .failed:
+        if let balance = transactionStore.balance(
+            accountID: account?.id,
+            currency: account?.currency ?? reportingCurrency.uppercased(),
+            rates: exchangeRateStore.snapshot
+        ) {
+            MoneyFormatter.format(
+                balance, currency: account?.currency ?? reportingCurrency.uppercased(),
+                roundToWhole: roundTotals
+            )
+
+        } else {
             "Balance unavailable"
         }
     }

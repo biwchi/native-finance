@@ -10,56 +10,37 @@ struct TransactionListView: View {
     var recentLimit: Int?
 
     var body: some View {
-        List {
-            switch transactionStore.state {
-            case .idle, .loading:
-                ProgressView("Loading transactions")
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-
-            case .loaded:
-                if transactionStore.transactions.isEmpty {
-                    ContentUnavailableView(
-                        "No transactions yet",
-                        iconName: "list",
-                        description: Text(emptyDescription)
-                    )
-                    .listRowBackground(Color.clear)
-                } else if let recentLimit {
-                    Section("Recent transactions") {
-                        ForEach(transactionStore.transactions.prefix(recentLimit)) { transaction in
+        AppList {
+            if transactionStore.transactions(for: accountStore.selectedAccountID).isEmpty {
+                ContentUnavailableView(
+                    "No transactions yet",
+                    iconName: "list",
+                    description: Text(emptyDescription)
+                )
+                .listRowBackground(Color.clear)
+            } else if let recentLimit {
+                AppSection("Recent transactions") {
+                    ForEach(transactionStore.transactions(for: accountStore.selectedAccountID).prefix(recentLimit)) { transaction in
+                        transactionButton(transaction)
+                    }
+                }
+            } else {
+                ForEach(transactionGroups, id: \.day) { group in
+                    AppSection {
+                        ForEach(group.transactions) { transaction in
                             transactionButton(transaction)
                         }
-                    }
-                } else {
-                    ForEach(transactionGroups, id: \.day) { group in
-                        Section {
-                            ForEach(group.transactions) { transaction in
-                                transactionButton(transaction)
-                            }
-                        } header: {
-                            Text(group.day, format: .dateTime.day().month(.wide).year())
-                        }
+                    } header: {
+                        Text(group.day, format: .dateTime.day().month(.wide).year())
                     }
                 }
-
-            case let .failed(message):
-                ContentUnavailableView {
-                    Label("Couldn’t load transactions", icon: "wifi-warning")
-                } description: {
-                    Text(message)
-                } actions: {
-                    PrimaryActionButton("Try Again", appearance: .prominent) {
-                        Task { await reload() }
-                    }
-                }
-                .listRowBackground(Color.clear)
             }
+
         }
+        .animateListChanges(value: transactionStore.allTransactions.map(\.id))
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(4))
         .environment(\.defaultMinListRowHeight, 0)
-        .refreshable { await reload() }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .environmentObject(accountStore)
@@ -111,17 +92,15 @@ struct TransactionListView: View {
         .buttonStyle(.plain)
         .accessibilityHint("Edit transaction")
         .disabled(deletingTransactionID != nil)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
+        .circleSwipeActions(isEnabled: deletingTransactionID == nil) {
+            CircleSwipeAction(title: "Delete", icon: "trash") {
                 presentedAlert = .confirmDeletion(transaction)
-            } label: {
-                Label("Delete", icon: "trash")
             }
         }
     }
 
     private var transactionGroups: [(day: Date, transactions: [FinanceTransaction])] {
-        let groups = Dictionary(grouping: transactionStore.transactions) {
+        let groups = Dictionary(grouping: transactionStore.transactions(for: accountStore.selectedAccountID)) {
             Calendar.current.startOfDay(for: $0.occurredAt)
         }
         return groups.keys.sorted(by: >).map { (day: $0, transactions: groups[$0] ?? []) }

@@ -35,7 +35,7 @@ export async function saveMonthlyBudget(
   if (!budget.ok) return budget;
 
   if (!hasBudgetValues(budget.value)) {
-    await dependencies.budgets.delete(budget.value.month, budget.value.accountId);
+    await dependencies.budgets.delete(budget.value.accountId);
     return ok(null);
   }
   return ok(await dependencies.budgets.save(budget.value));

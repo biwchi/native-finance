@@ -48,6 +48,7 @@ export interface TransactionStore {
     after: Date,
     excludeId?: string,
   ): Promise<void>;
+  excludeOccurrence?(scheduleId: string, scheduledFor: Date): Promise<void>;
   insertOccurrences(
     schedule: RecurringSchedule,
     dates: Date[],

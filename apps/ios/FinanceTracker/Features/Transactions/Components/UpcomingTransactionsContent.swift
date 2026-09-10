@@ -12,33 +12,13 @@ struct UpcomingTransactionsContent: View {
     var onDelete: ((UpcomingTransaction) -> Void)? = nil
 
     var body: some View {
-        switch transactionStore.upcomingState {
-        case .idle, .loading:
-            ProgressView("Loading recurring transactions")
-                .frame(maxWidth: .infinity)
-        case .loaded:
-            ForEach(transactions.prefix(limit ?? Int.max)) { transaction in
-                transactionButton(transaction)
-            }
-        case .failed:
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Couldn’t load recurring transactions", icon: "wifi-warning")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                PrimaryActionButton("Try Again") {
-                    Task {
-                        await transactionStore.loadUpcomingTransactions(
-                            accountID: accountStore.selectedAccountID
-                        )
-                    }
-                }
-            }
-            .padding(.vertical, 8)
+        ForEach(transactions.prefix(limit ?? Int.max)) { transaction in
+            transactionButton(transaction)
         }
     }
 
     private var transactions: [UpcomingTransaction] {
-        let transactions = allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions
+        let transactions = allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions(for: accountStore.selectedAccountID)
         return transactions.filter { kindFilter == nil || $0.kind == kindFilter }
     }
 
@@ -59,14 +39,11 @@ struct UpcomingTransactionsContent: View {
         .buttonStyle(.plain)
         .accessibilityHint("Edit recurring transaction")
         .disabled(isDeleting)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .circleSwipeActions(isEnabled: !isDeleting) {
             if let onDelete {
-                Button(role: .destructive) {
+                CircleSwipeAction(title: "Delete", icon: "trash") {
                     onDelete(transaction)
-                } label: {
-                    Label("Delete", icon: "trash")
                 }
-                .disabled(isDeleting)
             }
         }
     }

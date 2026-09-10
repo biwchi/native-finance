@@ -10,7 +10,6 @@ describe("createBudget", () => {
 
   it("accepts iOS uppercase category UUIDs returned lowercase by the database", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       monthlyLimit: "1200",
       groups: [],
@@ -26,7 +25,6 @@ describe("createBudget", () => {
 
   it("matches pool UUIDs regardless of casing", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [{ id: groupId.toUpperCase(), name: "Needs", limit: "500" }],
       categoryAssignments: [{ categoryId: foodId.toUpperCase(), groupId }],
@@ -42,7 +40,6 @@ describe("createBudget", () => {
 
   it("rejects duplicate category UUIDs with different casing", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [],
       categoryAssignments: [
@@ -56,7 +53,6 @@ describe("createBudget", () => {
 
   it("rejects duplicate pool UUIDs with different casing", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [
         { id: groupId, name: "Needs", limit: "500" },
@@ -70,7 +66,6 @@ describe("createBudget", () => {
 
   it("still rejects categories that do not exist", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [],
       categoryAssignments: [{ categoryId: foodId.toUpperCase(), limit: "100" }],
@@ -81,7 +76,6 @@ describe("createBudget", () => {
 
   it("still rejects income categories with uppercase UUIDs", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [],
       categoryAssignments: [{ categoryId: foodId.toUpperCase(), limit: "100" }],
@@ -92,7 +86,6 @@ describe("createBudget", () => {
 
   it("builds normalized groups and category assignments", () => {
     const result = createBudget({
-      month: "2026-09",
       accountId: "account",
       currency: "usd",
       monthlyLimit: "1000",
@@ -107,7 +100,6 @@ describe("createBudget", () => {
       ok: true,
       value: {
         accountId: "account",
-        month: "2026-09-01",
         currency: "USD",
         monthlyLimit: "1000",
         groups: [{ id: "group", name: "Needs", limit: "500", sortOrder: 0 }],
@@ -118,7 +110,6 @@ describe("createBudget", () => {
 
   it("rejects an assignment to a group outside the budget", () => {
     const result = createBudget({
-      month: "2026-09",
       currency: "USD",
       groups: [],
       categoryAssignments: [{ categoryId: "food", groupId: "missing" }],

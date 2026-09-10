@@ -5,8 +5,8 @@ struct FinancesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        List {
-            Section {
+        AppList(usesScrollEdgeFades: false) {
+            AppSection {
                 NavigationLink {
                     RecurringTransactionsView(allAccounts: true)
                 } label: {
@@ -27,7 +27,7 @@ struct FinancesView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .financePage(usesNativeNavigationTitle: true)
+        .financePage()
         .navigationTitle("Finances")
         .navigationBarTitleDisplayMode(.large)
     }

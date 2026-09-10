@@ -39,8 +39,25 @@ struct PrimaryIconButton: View {
     private var styledButton: some View {
         if #available(iOS 26.0, *), appearance == .glass {
             button.buttonStyle(.glass(.regular.tint(AppColor.accent.opacity(0.22))))
+        } else if appearance == .glass {
+            button.buttonStyle(LegacyGlassStyle())
         } else {
             button.buttonStyle(.borderedProminent)
+        }
+    }
+
+    private struct LegacyGlassStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .frame(width: AppControlSize.floatingButtonDiameter,
+                       height: AppControlSize.floatingButtonDiameter)
+                .modifier(LegacyGlassSurface(shape: Circle(), tint: AppColor.accent.opacity(0.22)))
+                .contentShape(Circle())
+                .compositingGroup()
+                .opacity(isEnabled ? (configuration.isPressed ? 0.9 : 1) : 0.45)
+                .scaleEffect(configuration.isPressed ? 0.96 : 1)
         }
     }
 
@@ -53,7 +70,7 @@ struct PrimaryIconButton: View {
     }
 
     private var foreground: Color {
-        if #available(iOS 26.0, *), appearance == .glass {
+        if appearance == .glass {
             return isEnabled ? .primary : .secondary
         }
         return isEnabled ? AppColor.onAccent : .primary

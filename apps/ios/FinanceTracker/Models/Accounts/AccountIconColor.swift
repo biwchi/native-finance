@@ -1,6 +1,6 @@
 import Foundation
 
-enum AccountIconColor: String, Codable, CaseIterable, Identifiable {
+enum AccountIconColor: String, Codable, CaseIterable, Identifiable, Sendable {
     case blue
     case indigo
     case purple

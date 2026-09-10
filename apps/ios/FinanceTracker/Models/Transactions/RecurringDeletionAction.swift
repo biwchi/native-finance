@@ -1,6 +1,6 @@
 import Foundation
 
-enum RecurringDeletionAction: String, CaseIterable {
+enum RecurringDeletionAction: String, Codable, CaseIterable {
     case occurrence
     case stopRepeating
     case occurrenceAndFuture

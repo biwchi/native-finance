@@ -16,8 +16,8 @@ struct NewTransactionCategoryView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Category") {
+            AppForm {
+                AppSection("Category") {
                     TextField("Name", text: $name)
                     LabeledContent("Type", value: kind.title)
 
@@ -37,16 +37,16 @@ struct NewTransactionCategoryView: View {
                     .pickerStyle(.navigationLink)
                 }
 
-                Section("Icon") {
+                AppSection("Icon") {
                     CategoryIconPicker(selection: $icon, color: color)
                 }
 
-                Section("Color") {
+                AppSection("Color") {
                     CategoryColorPicker(selection: $color)
                 }
 
                 if let errorMessage {
-                    Section {
+                    AppSection {
                         Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(AppColor.destructiveText)
                     }
@@ -56,19 +56,25 @@ struct NewTransactionCategoryView: View {
             .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
+                    Group {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                        .disabled(isSaving)
                     }
-                    .disabled(isSaving)
+                    .legacyToolbarControl()
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        Task {
-                            await create()
+                    Group {
+                        Button("Add") {
+                            Task {
+                                await create()
+                            }
                         }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                    .legacyToolbarControl()
                 }
             }
         }

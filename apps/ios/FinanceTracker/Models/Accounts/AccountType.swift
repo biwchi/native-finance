@@ -1,6 +1,6 @@
 import Foundation
 
-enum AccountType: String, Codable, CaseIterable, Identifiable {
+enum AccountType: String, Codable, CaseIterable, Identifiable, Sendable {
     case cash
     case checking
     case savings

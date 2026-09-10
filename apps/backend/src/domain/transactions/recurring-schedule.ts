@@ -14,6 +14,7 @@ export type RecurringSchedule = {
   frequency: RecurrenceFrequency;
   startAt: Date;
   lastOccurrenceAt: Date;
+  nextScheduledFor?: Date | null;
   nextOccurrenceAt: Date | null;
   endAt: Date | null;
   createdAt: Date;

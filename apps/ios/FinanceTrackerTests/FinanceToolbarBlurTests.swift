@@ -6,7 +6,6 @@ import SwiftUI
 final class FinanceToolbarBlurTests: XCTestCase {
     @MainActor
     func testToolbarBlurRetainsDetailAfterLayoutAndAppearanceChanges() async throws {
-        guard #available(iOS 26.0, *) else { throw XCTSkip("Custom toolbar blur requires iOS 26") }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         // Host through SwiftUI: UIKit-only fixtures do not reproduce the mask reset.
@@ -14,7 +13,7 @@ final class FinanceToolbarBlurTests: XCTestCase {
             StripeBackdrop()
                 .frame(width: width, height: 180)
                 .overlay {
-                    FinanceToolbarBlurView(transitionHeight: 56)
+                    ScrollEdgeBlurView(transitionHeight: 56)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .ignoresSafeArea()
@@ -51,7 +50,7 @@ final class FinanceToolbarBlurTests: XCTestCase {
             let pages = (0..<3).map { _ in
                 UIHostingController(rootView: StripeBackdrop()
                     .frame(width: 300, height: 180)
-                    .overlay { FinanceToolbarBlurView(transitionHeight: 56) }
+                    .overlay { ScrollEdgeBlurView(transitionHeight: 56) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .ignoresSafeArea())
             }

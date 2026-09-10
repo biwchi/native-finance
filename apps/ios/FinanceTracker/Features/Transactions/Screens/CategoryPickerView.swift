@@ -12,8 +12,8 @@ struct CategoryPickerView: View {
     @State private var didCreateCategory = false
 
     var body: some View {
-        List {
-            Section {
+        AppList {
+            AppSection {
                 Button {
                     select(nil)
                 } label: {
@@ -43,21 +43,7 @@ struct CategoryPickerView: View {
                 .foregroundStyle(.tint)
             }
 
-            Section(kind == .expense ? "Expense categories" : "Income categories") {
-                if transactionStore.isLoadingCategories && categories.isEmpty {
-                    ProgressView("Loading categories")
-                        .frame(maxWidth: .infinity)
-                } else if let message = transactionStore.categoryErrorMessage {
-                    VStack(alignment: .leading, spacing: AppSpacing.medium) {
-                        Label(message, icon: "wifi-warning")
-                            .foregroundStyle(.secondary)
-                        Button("Try Again") {
-                            Task { await transactionStore.loadCategories(force: true) }
-                        }
-                        .disabled(transactionStore.isLoadingCategories)
-                    }
-                }
-
+            AppSection(kind == .expense ? "Expense categories" : "Income categories") {
                 ForEach(filteredCategories) { category in
                     let children = transactionStore.subcategories(of: category)
 
@@ -85,9 +71,7 @@ struct CategoryPickerView: View {
                     }
                 }
 
-                if filteredCategories.isEmpty,
-                   !transactionStore.isLoadingCategories,
-                   transactionStore.categoryErrorMessage == nil {
+                if filteredCategories.isEmpty {
                     if searchText.isEmpty {
                         ContentUnavailableView(
                             "No categories yet",

@@ -65,10 +65,10 @@ databaseDescribe("monthly budget API", () => {
     expect(saveResponse.status).toBe(200);
     expect(saved).toMatchObject({
       accountId,
-      month: "2026-09",
       currency: "USD",
       monthlyLimit: "3800.0000",
     });
+    expect(saved).not.toHaveProperty("month");
     expect(saved.groups).toEqual([
       { id: groupId, name: "Needs", limit: "500.0000", sortOrder: 0 },
     ]);
@@ -80,7 +80,7 @@ databaseDescribe("monthly budget API", () => {
     );
 
     const getResponse = await request(
-      `/api/v1/budgets/monthly?month=2026-09&accountId=${accountId}`,
+      `/api/v1/budgets/monthly?month=2026-08&accountId=${accountId}`,
     );
     expect(getResponse.status).toBe(200);
     expect(await getResponse.json()).toEqual(saved);
@@ -88,7 +88,7 @@ databaseDescribe("monthly budget API", () => {
     // Swift re-encodes the loaded UUIDs in uppercase on every edit.
     const editResponse = await request("/api/v1/budgets/monthly", "PUT", {
       accountId: accountId.toUpperCase(),
-      month: "2026-09",
+      month: "2026-07",
       currency: saved.currency,
       monthlyLimit: "4200",
       groups: saved.groups.map((group) => ({
@@ -112,13 +112,12 @@ databaseDescribe("monthly budget API", () => {
       ]),
     });
     const editedResponse = await request(
-      `/api/v1/budgets/monthly?month=2026-09&accountId=${accountId}`,
+      `/api/v1/budgets/monthly?month=2026-08&accountId=${accountId}`,
     );
     expect(await editedResponse.json()).toEqual(edited);
 
     const clearResponse = await request("/api/v1/budgets/monthly", "PUT", {
       accountId,
-      month: "2026-09",
       currency: "USD",
       monthlyLimit: null,
       groups: [],
@@ -128,7 +127,7 @@ databaseDescribe("monthly budget API", () => {
     expect(await clearResponse.json()).toBeNull();
 
     const emptyResponse = await request(
-      `/api/v1/budgets/monthly?month=2026-09&accountId=${accountId}`,
+      `/api/v1/budgets/monthly?month=2026-08&accountId=${accountId}`,
     );
     expect(await emptyResponse.json()).toBeNull();
   });

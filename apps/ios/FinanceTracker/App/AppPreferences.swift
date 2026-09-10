@@ -5,6 +5,8 @@ enum AppPreferences {
     static let defaultCurrencyKey = "defaultCurrency"
     static let firstWeekdayKey = "firstWeekday"
     static let roundTotalsKey = "roundTotals"
+    static let useAllocatedBudgetForSummaryKey = "useAllocatedBudgetForSummary"
+    static let defaultUseAllocatedBudgetForSummary = true
     static let themeKey = "theme"
     static let preferSimpleTransactionEntryKey = "preferSimpleTransactionEntry"
     static let recurringReminderDaysKey = "recurringReminderDays"

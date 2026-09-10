@@ -19,6 +19,7 @@ export async function materializeRecurringSchedule(
     );
     await store.insertOccurrences(schedule, plan.dates);
     await store.updateSchedule(schedule.id, {
+      nextScheduledFor: plan.dates.length ? null : schedule.nextScheduledFor,
       lastOccurrenceAt: plan.dates.at(-1) ?? schedule.lastOccurrenceAt,
       nextOccurrenceAt: plan.nextOccurrenceAt,
       updatedAt: new Date(),

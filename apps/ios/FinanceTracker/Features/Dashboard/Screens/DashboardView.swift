@@ -48,6 +48,8 @@ struct DashboardView: View {
     @StateObject private var summaryRates = ExchangeRateStore()
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var reportingCurrency = AppPreferences.initialCurrency
+    @AppStorage(AppPreferences.useAllocatedBudgetForSummaryKey)
+    private var useAllocatedBudgetForSummary = AppPreferences.defaultUseAllocatedBudgetForSummary
     @AppStorage(AppPreferences.recurringReminderDaysKey)
     private var recurringReminderDays = AppPreferences.defaultRecurringReminderDays
     @State private var selectedPeriod = FinanceDateFilter()
@@ -71,7 +73,7 @@ struct DashboardView: View {
                 }
                 .task(id: budgetScope) {
                     if selectedPeriod.preset == .month {
-                        await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID)
+                        await budgetStore.loadBudget(accountID: accountStore.selectedAccountID)
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -82,30 +84,32 @@ struct DashboardView: View {
                 .financeOverviewToolbar()
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 0) {
-                            NavigationLink {
-                                FinancesView(initialMonth: selectedPeriod.preset == .month ? selectedPeriod.anchor : .now)
-                            } label: {
-                                AppIcon("view-grid")
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityLabel("Finances")
-                            .accessibilityIdentifier("financesNavigation")
+                        Group {
+                            HStack(spacing: 0) {
+                                NavigationLink {
+                                    FinancesView(initialMonth: selectedPeriod.preset == .month ? selectedPeriod.anchor : .now)
+                                } label: {
+                                    AppIcon("view-grid")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("Finances")
+                                .accessibilityIdentifier("financesNavigation")
 
-                            NavigationLink {
-                                SettingsView()
-                            } label: {
-                                AppIcon("settings")
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
+                                NavigationLink {
+                                    SettingsView()
+                                } label: {
+                                    AppIcon("settings")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("Settings")
                             }
-                            .accessibilityLabel("Settings")
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .legacyToolbarControl(horizontalPadding: 0)
                     }
                 }
-                .refreshable { await reload() }
         }
         .task(id: rateScope) { await loadRates() }
         .sheet(item: $selectedSummaryMetric) { metric in
@@ -140,35 +144,6 @@ struct DashboardView: View {
         .frame(width: 62, height: 62)
         .frame(maxWidth: .infinity)
         .padding(.vertical, AppSpacing.small)
-        .background {
-            bottomScrollFade
-        }
-    }
-
-    @ViewBuilder
-    private var bottomScrollFade: some View {
-        if #available(iOS 26.0, *) {
-            GeometryReader { proxy in
-                FinanceToolbarBlurView(transitionHeight: 64, edge: .bottom)
-                    .overlay {
-                        AppColor.groupedBackground
-                            .mask {
-                                LinearGradient(stops: [
-                                    .init(color: .clear, location: 0),
-                                    .init(color: .black.opacity(0.03), location: 0.15),
-                                    .init(color: .black.opacity(0.12), location: 0.3),
-                                    .init(color: .black.opacity(0.38), location: 0.5),
-                                    .init(color: .black.opacity(0.85), location: 1)
-                                ], startPoint: .top, endPoint: .bottom)
-                            }
-                    }
-                    .frame(height: (proxy.size.height + 40) * 2 / 3)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-            }
-            .ignoresSafeArea(.container, edges: .bottom)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
     }
 
     @ViewBuilder
@@ -197,11 +172,11 @@ struct DashboardView: View {
 
     private func dashboardList(now: Date, transactionOpacity: Double, summaryHeight: CGFloat?) -> some View {
         let reminders = FinanceOverviewData.upcomingReminders(
-            transactionStore.upcomingTransactions, daysBefore: recurringReminderDays,
+            transactionStore.upcomingTransactions(for: accountStore.selectedAccountID), daysBefore: recurringReminderDays,
             now: now, calendar: calendar
         )
-        return List {
-            Section {
+        return AppList(usesCompactTopSpacing: true, usesScrollEdgeFades: false) {
+            AppSection {
                 FinancePageHeader(dateSelection: $selectedPeriod)
                 if transactionStore.state == .loaded, let insights {
                     summaryCards(for: insights, height: summaryHeight)
@@ -211,7 +186,7 @@ struct DashboardView: View {
             }
             .modifier(FinanceSectionMargins())
             if transactionStore.upcomingState == .loaded, let nearest = reminders.first {
-                Section {
+                AppSection {
                     Button {
                         isShowingRecurring = true
                     } label: {
@@ -228,18 +203,21 @@ struct DashboardView: View {
                 .modifier(FinanceSectionMargins(top: AppSpacing.large))
             }
             transactionSections(opacity: transactionOpacity)
+                .animateListChanges(value: transactionStore.allTransactions.map(\.id))
                 // Filtering replaces the results without animating individual row moves.
                 .transaction { $0.animation = nil }
             // Clear the floating Add button and its padding, then leave a 24-point gap.
             FinanceListBottomSpacer(height: 62 + AppSpacing.small * 2 + AppSpacing.doubleExtraLarge)
         }
+        .animateListChanges(value: transactionStore.allTransactions.map(\.id))
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(AppSpacing.large))
         .environment(\.defaultMinListRowHeight, 0)
         .environment(\.defaultMinListHeaderHeight, 0)
-        .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self) {
+        // Home has no native title; its fade must also cover the detached summary glass.
+        .financePage(detachedPreference: SummaryCardBoundsPreferenceKey.self, usesNativeTopEdge: false) {
             bounds, proxy in
-            if transactionStore.state == .loaded, let insights {
+            if #available(iOS 26.0, *), transactionStore.state == .loaded, let insights {
                 ZStack {
                     summaryCardOverlay(for: insights, bounds: bounds, proxy: proxy)
                 }
@@ -249,23 +227,23 @@ struct DashboardView: View {
     }
 
     private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
-    private var currencies: Set<String> { Set(transactionStore.transactions.map(\.currency) + [budgetStore.budget?.currency].compactMap { $0 }) }
+    private var currencies: Set<String> { Set(transactionStore.transactions(for: accountStore.selectedAccountID).map(\.currency) + [budgetStore.budget(accountID: accountStore.selectedAccountID)?.currency].compactMap { $0 }) }
     private var rateScope: String { "\(currency):\(currencies.sorted().joined(separator: ","))" }
     private var periodTransactions: [FinanceTransaction] {
-        FinanceOverviewData.transactions(transactionStore.transactions, in: selectedPeriod, calendar: calendar)
+        FinanceOverviewData.transactions(transactionStore.transactions(for: accountStore.selectedAccountID), in: selectedPeriod, calendar: calendar)
     }
     private var insights: DashboardInsights? {
-        guard let converted = FinanceOverviewData.converted(transactionStore.transactions, to: currency, using: summaryRates) else { return nil }
+        guard let converted = FinanceOverviewData.converted(transactionStore.transactions(for: accountStore.selectedAccountID), to: currency, using: summaryRates) else { return nil }
         return DashboardInsights.calculate(transactions: converted, filter: selectedPeriod, calendar: calendar,
-                                           monthlyLimit: convertedBudget?.monthlyLimit.flatMap { Decimal(string: $0) })
+                                           monthlyLimit: convertedBudget?.summaryLimit(useAllocatedBudget: useAllocatedBudgetForSummary))
     }
     private var budgetScope: String {
         "\(selectedPeriod.preset.rawValue):\(accountStore.selectedAccountID?.uuidString ?? "all"):\(BudgetMonth.key(for: selectedPeriod.anchor))"
     }
     private var convertedBudget: MonthlyBudget? {
         guard selectedPeriod.preset == .month,
-              budgetStore.isLoaded(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID) else { return nil }
-        return budgetStore.budget?.converted(to: currency, using: summaryRates)
+              budgetStore.isLoaded(accountID: accountStore.selectedAccountID) else { return nil }
+        return budgetStore.budget(accountID: accountStore.selectedAccountID)?.converted(to: currency, using: summaryRates)
     }
     private var dashboardEmptyState: some View {
         ContentUnavailableView(
@@ -378,7 +356,7 @@ struct DashboardView: View {
     private func reload() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         if selectedPeriod.preset == .month {
-            await budgetStore.loadBudget(month: selectedPeriod.anchor, accountID: accountStore.selectedAccountID, force: true)
+            await budgetStore.loadBudget(accountID: accountStore.selectedAccountID)
         }
         await loadRates(force: true)
     }
@@ -392,48 +370,33 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func transactionSections(opacity: Double) -> some View {
-        switch transactionStore.state {
-        case .idle, .loading:
-            Section {
-                ProgressView("Loading transactions")
+        if periodTransactions.isEmpty {
+            AppSection {
+                dashboardEmptyState
+                    .opacity(opacity)
                     .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
             }
             .modifier(FinanceSectionMargins(top: AppSpacing.large))
-        case .loaded:
-            if periodTransactions.isEmpty {
-                Section {
-                    dashboardEmptyState
+        } else {
+            ForEach(transactionGroups, id: \.day) { group in
+                AppSection {
+                    ForEach(group.transactions) { transaction in
+                        transactionButton(transaction)
+                            .opacity(opacity)
+                    }
+                } header: {
+                    Text(group.day, format: .dateTime.month(.wide).day().year())
                         .opacity(opacity)
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(
+                            top: 0,
+                            leading: AppSpacing.large,
+                            bottom: AppSpacing.small,
+                            trailing: AppSpacing.large
+                        ))
                 }
                 .modifier(FinanceSectionMargins(top: AppSpacing.large))
-            } else {
-                ForEach(transactionGroups, id: \.day) { group in
-                    Section {
-                        ForEach(group.transactions) { transaction in
-                            transactionButton(transaction)
-                                .opacity(opacity)
-                        }
-                    } header: {
-                        Text(group.day, format: .dateTime.month(.wide).day().year())
-                            .opacity(opacity)
-                            .listRowInsets(EdgeInsets(
-                                top: 0,
-                                leading: AppSpacing.large,
-                                bottom: AppSpacing.small,
-                                trailing: AppSpacing.large
-                            ))
-                    }
-                    .modifier(FinanceSectionMargins(top: AppSpacing.large))
-                }
             }
-        case .failed:
-            Section {
-                Label("Couldn’t load transactions", icon: "wifi-warning")
-                    .foregroundStyle(.secondary)
-            }
-            .modifier(FinanceSectionMargins(top: AppSpacing.large))
         }
     }
 
@@ -451,25 +414,24 @@ struct DashboardView: View {
         .buttonStyle(.plain)
         .accessibilityHint("Edit transaction")
         .disabled(deletingTransactionID != nil)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                Task { await delete(transaction) }
-            } label: {
-                Label("Delete", icon: "trash")
+        .circleSwipeActions(isEnabled: deletingTransactionID == nil) {
+            CircleSwipeAction.delete {
+                await delete(transaction)
             }
-            .disabled(deletingTransactionID != nil)
         }
     }
 
-    private func delete(_ transaction: FinanceTransaction) async {
-        guard deletingTransactionID == nil else { return }
+    private func delete(_ transaction: FinanceTransaction) async -> Bool {
+        guard deletingTransactionID == nil else { return false }
         deletingTransactionID = transaction.id
         defer { deletingTransactionID = nil }
 
         do {
             try await transactionStore.deleteTransaction(transaction)
+            return true
         } catch {
             deletionError = error.localizedDescription
+            return false
         }
     }
 

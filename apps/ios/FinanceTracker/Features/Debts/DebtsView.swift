@@ -22,20 +22,13 @@ struct DebtsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        List {
-            Section {
+        AppList(usesScrollEdgeFades: false) {
+            AppSection {
                 summary
             }
             .modifier(FinanceSectionMargins())
 
-            if case let .failed(message) = transactionStore.state {
-                Section {
-                    Text(message).foregroundStyle(.secondary)
-                    Button("Try again") { Task { await refresh() } }
-                }
-            } else if transactionStore.state == .loading || transactionStore.state == .idle {
-                ProgressView("Loading debts")
-            } else if transactionStore.debtTransactions.isEmpty {
+            if transactionStore.debtTransactions.isEmpty {
                 ContentUnavailableView {
                     Label("No outstanding debts", icon: "user")
                 } description: {
@@ -46,7 +39,7 @@ struct DebtsView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(recipientGroups) { group in
-                    Section {
+                    AppSection {
                         recipientSummary(group)
                         ForEach(group.transactions) { transaction in
                             debtRow(transaction)
@@ -58,21 +51,24 @@ struct DebtsView: View {
             }
             FinanceListBottomSpacer()
         }
+        .animateListChanges(value: transactionStore.allTransactions.map(\.id))
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(AppSpacing.large))
-        .financePage(usesNativeNavigationTitle: true)
+        .financePage()
         .navigationTitle("Debts")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { isAdding = true } label: { Label("Lend money", icon: "plus") }
-                    Button("Manage recipients") { isManagingRecipients = true }
-                    Button { isCreatingRecipient = true } label: { Label("New recipient", icon: "user") }
-                } label: { Label("Add debt", icon: "plus") }
+                Group {
+                    Menu {
+                        Button { isAdding = true } label: { Label("Lend money", icon: "plus") }
+                        Button("Manage recipients") { isManagingRecipients = true }
+                        Button { isCreatingRecipient = true } label: { Label("New recipient", icon: "user") }
+                    } label: { Label("Add debt", icon: "plus") }
+                }
+                .legacyToolbarControl()
             }
         }
-        .refreshable { await refresh() }
         .task {
             if transactionStore.state != .loaded, transactionStore.state != .loading {
                 await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
@@ -123,11 +119,10 @@ struct DebtsView: View {
         .accessibilityHint("Edit debt transaction")
         .disabled(deletingIDs.contains(transaction.id))
         .opacity(deletingIDs.contains(transaction.id) ? 0.5 : 1)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { returningTransaction = transaction } label: {
-                Label("Delete · returned", icon: "trash")
+        .circleSwipeActions(isEnabled: !deletingIDs.contains(transaction.id)) {
+            CircleSwipeAction(title: "Delete · returned", icon: "trash") {
+                returningTransaction = transaction
             }
-            .disabled(deletingIDs.contains(transaction.id))
         }
         .contextMenu {
             Button("Delete · money returned", role: .destructive) {
@@ -182,9 +177,7 @@ struct DebtsView: View {
                 }
                 Text("Shown by currency until exchange rates are available.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Retry exchange rates") {
-                    Task { await rates.load(currencies: Set(currencies), reportingCurrency: currency, force: true) }
-                }
+
             }
             .padding(.vertical, AppSpacing.small)
         } else {
@@ -220,7 +213,7 @@ struct DebtsView: View {
     private func refresh() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         await transactionStore.loadDebts()
-        await rates.load(currencies: Set(currencies), reportingCurrency: currency, force: true)
+        await rates.load(currencies: Set(currencies), reportingCurrency: currency)
     }
 
     private func markReturned(_ transaction: FinanceTransaction) async {

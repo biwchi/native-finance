@@ -3,70 +3,50 @@ import Foundation
 
 @MainActor
 final class BudgetStore: ObservableObject {
-    enum State: Equatable {
-        case idle
-        case loading
-        case loaded
-        case failed(String)
-    }
-
-    @Published private(set) var state: State = .idle
+    enum State: Equatable { case idle, loading, loaded, failed(String) }
+    @Published private(set) var state: State = .loaded
     @Published private(set) var budget: MonthlyBudget?
+    @Published private(set) var budgets: [String: MonthlyBudget] = [:]
+    private let repository: LocalFinanceRepository
+    private var currentScope = "all"
+    private var subscription: AnyCancellable?
 
-    private let apiClient: APIClient
-    private var currentScope = ""
-
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
-    }
-
-#if DEBUG
-    static func preview(_ budget: MonthlyBudget? = nil) -> BudgetStore {
-        let store = BudgetStore()
-        store.budget = budget
-        if let budget {
-            store.currentScope = "\(budget.accountId?.uuidString ?? "all"):\(budget.month)"
-        }
-        store.state = .loaded
-        return store
-    }
-#endif
-
-    func loadBudget(month: Date, accountID: UUID?, force: Bool = false) async {
-        let monthKey = BudgetMonth.key(for: month)
-        let scope = "\(accountID?.uuidString ?? "all"):\(monthKey)"
-        guard force || scope != currentScope || state != .loaded else { return }
-
-        if scope != currentScope {
-            budget = nil
-        }
-        currentScope = scope
-        state = .loading
-
-        do {
-            let budget = try await apiClient.monthlyBudget(month: monthKey, accountID: accountID)
-            guard !Task.isCancelled, currentScope == scope else { return }
-            self.budget = budget
-            state = .loaded
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, currentScope == scope else { return }
-            budget = nil
-            state = .failed(error.localizedDescription)
+    init(apiClient: APIClient = APIClient(), repository: LocalFinanceRepository? = nil) {
+        self.repository = repository ?? .shared
+        subscription = self.repository.$snapshot.sink { [weak self] snapshot in
+            guard let self else { return }
+            self.budgets = snapshot.budgets
+            self.budget = snapshot.budgets[self.currentScope]
         }
     }
 
-    func isLoaded(month: Date, accountID: UUID?) -> Bool {
-        state == .loaded && currentScope == "\(accountID?.uuidString ?? "all"):\(BudgetMonth.key(for: month))"
+    func loadBudget(accountID: UUID?, force: Bool = false) async {
+        currentScope = budgetKey(accountID: accountID)
+        budget = repository.snapshot.budgets[currentScope]
+        state = .loaded
     }
+
+    func budget(accountID: UUID?) -> MonthlyBudget? { budgets[budgetKey(accountID: accountID)] }
+    func isLoaded(accountID: UUID?) -> Bool { true }
 
     @discardableResult
     func saveBudget(_ request: MonthlyBudgetRequest) async throws -> MonthlyBudget? {
-        let budget = try await apiClient.saveMonthlyBudget(request)
-        self.budget = budget
-        currentScope = "\(request.accountId?.uuidString ?? "all"):\(request.month)"
+        let saved = try repository.edit { try $0.saveBudget(request) }
+        currentScope = budgetKey(accountID: request.accountId)
+        budget = saved
         state = .loaded
-        return budget
+        return saved
     }
+#if DEBUG
+    static func preview(_ budget: MonthlyBudget? = nil) -> BudgetStore {
+        let store = BudgetStore()
+        store.subscription = nil
+        store.budget = budget
+        if let budget {
+            store.currentScope = budgetKey(accountID: budget.accountId)
+            store.budgets[store.currentScope] = budget
+        }
+        return store
+    }
+#endif
 }

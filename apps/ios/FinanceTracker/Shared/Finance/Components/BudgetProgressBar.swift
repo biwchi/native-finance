@@ -5,6 +5,7 @@ struct BudgetProgressBar: View {
     let budgetProgress: Double
     let monthProgress: Double?
     let tint: Color
+    var isCompact = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
@@ -19,11 +20,11 @@ struct BudgetProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(contrast == .increased ? 0.24 : 0.09))
-                    .frame(height: 6)
+                    .frame(height: isCompact ? 3 : 6)
 
                 Capsule()
                     .fill(tint)
-                    .frame(width: fillWidth, height: 6)
+                    .frame(width: fillWidth, height: isCompact ? 3 : 6)
 
                 if let monthProgress {
                     let offset = min(max(width * clamped(monthProgress) - tickWidth / 2, 0),
@@ -36,7 +37,7 @@ struct BudgetProgressBar: View {
             }
             .frame(maxHeight: .infinity)
         }
-        .frame(height: 12)
+        .frame(height: isCompact && monthProgress == nil ? 3 : 12)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: budgetProgress)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: monthProgress)
         .accessibilityHidden(true)

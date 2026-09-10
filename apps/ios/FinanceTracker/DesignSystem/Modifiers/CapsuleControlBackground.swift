@@ -16,7 +16,7 @@ struct CapsuleControlBackground: ViewModifier {
             if #available(iOS 26.0, *) {
                 content.glassEffect(.regular.interactive(isEnabled), in: Capsule())
             } else {
-                content.background(.thinMaterial, in: Capsule())
+                content.modifier(LegacyGlassSurface(shape: Capsule()))
             }
         } else {
             content.background(AppColor.controlFill, in: Capsule())

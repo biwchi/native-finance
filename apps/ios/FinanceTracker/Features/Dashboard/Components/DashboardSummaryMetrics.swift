@@ -209,16 +209,21 @@ struct DashboardSummaryMetrics: View {
                     }
                     .padding(AppSpacing.doubleExtraLarge)
                 }
+                .scrollEdgeFades()
                 .navigationTitle(metric.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
+                        Group {
+                            Button("Done") { dismiss() }
+                        }
+                        .legacyToolbarControl()
                     }
                 }
             }
             .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.medium, .large] : [.height(180), .medium])
             .presentationDragIndicator(.visible)
+            .legacySheetAppearance()
         }
     }
 }

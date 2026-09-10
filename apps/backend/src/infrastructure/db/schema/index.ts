@@ -6,3 +6,4 @@ export * from "./enums.schema.ts";
 export * from "./exchange-rate.schema.ts";
 export * from "./recurring-schedule.schema.ts";
 export * from "./transaction.schema.ts";
+export * from "./sync.schema.ts";

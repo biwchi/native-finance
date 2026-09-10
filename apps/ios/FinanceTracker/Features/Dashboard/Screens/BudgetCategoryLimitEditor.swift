@@ -35,8 +35,8 @@ struct BudgetCategoryLimitEditor: View {
     }
 
     var body: some View {
-        Form {
-            Section("Category") {
+        AppForm {
+            AppSection("Category") {
                 Picker("Category", selection: $categoryID) {
                     ForEach(categories) { category in
                         Text(category.name).tag(Optional(category.id))
@@ -45,11 +45,11 @@ struct BudgetCategoryLimitEditor: View {
                 .pickerStyle(.navigationLink)
             }
 
-            Section("Limit") {
+            AppSection("Limit") {
                 BudgetAmountField(title: "Amount", text: $limit, currency: currency)
             }
 
-            Section("Lives in") {
+            AppSection("Lives in") {
                 Picker("Pool", selection: $groupID) {
                     Text("Standalone").tag(Optional<UUID>.none)
                     ForEach(groups) { group in
@@ -66,15 +66,18 @@ struct BudgetCategoryLimitEditor: View {
         }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    guard let categoryID else { return }
-                    onSave(
-                        BudgetCategoryDraft(categoryID: categoryID, limit: limit),
-                        groupID
-                    )
-                    dismiss()
+                Group {
+                    Button("Done") {
+                        guard let categoryID else { return }
+                        onSave(
+                            BudgetCategoryDraft(categoryID: categoryID, limit: limit),
+                            groupID
+                        )
+                        dismiss()
+                    }
+                    .disabled(categoryID == nil || BudgetAmountParser.parse(limit) == nil)
                 }
-                .disabled(categoryID == nil || BudgetAmountParser.parse(limit) == nil)
+                .legacyToolbarControl()
             }
         }
     }

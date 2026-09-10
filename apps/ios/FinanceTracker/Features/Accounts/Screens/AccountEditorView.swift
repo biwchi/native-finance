@@ -30,8 +30,8 @@ struct AccountEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account details") {
+            AppForm {
+                AppSection("Account details") {
                     TextField("Name", text: $name)
                         .textContentType(.name)
 
@@ -61,7 +61,7 @@ struct AccountEditorView: View {
                     }
                 }
 
-                Section("Icon") {
+                AppSection("Icon") {
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.flexible()), count: 6),
                         spacing: 16
@@ -86,7 +86,7 @@ struct AccountEditorView: View {
                     .padding(.vertical, 4)
                 }
 
-                Section("Icon color") {
+                AppSection("Icon color") {
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.flexible()), count: 6),
                         spacing: 16
@@ -114,7 +114,7 @@ struct AccountEditorView: View {
                 }
 
                 if let errorMessage {
-                    Section {
+                    AppSection {
                         Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(AppColor.destructiveText)
                     }
@@ -124,10 +124,13 @@ struct AccountEditorView: View {
             .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
+                    Group {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                        .disabled(isSaving)
                     }
-                    .disabled(isSaving)
+                    .legacyToolbarControl()
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -144,7 +147,6 @@ struct AccountEditorView: View {
     private var submitButton: some View {
         PrimaryActionButton(
             account == nil ? "Add account" : "Save changes",
-            isLoading: isSaving,
             appearance: .glass
         ) {
             Task {
@@ -171,6 +173,7 @@ struct AccountEditorView: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }

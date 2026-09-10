@@ -26,13 +26,13 @@ struct BudgetGroupEditorView: View {
     }
 
     var body: some View {
-        List {
-            Section("Pool details") {
+        AppList {
+            AppSection("Pool details") {
                 TextField("Name", text: $group.name)
                 BudgetAmountField(title: "Limit", text: $group.limit, currency: currency)
             }
 
-            Section("Categories") {
+            AppSection("Categories") {
                 ForEach(filteredCategories) { category in
                     let isUnavailable = unavailableCategoryIDs.contains(category.id)
                     let isSelected = group.categories.contains { $0.categoryID == category.id }
@@ -70,11 +70,14 @@ struct BudgetGroupEditorView: View {
         .searchable(text: $searchText, prompt: "Find a category")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    onSave(group)
-                    dismiss()
+                Group {
+                    Button("Done") {
+                        onSave(group)
+                        dismiss()
+                    }
+                    .disabled(!canSave)
                 }
-                .disabled(!canSave)
+                .legacyToolbarControl()
             }
         }
     }

@@ -16,8 +16,8 @@ export function createExchangeRatesRouter(controller: ExchangeRateController) {
   return new Elysia({ prefix: "/exchange-rates" })
     .get("/latest", async ({ query, set }) => {
       const result = await controller.latest({
-        reportingCurrency: query.reportingCurrency,
-        currencies: query.currencies.split(","),
+        reportingCurrency: query.reportingCurrency ?? "USD",
+        currencies: query.currencies?.split(",") ?? [],
         forceRefresh: query.refresh === "true",
       });
       if (!result.ok) {

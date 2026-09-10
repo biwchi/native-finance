@@ -32,7 +32,6 @@ private enum DashboardPreviewData {
     static let budget = MonthlyBudget(
         id: UUID(),
         accountId: account.id,
-        month: BudgetMonth.key(for: now),
         currency: account.currency,
         monthlyLimit: "1200000",
         groups: [],

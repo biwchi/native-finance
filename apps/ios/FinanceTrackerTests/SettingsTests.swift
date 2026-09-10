@@ -41,11 +41,12 @@ final class SettingsTests: XCTestCase {
             defaults.set((scheme == .dark ? AppTheme.dark : .light).rawValue, forKey: AppPreferences.themeKey)
             for selected in [false, true] {
                 defaults.set(selected, forKey: AppPreferences.roundTotalsKey)
+                if selected { defaults.set(false, forKey: AppPreferences.useAllocatedBudgetForSummaryKey) }
                 defaults.set(selected ? 2 : 0, forKey: AppPreferences.firstWeekdayKey)
                 if selected { defaults.set(7, forKey: AppPreferences.recurringReminderDaysKey) }
                 try await capture(NavigationStack { SettingsView() }.environmentObject(TransactionStore()).defaultAppStorage(defaults),
                                   name: "Settings-\(scheme)-\(selected ? "selected" : "default")",
-                                  scheme: scheme, scene: scene, height: 1400)
+                                  scheme: scheme, scene: scene, height: 1600)
             }
             try await capture(DeleteDataConfirmationView(
                 title: "Delete all data",

@@ -9,6 +9,8 @@ struct FinanceDatePickerButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Binding var selection: FinanceDateFilter
+    var isToolbarItem = false
+    var onChooseDate: (() -> Void)? = nil
     @State private var isShowingFilter = false
     @State private var savedCustom: FinanceDateFilter?
     @GestureState private var isDragging = false
@@ -21,19 +23,27 @@ struct FinanceDatePickerButton: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            periodButton("Previous period", symbol: "chevron.backward", offset: -1)
+            if !isToolbarItem {
+                periodButton("Previous period", symbol: "chevron.backward", offset: -1)
+            }
 
             Button {
                 guard !isSettling else { return }
-                isShowingFilter = true
+                if let onChooseDate {
+                    onChooseDate()
+                } else {
+                    isShowingFilter = true
+                }
             } label: {
                 labelSizing
                     .contentShape(Rectangle())
             }
-            .accessibilityLabel("Choose date filter")
+            .accessibilityLabel(isToolbarItem ? "Choose month" : "Choose date filter")
             .accessibilityIdentifier("date-filter-menu")
             .accessibilityValue(selection.label(calendar: calendar, locale: locale))
-            .accessibilityHint(selection.preset == .allTime
+            .accessibilityHint(isToolbarItem
+                ? "Tap to choose a month. Swipe right for the previous month or left for the next."
+                : selection.preset == .allTime
                 ? "Opens period filters and custom date ranges"
                 : "Tap to choose a date range. Swipe right for the previous period or left for the next. Keep holding while you swipe to scroll up to three periods.")
             .accessibilityAdjustableAction { direction in
@@ -44,14 +54,16 @@ struct FinanceDatePickerButton: View {
                 }
             }
 
-            periodButton("Next period", symbol: "chevron.forward", offset: 1)
+            if !isToolbarItem {
+                periodButton("Next period", symbol: "chevron.forward", offset: 1)
+            }
         }
         .buttonStyle(ControlButtonStyle(isPressed: $isPressed))
         .overlay { periodLabels }
-        .modifier(ContainerSurface(reduceTransparency: reduceTransparency, isEnabled: isEnabled))
+        .modifier(ContainerSurface(reduceTransparency: reduceTransparency, isEnabled: isEnabled, isToolbarItem: isToolbarItem))
         .contentShape(Capsule())
         .highPriorityGesture(periodDrag)
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: isToolbarItem ? nil : .infinity, alignment: .center)
         .sheet(isPresented: $isShowingFilter) {
             FinanceDateFilterSheet(selection: selection, savedCustom: savedCustom, calendar: calendar) { result, custom in
                 selection = result
@@ -150,7 +162,7 @@ struct FinanceDatePickerButton: View {
 
     private var periodLabels: some View {
         GeometryReader { geometry in
-            let width = max(1, geometry.size.width - AppControlSize.minimumTapTarget * 2)
+            let width = max(1, geometry.size.width - (isToolbarItem ? 0 : AppControlSize.minimumTapTarget * 2))
             ZStack {
                 ForEach(previewOffsets, id: \.self) { offset in
                     label(for: offset)
@@ -175,7 +187,7 @@ struct FinanceDatePickerButton: View {
                 LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
                     .frame(width: isInteracting ? 28 : 12)
             }
-            .padding(.horizontal, isInteracting ? 8 : AppControlSize.minimumTapTarget)
+            .padding(.horizontal, isToolbarItem ? 0 : isInteracting ? 8 : AppControlSize.minimumTapTarget)
             .animation(interactionAnimation, value: isInteracting)
         }
         .opacity(isEnabled ? 1 : 0.35)
@@ -184,7 +196,7 @@ struct FinanceDatePickerButton: View {
     }
 
     private func label(for offset: Int) -> some View {
-        PeriodLabel(selection: selection, offset: offset, calendar: calendar, locale: locale)
+        PeriodLabel(selection: selection, offset: offset, calendar: calendar, locale: locale, isToolbarItem: isToolbarItem)
             .equatable()
     }
 
@@ -258,14 +270,17 @@ struct FinanceDatePickerButton: View {
         let offset: Int
         let calendar: Calendar
         let locale: Locale
+        let isToolbarItem: Bool
 
         var body: some View {
             // Formatting only reruns when the period or locale changes, rather
             // than for every drag frame across the larger set of labels.
             Text(selection.shifted(by: offset, calendar: calendar).label(calendar: calendar, locale: locale))
-                .font(.footnote.weight(.regular))
+                .font(isToolbarItem ? .subheadline.weight(.medium) : .footnote.weight(.regular))
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
+                .lineLimit(isToolbarItem ? 1 : nil)
+                .minimumScaleFactor(isToolbarItem ? 0.75 : 1)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 4)
                 .padding(.horizontal, 12)
@@ -276,10 +291,13 @@ struct FinanceDatePickerButton: View {
     private struct ContainerSurface: ViewModifier {
         let reduceTransparency: Bool
         let isEnabled: Bool
+        let isToolbarItem: Bool
 
         @ViewBuilder
         func body(content: Content) -> some View {
-            if #available(iOS 26.0, *), !reduceTransparency {
+            if isToolbarItem {
+                content.legacyToolbarControl(horizontalPadding: 0)
+            } else if #available(iOS 26.0, *), !reduceTransparency {
                 // Apply interactive glass to the whole control, keeping its inset
                 // capsule and the buttons' full-size touch targets.
                 content
@@ -287,16 +305,10 @@ struct FinanceDatePickerButton: View {
                     .glassEffect(.clear.interactive(isEnabled), in: Capsule())
                     .padding(4)
             } else {
-                content.background {
-                    Group {
-                        if reduceTransparency {
-                            Capsule().fill(AppColor.controlFill)
-                        } else {
-                            Capsule().fill(.ultraThinMaterial)
-                        }
-                    }
+                content
+                    .padding(-4)
+                    .modifier(LegacyGlassSurface(shape: Capsule()))
                     .padding(4)
-                }
             }
         }
     }

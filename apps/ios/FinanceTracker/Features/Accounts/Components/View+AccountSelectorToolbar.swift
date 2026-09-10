@@ -13,13 +13,8 @@ extension View {
     func leadingAccountSelectorToolbar() -> some View {
         navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarLeading) {
-                        AccountSelector(compact: true).padding(.leading, -12)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .topBarLeading) { AccountSelector(compact: true) }
+                ToolbarItem(placement: .topBarLeading) {
+                    AccountSelector(compact: true, isToolbarItem: true)
                 }
             }
     }

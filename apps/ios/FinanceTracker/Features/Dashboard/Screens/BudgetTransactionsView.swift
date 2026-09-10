@@ -20,8 +20,8 @@ struct BudgetTransactionsView: View {
     @State private var editingTransaction: FinanceTransaction?
 
     var body: some View {
-        List {
-            Section {
+        AppList(usesScrollEdgeFades: false) {
+            AppSection {
                 if transactionStore.state == .loaded,
                    let converted = FinanceOverviewData.converted(transactions, to: currency, using: rates) {
                     FinanceHighlightCard(
@@ -36,39 +36,31 @@ struct BudgetTransactionsView: View {
                 }
             }
             .modifier(FinanceSectionMargins())
-            Section("Transactions") {
-                switch transactionStore.state {
-                case .idle, .loading:
-                    ProgressView("Loading transactions").frame(maxWidth: .infinity)
-                case .failed:
-                    Button("Try Again") { Task { await refresh() } }
-                case .loaded:
-                    if transactions.isEmpty {
-                        ContentUnavailableView("No spending here", iconName: "list",
-                            description: Text("Transactions for this budget will appear here."))
-                            .listRowBackground(Color.clear)
+            AppSection("Transactions") {
+                if transactions.isEmpty {
+                    ContentUnavailableView("No spending here", iconName: "list",
+                        description: Text("Transactions for this budget will appear here."))
+                        .listRowBackground(Color.clear)
+                }
+                ForEach(transactions) { transaction in
+                    Button { editingTransaction = transaction } label: {
+                        TransactionRow(
+                            transaction: transaction,
+                            account: accountStore.accounts.first { $0.id == transaction.accountId },
+                            timestampStyle: .dateAndTime
+                        )
+                        .contentShape(Rectangle())
                     }
-                    ForEach(transactions) { transaction in
-                        Button { editingTransaction = transaction } label: {
-                            TransactionRow(
-                                transaction: transaction,
-                                account: accountStore.accounts.first { $0.id == transaction.accountId },
-                                timestampStyle: .dateAndTime
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Edit transaction")
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Edit transaction")
                 }
             }
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(AppSpacing.large))
-        .financePage(usesNativeNavigationTitle: true)
+        .financePage()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
-        .refreshable { await refresh() }
         .sheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
@@ -84,7 +76,7 @@ struct BudgetTransactionsView: View {
         switch scope {
         case .all: return monthly
         case .pool(let id):
-            guard let budget = budgetStore.budget else { return [] }
+            guard let budget = budgetStore.budget(accountID: accountID) else { return [] }
             return BudgetLimitProgress.transactions(inPool: id, budget: budget, from: monthly)
         case .category(let id):
             return BudgetLimitProgress.transactions(inCategory: id, from: monthly)
@@ -93,6 +85,6 @@ struct BudgetTransactionsView: View {
 
     private func refresh() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
-        await rates.load(currencies: Set(transactions.map(\.currency)), reportingCurrency: currency, force: true)
+        await rates.load(currencies: Set(transactions.map(\.currency)), reportingCurrency: currency)
     }
 }

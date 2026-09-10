@@ -46,7 +46,7 @@ Open `apps/ios/FinanceTracker.xcodeproj`, select an iPhone simulator or your con
 
 For a physical iPhone, keep both devices on the same Wi-Fi, leave the backend running with `HOST=::`, and allow Local Network access when the app asks. See [the iOS setup guide](apps/ios/README.md) for troubleshooting and API address overrides.
 
-The app loads accounts from `/api/v1/accounts`, creates and edits them from the account picker, and filters `/api/v1/transactions` by the selected account. Account icons, colors, and ISO currency codes are stored by the backend. The default Total selection loads transactions across every account.
+The app imports existing finance data once, then saves and reads accounts, transactions, budgets, and recurring schedules in a persistent GRDB/SQLite database. A single worker synchronizes changes automatically. Finance screens work offline without synchronization indicators; Quick Entry interpretation requires a connection. See [the local-first architecture and test guide](docs/local-first.md).
 
 ## Common commands
 

@@ -7,8 +7,8 @@ struct SubcategoryPickerView: View {
     let onSelect: (UUID?) -> Void
 
     var body: some View {
-        List {
-            Section {
+        AppList {
+            AppSection {
                 Button {
                     onSelect(parent.id)
                 } label: {
@@ -24,7 +24,7 @@ struct SubcategoryPickerView: View {
                 Text("A subcategory is optional.")
             }
 
-            Section("Subcategories") {
+            AppSection("Subcategories") {
                 ForEach(subcategories) { category in
                     Button {
                         onSelect(category.id)

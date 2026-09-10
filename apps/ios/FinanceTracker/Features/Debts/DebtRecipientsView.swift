@@ -8,14 +8,8 @@ struct DebtRecipientsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let message = transactionStore.debtErrorMessage {
-                    Text(message).foregroundStyle(.secondary)
-                    Button("Try again") { Task { await transactionStore.loadDebts() } }
-                }
-                if transactionStore.isLoadingDebts {
-                    ProgressView("Loading recipients")
-                } else if transactionStore.debts.isEmpty && transactionStore.debtErrorMessage == nil {
+            AppList {
+                if transactionStore.debts.isEmpty {
                     ContentUnavailableView("No recipients", iconName: "user",
                         description: Text("Create a recipient to start lending money."))
                 }
@@ -33,13 +27,20 @@ struct DebtRecipientsView: View {
             }
             .navigationTitle("Debt recipients")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Group {
+                        Button("Done") { dismiss() }
+                    }
+                    .legacyToolbarControl()
+                }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { isCreating = true } label: { Label("New recipient", icon: "plus") }
+                    Group {
+                        Button { isCreating = true } label: { Label("New recipient", icon: "plus") }
+                    }
+                    .legacyToolbarControl()
                 }
             }
             .task { await transactionStore.loadDebts() }
-            .refreshable { await transactionStore.loadDebts() }
             .sheet(item: $editingDebt) { debt in DebtEditorView(debt: debt) { _ in } }
             .sheet(isPresented: $isCreating) { DebtEditorView { _ in } }
         }

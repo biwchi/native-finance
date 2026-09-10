@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject private var repository = LocalFinanceRepository.shared
     private enum DeletionAction {
         case allData
         case userAccount
@@ -34,6 +35,8 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage(AppPreferences.firstWeekdayKey) private var firstWeekday = 0
     @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
+    @AppStorage(AppPreferences.useAllocatedBudgetForSummaryKey)
+    private var useAllocatedBudgetForSummary = AppPreferences.defaultUseAllocatedBudgetForSummary
     @AppStorage(AppPreferences.recurringReminderDaysKey)
     private var recurringReminderDays = AppPreferences.defaultRecurringReminderDays
     @State private var deletionAction = DeletionAction.allData
@@ -42,8 +45,12 @@ struct SettingsView: View {
     @State private var supportMessage: String?
 
     var body: some View {
-        Form {
-            Section {
+        AppForm {
+            if repository.snapshot.pending.contains(where: { $0.issue != nil }) {
+                AppSection { NavigationLink("Review changes") { SyncReviewView() } }
+            }
+            AppSection { NavigationLink("Exchange rates") { RateDetailsView() } }
+            AppSection {
                 NavigationLink {
                     CategorySettingsView()
                 } label: {
@@ -57,20 +64,23 @@ struct SettingsView: View {
                     )
                     .navigationTitle("Default currency")
                 } label: {
-                    LabeledContent {
-                        Text(currencyLabel)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        Label("Default currency", icon: "cash")
+                    if #available(iOS 26.0, *) {
+                        currencySettingsLabel
+                    } else {
+                        // Native legacy row sizing otherwise removes padding from this two-line label.
+                        currencySettingsLabel
+                            .environment(\.defaultMinListRowHeight, 0)
+                            .padding(.vertical, AppSpacing.large)
                     }
                 }
+                .legacyListRows(verticalPadding: 0)
 
                 Toggle(isOn: isDarkTheme) {
                     Label("Dark theme", icon: "half-moon")
                 }
             }
 
-            Section {
+            AppSection {
                 Picker(selection: $firstWeekday) {
                     Text("System default").tag(0)
                     ForEach(1...7, id: \.self) { day in
@@ -88,7 +98,18 @@ struct SettingsView: View {
                 Text("Show totals as whole numbers on Home and Budget. Transaction amounts keep their full precision.")
             }
 
-            Section {
+            AppSection {
+                Toggle(isOn: $useAllocatedBudgetForSummary) {
+                    Label("Use pool and category limits", icon: "percentage-circle")
+                }
+                .accessibilityIdentifier("useAllocatedBudgetForSummary")
+            } header: {
+                Text("Budget summary")
+            } footer: {
+                Text("When no monthly limit is set, Home and Budget use the total of your pools and category limits outside pools. Turn off to show a budget summary only with a monthly limit.")
+            }
+
+            AppSection {
                 Toggle(isOn: $preferSimpleTransactionEntry) {
                     Label("Use quick entry", icon: "input-field")
                 }
@@ -98,7 +119,7 @@ struct SettingsView: View {
                 Text("The Add button opens a multiline entry above the keyboard, then shows the transaction form for review.")
             }
 
-            Section {
+            AppSection {
                 Picker(selection: $recurringReminderDays) {
                     ForEach(AppPreferences.recurringReminderDaysRange, id: \.self) { days in
                         Text(days == 0 ? "On the day" : days == 1 ? "1 day before" : "\(days) days before")
@@ -113,7 +134,7 @@ struct SettingsView: View {
                 Text("Show the nearest upcoming recurring transaction on Home, starting this many days before it is due.")
             }
 
-            Section("Support") {
+            AppSection("Support") {
                 ForEach(SettingsSupportLink.allCases) { link in
                     Button {
                         openSupport(link)
@@ -129,7 +150,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section {
+            AppSection {
                 Button(role: .destructive) {
                     deletionAction = .allData
                     showsDeleteWarning = true
@@ -150,7 +171,7 @@ struct SettingsView: View {
             }
             .tint(.red)
 
-            Section {
+            AppSection {
                 Text(appVersion)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -170,7 +191,7 @@ struct SettingsView: View {
             DeleteDataConfirmationView(title: deletionAction.title, explanation: deletionAction.explanation) { confirmation in
                 switch deletionAction {
                 case .allData:
-                    try await APIClient().deleteAllData(confirmation: confirmation)
+                    try repository.deleteAllData()
                     URLCache.shared.removeAllCachedResponses()
                     NotificationCenter.default.post(name: AppPreferences.dataDeletedNotification, object: nil)
                 case .userAccount:
@@ -221,5 +242,14 @@ struct SettingsView: View {
             return defaultCurrency
         }
         return "\(defaultCurrency) · \(name)"
+    }
+
+    private var currencySettingsLabel: some View {
+        LabeledContent {
+            Text(currencyLabel)
+                .foregroundStyle(.secondary)
+        } label: {
+            Label("Default currency", icon: "cash")
+        }
     }
 }

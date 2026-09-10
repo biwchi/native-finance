@@ -1,6 +1,6 @@
 import Foundation
 
-struct TransactionCategory: Codable, Identifiable, Hashable {
+struct TransactionCategory: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     let systemKey: String?
     let name: String

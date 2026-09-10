@@ -1,6 +1,6 @@
 import Foundation
 
-struct Account: Codable, Identifiable, Hashable {
+struct Account: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     let name: String
     let type: AccountType
@@ -9,4 +9,5 @@ struct Account: Codable, Identifiable, Hashable {
     let iconColor: AccountIconColor
     let createdAt: String
     let updatedAt: String
+    var sortOrder: Int? = nil
 }

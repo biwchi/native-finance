@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum QuickTransactionMode: String, CaseIterable, Identifiable {
+enum QuickTransactionMode: String, Codable, CaseIterable, Identifiable {
     case income
     case expense
     case transfer

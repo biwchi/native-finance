@@ -11,7 +11,7 @@ struct ComingUpSection: View {
 
     var body: some View {
         if transactionStore.upcomingState == .loaded, !transactions.isEmpty {
-            Section {
+            AppSection {
                 UpcomingTransactionsContent(limit: 4, allAccounts: allAccounts, onEdit: onEdit)
             } header: {
                 FinanceSectionHeader("Coming up") {

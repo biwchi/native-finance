@@ -37,6 +37,7 @@ export const transactions = pgTable(
     payee: text(),
     note: text(),
     occurredAt: timestamp({ withTimezone: true }).notNull(),
+    scheduledFor: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
@@ -48,7 +49,7 @@ export const transactions = pgTable(
       table.recurringScheduleId,
     ),
     uniqueIndex("transactions_schedule_occurrence_unique")
-      .on(table.recurringScheduleId, table.occurredAt)
+      .on(table.recurringScheduleId, table.scheduledFor)
       .where(sql`${table.recurringScheduleId} is not null`),
     index("transactions_occurred_at_idx").on(table.occurredAt),
   ],

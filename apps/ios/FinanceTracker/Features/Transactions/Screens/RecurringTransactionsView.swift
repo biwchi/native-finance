@@ -22,14 +22,14 @@ struct RecurringTransactionsView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            List {
-                Section {
+            AppList(usesScrollEdgeFades: false) {
+                AppSection {
                     summary(at: context.date)
                 }
                 .modifier(FinanceSectionMargins())
 
                 if transactionStore.upcomingState == .loaded, filteredUpcomingTransactions.isEmpty {
-                    Section {
+                    AppSection {
                         ContentUnavailableView {
                             Label(emptyStateTitle, icon: "repeat")
                         } description: {
@@ -42,7 +42,7 @@ struct RecurringTransactionsView: View {
                         .listRowBackground(Color.clear)
                     }
                 } else {
-                    Section {
+                    AppSection {
                         UpcomingTransactionsContent(
                             allAccounts: allAccounts,
                             kindFilter: kindFilter.transactionKind,
@@ -59,33 +59,29 @@ struct RecurringTransactionsView: View {
                 recordedTransactionsSection(now: context.date)
                 FinanceListBottomSpacer()
             }
+            .animateListChanges(value: transactionStore.allUpcomingTransactions.map(\.id))
             .listStyle(.insetGrouped)
             .listSectionSpacing(.custom(AppSpacing.large))
-            .financePage(usesNativeNavigationTitle: true)
+            .financePage()
         }
         .navigationTitle("Recurring")
         .navigationBarTitleDisplayMode(.large)
         .modifier(RecurringAccountsToolbar(allAccounts: allAccounts))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { isAdding = true } label: {
-                    Label("Add recurring transaction", icon: "plus")
+                Group {
+                    Button { isAdding = true } label: {
+                        Label("Add recurring transaction", icon: "plus")
+                    }
                 }
+                .legacyToolbarControl()
             }
         }
-        .refreshable { await refresh() }
         .task {
-            switch transactionStore.state {
-            case .idle, .failed:
+            if upcomingTransactions.contains(where: { $0.occurredAt < .now }) {
                 await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
-            case .loaded:
-                if upcomingTransactions.contains(where: { $0.occurredAt < .now }) {
-                    await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
-                } else if transactionStore.upcomingState != .loaded, transactionStore.upcomingState != .loading {
-                    await transactionStore.loadUpcomingTransactions(accountID: accountStore.selectedAccountID)
-                }
-            case .loading:
-                break
+            } else if transactionStore.upcomingState != .loaded, transactionStore.upcomingState != .loading {
+                await transactionStore.loadUpcomingTransactions(accountID: accountStore.selectedAccountID)
             }
         }
         .task(id: rateScope) {
@@ -122,7 +118,7 @@ struct RecurringTransactionsView: View {
     }
 
     private var upcomingTransactions: [UpcomingTransaction] {
-        allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions
+        allAccounts ? transactionStore.allUpcomingTransactions : transactionStore.upcomingTransactions(for: accountStore.selectedAccountID)
     }
 
     private var currency: String {
@@ -164,11 +160,7 @@ struct RecurringTransactionsView: View {
             } else {
                 VStack(spacing: AppSpacing.small) {
                     FinanceSummaryUnavailable(state: transactionStore.upcomingState, rateState: rates.state)
-                    if case .failed = rates.state {
-                        Button("Retry exchange rates") {
-                            Task { await rates.load(currencies: currencies, reportingCurrency: currency, force: true) }
-                        }
-                    }
+
                 }
             }
 
@@ -215,39 +207,32 @@ struct RecurringTransactionsView: View {
 
     @ViewBuilder
     private func recordedTransactionsSection(now: Date) -> some View {
-        let transactions = (allAccounts ? transactionStore.allTransactions : transactionStore.transactions)
+        let transactions = (allAccounts ? transactionStore.allTransactions : transactionStore.transactions(for: accountStore.selectedAccountID))
             .filter { $0.recurrence != nil && $0.occurredAt <= now && kindFilter.includes($0.kind) }
             .sorted { $0.occurredAt > $1.occurredAt }
-        Section("Recorded transactions") {
-            switch transactionStore.state {
-            case .idle, .loading:
-                ProgressView("Loading transactions").frame(maxWidth: .infinity)
-            case .failed:
-                Button("Retry transaction history") { Task { await refresh() } }
-            case .loaded:
-                if transactions.isEmpty {
-                    Text("Completed recurring transactions will appear here.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+        AppSection("Recorded transactions") {
+            if transactions.isEmpty {
+                Text("Completed recurring transactions will appear here.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            ForEach(transactions) { transaction in
+                Button { editingRecordedTransaction = transaction } label: {
+                    TransactionRow(
+                        transaction: transaction,
+                        account: accountStore.accounts.first { $0.id == transaction.accountId },
+                        timestampStyle: .dateAndTime
+                    )
+                    .contentShape(Rectangle())
                 }
-                ForEach(transactions) { transaction in
-                    Button { editingRecordedTransaction = transaction } label: {
-                        TransactionRow(
-                            transaction: transaction,
-                            account: accountStore.accounts.first { $0.id == transaction.accountId },
-                            timestampStyle: .dateAndTime
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Edit recorded transaction")
-                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Edit recorded transaction")
             }
         }
     }
 
     private func refresh() async {
         await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
-        await rates.load(currencies: currencies, reportingCurrency: currency, force: true)
+        await rates.load(currencies: currencies, reportingCurrency: currency)
     }
 
     private var alertBinding: Binding<Bool> {

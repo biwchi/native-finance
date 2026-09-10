@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 
 import type {
   BudgetRepository,
@@ -12,14 +12,11 @@ import {
 } from "../schema/budget.schema.ts";
 
 export function createDrizzleBudgetRepository(database: Database): BudgetRepository {
-  async function findPlan(month: string, accountId: string | null) {
+  async function findPlan(accountId: string | null) {
     const [plan] = await database
       .select()
       .from(budgetPlans)
-      .where(and(
-        eq(budgetPlans.month, month),
-        accountId ? eq(budgetPlans.accountId, accountId) : isNull(budgetPlans.accountId),
-      ))
+      .where(accountId ? eq(budgetPlans.accountId, accountId) : isNull(budgetPlans.accountId))
       .limit(1);
     return plan ?? null;
   }
@@ -56,7 +53,6 @@ export function createDrizzleBudgetRepository(database: Database): BudgetReposit
     return {
       id: plan.id,
       accountId: plan.accountId,
-      month: plan.month.slice(0, 7),
       currency: plan.currency,
       monthlyLimit: plan.monthlyLimit,
       groups,
@@ -67,13 +63,13 @@ export function createDrizzleBudgetRepository(database: Database): BudgetReposit
   }
 
   return {
-    async find(month, accountId) {
-      const plan = await findPlan(month, accountId);
+    async find(accountId) {
+      const plan = await findPlan(accountId);
       return plan ? load(plan.id) : null;
     },
 
     async save(snapshot: BudgetDraft) {
-      const existing = await findPlan(snapshot.month, snapshot.accountId);
+      const existing = await findPlan(snapshot.accountId);
       const planId = await database.transaction(async (transaction) => {
         const [plan] = existing
           ? await transaction
@@ -89,7 +85,6 @@ export function createDrizzleBudgetRepository(database: Database): BudgetReposit
               .insert(budgetPlans)
               .values({
                 accountId: snapshot.accountId,
-                month: snapshot.month,
                 currency: snapshot.currency,
                 monthlyLimit: snapshot.monthlyLimit,
               })
@@ -123,8 +118,8 @@ export function createDrizzleBudgetRepository(database: Database): BudgetReposit
       return saved;
     },
 
-    async delete(month, accountId) {
-      const plan = await findPlan(month, accountId);
+    async delete(accountId) {
+      const plan = await findPlan(accountId);
       if (plan) await database.delete(budgetPlans).where(eq(budgetPlans.id, plan.id));
     },
   };

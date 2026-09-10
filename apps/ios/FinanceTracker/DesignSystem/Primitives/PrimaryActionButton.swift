@@ -37,10 +37,11 @@ struct PrimaryActionButton: View {
                 if #available(iOS 26.0, *) {
                     button.buttonStyle(.glassProminent)
                 } else {
-                    button.buttonStyle(.borderedProminent)
+                    button.buttonStyle(LegacyGlassStyle(isLoading: isLoading))
                 }
             }
         }
+        .buttonBorderShape(.capsule)
         .tint(AppColor.accent)
         .disabled(isLoading)
     }
@@ -66,8 +67,27 @@ struct PrimaryActionButton: View {
     private var foreground: Color {
         // The custom capsule retains its accent fill when disabled or loading.
         if appearance == .capsule { return AppColor.onAccent }
+        if #unavailable(iOS 26.0), appearance == .glass { return AppColor.onAccent }
         if !isEnabled || (isLoading && appearance != .capsule) { return .primary }
         return AppColor.onAccent
+    }
+
+    private struct LegacyGlassStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.controlSize) private var controlSize
+        let isLoading: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .padding(.horizontal, AppSpacing.large)
+                .padding(.vertical, AppSpacing.small)
+                .frame(minHeight: controlSize == .large || controlSize == .extraLarge
+                       ? AppControlSize.primaryButtonHeight : AppControlSize.minimumTapTarget)
+                .background(AppColor.accent, in: Capsule())
+                .contentShape(Capsule())
+                .compositingGroup()
+                .opacity(isEnabled || isLoading ? (configuration.isPressed ? 0.9 : 1) : 0.45)
+        }
     }
 
     private struct CapsuleStyle: ButtonStyle {

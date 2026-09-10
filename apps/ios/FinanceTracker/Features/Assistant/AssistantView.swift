@@ -8,6 +8,7 @@ struct AssistantView: View {
                 iconName: "sparks",
                 description: Text("The assistant will help you understand your finances.")
             )
+            .scrollEdgeFades(background: AppColor.background)
             .accountSelectorToolbar()
         }
     }

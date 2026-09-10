@@ -68,7 +68,7 @@ describe("getLatestExchangeRates", () => {
 
   it("falls back to an expired snapshot when Frankfurter is down", async () => {
     const memory = createMemoryRepository([
-      storedRate("KZT", "537.5", new Date("2026-09-02T09:00:00Z")),
+      storedRate("KZT", "537.5", new Date("2026-09-01T09:00:00Z")),
     ]);
     const result = await getLatestExchangeRates({
       reportingCurrency: "KZT",
@@ -82,7 +82,7 @@ describe("getLatestExchangeRates", () => {
     expect(result.ok).toBeTrue();
     if (!result.ok) return;
     expect(result.value.stale).toBe(true);
-    expect(result.value.fetchedAt).toEqual(new Date("2026-09-02T09:00:00Z"));
+    expect(result.value.fetchedAt).toEqual(new Date("2026-09-01T09:00:00Z"));
   });
 
   it("fails when a required rate has never been cached", async () => {
@@ -158,4 +158,43 @@ function storedRate(
     provider: "frankfurter",
     fetchedAt,
   };
+}
+
+describe("complete daily rate table", () => {
+  it("coalesces concurrent callers and ignores force refresh within 24 hours", async () => {
+    const memory = fullMemoryRepository(); let calls = 0; let clock = new Date("2026-09-02T12:00:00Z");
+    const dependencies = { repository: memory.repository, now: () => clock, provider: async (currencies: string[]) => {
+      calls += 1; expect(currencies).toEqual([]); await new Promise(r => setTimeout(r, 10));
+      return [{ quoteCurrency: "EUR", rate: "0.8", effectiveDate: "2026-09-02" }, { quoteCurrency: "KZT", rate: "500", effectiveDate: "2026-09-02" }];
+    } };
+    const results = await Promise.all(Array.from({ length: 20 }, () => getLatestExchangeRates({ reportingCurrency: "USD", currencies: [] }, dependencies)));
+    expect(calls).toBe(1); expect(results.every(r => r.ok && r.value.quotes.length === 3)).toBe(true);
+    clock = new Date(clock.getTime() + 86399_000);
+    const filtered = await getLatestExchangeRates({ reportingCurrency: "KZT", currencies: ["EUR"], forceRefresh: true }, dependencies);
+    expect(calls).toBe(1); expect(filtered.ok).toBe(true);
+    clock = new Date(clock.getTime() + 1000);
+    await getLatestExchangeRates({ reportingCurrency: "USD", currencies: [] }, dependencies);
+    expect(calls).toBe(2);
+  });
+  it("keeps dates and cached conversions when provider fails, but never invents missing rates", async () => {
+    const fetchedAt = new Date("2026-09-01T00:00:00Z"); const memory = fullMemoryRepository([storedRate("EUR", "0.8", fetchedAt)], fetchedAt);
+    const dependencies = { repository: memory.repository, now: () => new Date("2026-09-03T00:00:00Z"), provider: async () => { throw new Error("offline"); } };
+    const result = await getLatestExchangeRates({ reportingCurrency: "USD", currencies: [] }, dependencies);
+    expect(result.ok).toBe(true);
+    if (result.ok) { expect(result.value.stale).toBe(true); expect(result.value.fetchedAt).toEqual(fetchedAt); expect(convertExchangeAmount("100", "EUR", "USD", result.value)?.amount).toBe("125"); }
+    expect(await memory.repository.lastFullRefresh!()).toEqual(fetchedAt);
+    const missing = await getLatestExchangeRates({ reportingCurrency: "JPY", currencies: ["EUR"] }, dependencies);
+    expect(missing.ok).toBe(false);
+  });
+});
+function fullMemoryRepository(initial: StoredExchangeRate[] = [], initialRefresh: Date | null = null) {
+  let rates = initial; let refreshed = initialRefresh;
+  const repository: ExchangeRateRepository = {
+    async findLatest(currencies) { return rates.filter(r => currencies.includes(r.quoteCurrency)); },
+    async save(values) { rates = values; },
+    async findAllLatest() { return rates; },
+    async lastFullRefresh() { return refreshed; },
+    async saveFullSnapshot(values, date) { rates = values; refreshed = date; },
+  };
+  return { repository };
 }

@@ -1,10 +1,10 @@
 import Foundation
 
 struct AdaptiveCategoryResolver: CategoryResolving {
-    private let apiClient: APIClient
+    private let repository: LocalFinanceRepository?
 
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
+    init(apiClient: APIClient = APIClient(), repository: LocalFinanceRepository? = nil) {
+        self.repository = repository
     }
 
     func resolve(
@@ -15,10 +15,8 @@ struct AdaptiveCategoryResolver: CategoryResolving {
         let availableCategories = categories.filter { $0.kind == kind }
         guard !availableCategories.isEmpty else { return nil }
 
-        if let history = try? await apiClient.categorySuggestions(
-            description: description,
-            kind: kind
-        ).suggestions.first,
+        let transactions = await MainActor.run { (repository ?? .shared).snapshot.detailedTransactions }
+        if let history = LocalHistoryMatcher.suggestions(description: description, kind: kind, transactions: transactions).first,
            availableCategories.contains(where: { $0.id == history.categoryId }) {
             return CategoryResolution(
                 categoryID: history.categoryId,

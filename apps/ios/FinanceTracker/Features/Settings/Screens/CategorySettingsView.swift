@@ -10,8 +10,8 @@ struct CategorySettingsView: View {
     @State private var isDeleting = false
 
     var body: some View {
-        List {
-            Section {
+        AppList {
+            AppSection {
                 Picker("Type", selection: $kind) {
                     ForEach([TransactionKind.expense, .income]) { kind in
                         Text(kind.title).tag(kind)
@@ -20,12 +20,7 @@ struct CategorySettingsView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section(kind == .expense ? "Expense categories" : "Income categories") {
-                if transactionStore.isLoadingCategories && categories.isEmpty {
-                    ProgressView("Loading categories")
-                        .frame(maxWidth: .infinity)
-                }
-
+            AppSection(kind == .expense ? "Expense categories" : "Income categories") {
                 ForEach(categories) { category in
                     row(category)
 
@@ -34,9 +29,7 @@ struct CategorySettingsView: View {
                     }
                 }
 
-                if categories.isEmpty,
-                   !transactionStore.isLoadingCategories,
-                   transactionStore.categoryErrorMessage == nil {
+                if categories.isEmpty {
                     ContentUnavailableView(
                         "No categories",
                         iconName: "label",
@@ -45,29 +38,30 @@ struct CategorySettingsView: View {
                 }
             }
 
-            if let message = transactionStore.categoryErrorMessage ?? errorMessage {
-                Section {
+            if let message = errorMessage {
+                AppSection {
                     Label(message, icon: "warning-triangle")
                         .foregroundStyle(AppColor.destructiveText)
                 }
             }
         }
+        .animateListChanges(value: transactionStore.categories.map(\.id))
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    editor = CategoryEditor(category: nil, kind: kind)
-                } label: {
-                    Label("Add category", icon: "plus")
+                Group {
+                    Button {
+                        editor = CategoryEditor(category: nil, kind: kind)
+                    } label: {
+                        Label("Add category", icon: "plus")
+                    }
                 }
+                .legacyToolbarControl()
             }
         }
         .task {
             await transactionStore.loadCategories()
-        }
-        .refreshable {
-            await transactionStore.loadCategories(force: true)
         }
         .sheet(item: $editor) { editor in
             CategoryEditorView(editor: editor)

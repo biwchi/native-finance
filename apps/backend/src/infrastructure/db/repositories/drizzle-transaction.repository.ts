@@ -7,6 +7,7 @@ import {
   gt,
   isNotNull,
   lte,
+  sql,
 } from "drizzle-orm";
 
 import type { TransactionRepository } from "../../../application/transactions/transaction.repository.ts";
@@ -80,9 +81,10 @@ export function createDrizzleTransactionRepository(
     },
 
     atomically(operation) {
-      return database.transaction((transaction) =>
-        operation(createDrizzleTransactionStore(transaction))
-      );
+      return database.transaction(async (transaction) => {
+        await transaction.execute(sql`select finance_sync_lock()`);
+        return operation(createDrizzleTransactionStore(transaction));
+      });
     },
   };
 }

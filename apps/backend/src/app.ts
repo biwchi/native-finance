@@ -1,5 +1,6 @@
 import { createDrizzleAppDataRepository } from "./infrastructure/db/repositories/drizzle-app-data.repository.ts";
 import { createDrizzleDebtRepository } from "./infrastructure/db/repositories/drizzle-debt.repository.ts";
+import { createDrizzleSyncRepository } from "./infrastructure/sync/drizzle-sync.repository.ts";
 import { createAccount } from "./application/accounts/create-account.ts";
 import { deleteAccount } from "./application/accounts/delete-account.ts";
 import { listAccounts } from "./application/accounts/list-accounts.ts";
@@ -52,6 +53,7 @@ const quickEntryInterpreter = createOpenAIQuickEntryInterpreter({
 });
 
 export const app = createHttpApp({
+  sync: createDrizzleSyncRepository(db),
   appData: createDrizzleAppDataRepository(db),
   debts,
   accounts: {

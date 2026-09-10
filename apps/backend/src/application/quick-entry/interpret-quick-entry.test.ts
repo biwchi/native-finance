@@ -78,6 +78,19 @@ describe("interpretQuickEntry", () => {
     });
   });
 
+  it("uses complete local context for unsynced accounts and categories", async () => {
+    const localAccount = makeAccount("Offline cash", "USD"); const localCategory = makeCategory("Offline food", "expense");
+    const result = await interpretQuickEntry({ text: "Coffee 4", defaultAccountId: localAccount.id, locale: "en_US", timeZone: "UTC", context: { accounts: [localAccount], categories: [localCategory] } }, {
+      accounts: accountRepository([]), categories: categoryRepository([]), exchangeRateRepository: memoryExchangeRepository(), exchangeRateProvider: async () => { throw new Error("No conversion needed"); }, now: () => now,
+      interpreter: { async interpret(input) {
+        expect(input.accounts.map(a => a.id)).toEqual([localAccount.id]); expect(input.categories.map(c => c.id)).toEqual([localCategory.id]);
+        return { transactions: [{ kind: "expense", accountId: localAccount.id, destinationAccountId: null, amount: "4", currency: "USD", categoryId: localCategory.id, merchant: "Coffee", payee: null, note: null, occurredAt: null, recurrence: null, sourceText: "Coffee 4" }], unparsedText: [] };
+      } },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.transactions[0]).toMatchObject({ accountId: localAccount.id, categoryId: localCategory.id, amount: "4" });
+  });
+
 });
 
 function makeAccount(name: string, currency: string): Account {

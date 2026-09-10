@@ -1,6 +1,6 @@
 import Foundation
 
-struct ExchangeRateSnapshot: Codable, Equatable {
+struct ExchangeRateSnapshot: Codable, Equatable, Sendable {
     let baseCurrency: String
     let reportingCurrency: String
     let quotes: [ExchangeRateQuote]
@@ -30,6 +30,7 @@ struct ExchangeRateSnapshot: Codable, Equatable {
     }
 
     private func rate(for currency: String) -> Decimal? {
+        if currency.caseInsensitiveCompare(baseCurrency) == .orderedSame { return 1 }
         guard let value = quotes.first(where: {
             $0.currency.caseInsensitiveCompare(currency) == .orderedSame
         })?.rate else {

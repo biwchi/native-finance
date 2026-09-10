@@ -8,9 +8,6 @@ struct DebtRecipientPicker: View {
 
     var body: some View {
         HStack {
-            if transactionStore.isLoadingDebts {
-                ProgressView()
-            }
             Menu {
                 Picker("Recipient", selection: $selection) {
                     Text("Choose recipient").tag(UUID?.none)
@@ -22,11 +19,7 @@ struct DebtRecipientPicker: View {
                 if let selectedDebt {
                     Button("Edit recipient") { editingDebt = selectedDebt }
                 }
-                if transactionStore.debtErrorMessage != nil {
-                    Button("Retry loading recipients") {
-                        Task { await transactionStore.loadDebts() }
-                    }
-                }
+
             } label: {
                 HStack {
                     if let selectedDebt { DebtIcon(debt: selectedDebt, size: 32) }
@@ -51,6 +44,6 @@ struct DebtRecipientPicker: View {
 
     private var selectedName: String {
         transactionStore.debts.first { $0.id == selection }?.name
-            ?? (transactionStore.debtErrorMessage == nil ? "Choose recipient" : "Couldn’t load recipients")
+            ?? "Choose recipient"
     }
 }

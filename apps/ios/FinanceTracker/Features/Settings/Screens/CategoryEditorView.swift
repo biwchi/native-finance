@@ -25,8 +25,8 @@ struct CategoryEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Category") {
+            AppForm {
+                AppSection("Category") {
                     TextField("Name", text: $name)
 
                     if editor.category == nil {
@@ -63,16 +63,16 @@ struct CategoryEditorView: View {
                     }
                 }
 
-                Section("Icon") {
+                AppSection("Icon") {
                     CategoryIconPicker(selection: $icon, color: color)
                 }
 
-                Section("Color") {
+                AppSection("Color") {
                     CategoryColorPicker(selection: $color)
                 }
 
                 if let errorMessage {
-                    Section {
+                    AppSection {
                         Label(errorMessage, icon: "warning-triangle")
                             .foregroundStyle(AppColor.destructiveText)
                     }
@@ -86,15 +86,21 @@ struct CategoryEditorView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSaving)
+                    Group {
+                        Button("Cancel") { dismiss() }
+                            .disabled(isSaving)
+                    }
+                    .legacyToolbarControl()
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await save() }
+                    Group {
+                        Button("Save") {
+                            Task { await save() }
+                        }
+                        .disabled(!canSave || isSaving)
                     }
-                    .disabled(!canSave || isSaving)
+                    .legacyToolbarControl()
                 }
             }
         }
@@ -133,6 +139,7 @@ struct CategoryEditorView: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }

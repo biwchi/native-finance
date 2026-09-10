@@ -57,6 +57,22 @@ final class AccentControlContrastTests: XCTestCase {
         }
     }
 
+    func testCircleSwipeIconsContrastWithTheirTranslucentFill() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            for color in [AppColor.destructive, Color.gray] {
+                let ink = UIColor(AppColor.iconForeground(for: color)).resolvedColor(with: traits)
+                let tint = UIColor(color).resolvedColor(with: traits)
+                let surface = UIColor.secondarySystemGroupedBackground.resolvedColor(with: traits)
+                let fill = blend(tint, over: surface, opacity: 0.14)
+                XCTAssertGreaterThanOrEqual(contrast(luminance(ink), luminance(fill)), 3)
+                var alpha: CGFloat = 0
+                ink.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+                XCTAssertEqual(alpha, 1, "Only the circle fill should be translucent")
+            }
+        }
+    }
+
     func testPaletteArtworkContrastsWithNativeAndTintedSurfaces() {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
@@ -228,7 +244,7 @@ final class AccentControlContrastTests: XCTestCase {
                     PrimaryIconButton("Add", iconName: "plus") {}
                     PrimaryIconButton("Disabled", iconName: "plus") {}.disabled(true)
                 }
-                if #available(iOS 26.0, *) {
+                Group {
                     HStack {
                         PrimaryIconButton(
                             "Glass Add",

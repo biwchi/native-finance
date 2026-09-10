@@ -5,7 +5,7 @@ private struct FinancePageGradientModifier: ViewModifier {
     let opacity: Double
     let height: CGFloat
     let backgroundColor: Color
-    let usesNativeNavigationTitle: Bool
+    var usesNativeTopEdge = true
     @State private var scrollOffset: CGFloat = 0
 
     @ViewBuilder
@@ -27,16 +27,11 @@ private struct FinancePageGradientModifier: ViewModifier {
         ZStack(alignment: .top) {
             pageBackground
 
-            if #available(iOS 26.0, *), !usesNativeNavigationTitle {
-                content
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .modifier(FinanceToolbarScrollEdgeModifier(background: pageBackground))
-            } else {
-                content
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-            }
+            content
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .modifier(ScrollEdgeFadeModifier(background: pageBackground, bottomBackground: backgroundColor,
+                                                usesNativeTopEdge: usesNativeTopEdge))
         }
     }
 
@@ -71,7 +66,6 @@ extension View {
     @ViewBuilder
     func financePage(
         enabled: Bool = true,
-        usesNativeNavigationTitle: Bool = false,
         tint: Color = AppColor.accent,
         opacity: Double = 0.5,
         gradientHeight: CGFloat = 420,
@@ -83,8 +77,7 @@ extension View {
                     tint: tint,
                     opacity: opacity,
                     height: gradientHeight,
-                    backgroundColor: backgroundColor,
-                    usesNativeNavigationTitle: usesNativeNavigationTitle
+                    backgroundColor: backgroundColor
                 )
             )
         } else {
@@ -96,6 +89,7 @@ extension View {
     func financePage<Key: PreferenceKey, DetachedContent: View>(
         enabled: Bool = true,
         detachedPreference key: Key.Type,
+        usesNativeTopEdge: Bool = true,
         tint: Color = AppColor.accent,
         opacity: Double = 0.5,
         gradientHeight: CGFloat = 420,
@@ -114,7 +108,7 @@ extension View {
                     opacity: opacity,
                     height: gradientHeight,
                     backgroundColor: backgroundColor,
-                    usesNativeNavigationTitle: false
+                    usesNativeTopEdge: usesNativeTopEdge
                 )
             )
         } else {

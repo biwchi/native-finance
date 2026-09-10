@@ -39,6 +39,8 @@ struct CurrencyPickerView: View {
             }
             .buttonStyle(.plain)
         }
+        .legacyListAppearance()
+        .scrollEdgeFades()
         .overlay {
             if filteredCurrencyCodes.isEmpty {
                 ContentUnavailableView(

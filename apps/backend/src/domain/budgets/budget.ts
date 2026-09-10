@@ -15,7 +15,6 @@ import {
 export type Budget = {
   id: string;
   accountId: string | null;
-  month: string;
   currency: string;
   monthlyLimit: string | null;
   groups: BudgetGroup[];
@@ -25,7 +24,6 @@ export type Budget = {
 };
 
 export type BudgetInput = {
-  month: string;
   accountId?: string | null;
   currency: string;
   monthlyLimit?: string | null;
@@ -36,7 +34,7 @@ export type BudgetInput = {
 export type BudgetDraft = Omit<
   Budget,
   "id" | "createdAt" | "updatedAt"
-> & { month: string };
+>;
 
 export type BudgetValidationError =
   | "account_not_found"
@@ -112,7 +110,6 @@ export function createBudget(
 
   return ok({
     accountId,
-    month: `${input.month}-01`,
     currency,
     monthlyLimit: input.monthlyLimit ?? null,
     groups,

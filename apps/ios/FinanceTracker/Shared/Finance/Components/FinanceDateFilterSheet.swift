@@ -45,8 +45,10 @@ struct FinanceDateFilterSheet: View {
             }
         }
         .scrollBounceBehavior(.basedOnSize)
+        .scrollEdgeFades(background: AppColor.elevatedSurface)
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(contentHeight)])
         .presentationDragIndicator(.visible)
+        .legacySheetAppearance()
         .presentationBackground(AppColor.elevatedSurface)
     }
 

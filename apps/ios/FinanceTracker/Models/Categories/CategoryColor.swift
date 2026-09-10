@@ -1,6 +1,6 @@
 import Foundation
 
-enum CategoryColor: String, Codable, CaseIterable, Identifiable {
+enum CategoryColor: String, Codable, CaseIterable, Identifiable, Sendable {
     case red
     case coral
     case orange

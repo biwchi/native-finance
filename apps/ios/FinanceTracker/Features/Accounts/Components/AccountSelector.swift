@@ -18,6 +18,7 @@ struct AccountSelector: View {
     var compact = false
     var showsCompactIcon = true
     var compactWidth: CGFloat? = nil
+    var isToolbarItem = false
 
     var body: some View {
         Menu {
@@ -59,6 +60,7 @@ struct AccountSelector: View {
                 .accessibilityHint("Opens the account picker")
         }
         .buttonStyle(.plain)
+        .padding(.leading, toolbarLeadingPadding)
         .tint(AppColor.accent)
         .task(id: exchangeRateScopeKey) {
             await exchangeRateStore.load(
@@ -76,13 +78,13 @@ struct AccountSelector: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(accountStore.selectionTitle)
-                        .font(.subheadline.weight(.semibold))
+                        .font(selectorTitleFont)
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
                     Text(selectionSubtitle)
-                        .font(.body.weight(.semibold))
+                        .font(selectorBalanceFont)
                         .foregroundStyle(Color.primary)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -92,7 +94,7 @@ struct AccountSelector: View {
             .frame(width: compactWidth.map { max(0, $0 - 16) }, alignment: .leading)
             .padding([.leading, .vertical], 4)
             .padding(.trailing, 12)
-            .accountSelectorGlass()
+            .accountSelectorGlass(isToolbarItem: isToolbarItem)
             .contentShape(Capsule())
         } else {
             HStack(spacing: 9) {
@@ -100,12 +102,12 @@ struct AccountSelector: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(accountStore.selectionTitle)
-                        .font(.subheadline.weight(.semibold))
+                        .font(selectorTitleFont)
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
                     Text(selectionSubtitle)
-                        .font(.body.weight(.semibold))
+                        .font(selectorBalanceFont)
                         .foregroundStyle(Color.primary)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -115,9 +117,27 @@ struct AccountSelector: View {
             .padding(.leading, 5)
             .padding(.trailing, 14)
             .padding(.vertical, 5)
-            .accountSelectorGlass()
+            .accountSelectorGlass(isToolbarItem: isToolbarItem)
             .contentShape(Capsule())
         }
+    }
+
+    private var toolbarLeadingPadding: CGFloat {
+        if #available(iOS 26.0, *), isToolbarItem, compact, showsCompactIcon {
+            // Keep the badge inside the native toolbar's four-point content inset.
+            return -10
+        }
+        return 0
+    }
+
+    private var selectorTitleFont: Font {
+        if #available(iOS 26.0, *) { return .subheadline.weight(.semibold) }
+        return .caption.weight(.semibold)
+    }
+
+    private var selectorBalanceFont: Font {
+        if #available(iOS 26.0, *) { return .body.weight(.semibold) }
+        return .caption.weight(.semibold)
     }
 
     private var selectedIcon: String {
@@ -141,25 +161,17 @@ struct AccountSelector: View {
     }
 
     private func balanceSubtitle(for account: Account?) -> String {
-        switch transactionStore.state {
-        case .idle, .loading:
-            "Loading balance"
-        case .loaded:
-            if let balance = transactionStore.balance(
-                accountID: account?.id,
-                currency: account?.currency ?? reportingCurrency.uppercased(),
-                rates: exchangeRateStore.snapshot
-            ) {
-                MoneyFormatter.format(
-                    balance, currency: account?.currency ?? reportingCurrency.uppercased(),
-                    roundToWhole: roundTotals
-                )
-            } else if exchangeRateStore.state == .idle || exchangeRateStore.state == .loading {
-                "Converting balance"
-            } else {
-                "Balance unavailable"
-            }
-        case .failed:
+        if let balance = transactionStore.balance(
+            accountID: account?.id,
+            currency: account?.currency ?? reportingCurrency.uppercased(),
+            rates: exchangeRateStore.snapshot
+        ) {
+            MoneyFormatter.format(
+                balance, currency: account?.currency ?? reportingCurrency.uppercased(),
+                roundToWhole: roundTotals
+            )
+
+        } else {
             "Balance unavailable"
         }
     }

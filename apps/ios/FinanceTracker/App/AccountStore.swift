@@ -8,131 +8,36 @@ final class AccountStore: ObservableObject {
     @Published var isManagingAccounts = false
     @Published var alertMessage: String?
     @Published private(set) var isLoading = false
+    private let repository: LocalFinanceRepository
+    private var isPreview = false
+    private var subscription: AnyCancellable?
 
-    private let apiClient: APIClient
-    private var hasLoaded = false
-
-    init(apiClient: APIClient = APIClient()) {
-        self.apiClient = apiClient
+    init(apiClient: APIClient = APIClient(), repository: LocalFinanceRepository? = nil) {
+        self.repository = repository ?? .shared
+        apply(self.repository.snapshot)
+        subscription = self.repository.$snapshot.sink { [weak self] in self?.apply($0) }
     }
-
+    private func apply(_ snapshot: LocalSnapshot) {
+        accounts = snapshot.sortedAccounts
+        if let selectedAccountID, snapshot.accounts[selectedAccountID] == nil { self.selectedAccountID = nil }
+    }
+    var selectedAccount: Account? { accounts.first { $0.id == selectedAccountID } }
+    var selectionTitle: String { selectedAccount?.name ?? "All Accounts" }
+    func loadAccounts(force: Bool = false) async { guard !isPreview else { return }; apply(repository.snapshot) }
+    @discardableResult
+    func createAccount(name: String, type: AccountType, currency: String, icon: String, iconColor: AccountIconColor) async throws -> Account {
+        let account = try repository.edit { try $0.saveAccount(name: name, type: type, currency: currency, icon: icon, color: iconColor) }
+        selectedAccountID = account.id; return account
+    }
+    @discardableResult
+    func updateAccount(id: UUID, name: String, type: AccountType, currency: String, icon: String, iconColor: AccountIconColor) async throws -> Account {
+        try repository.edit { try $0.saveAccount(id: id, name: name, type: type, currency: currency, icon: icon, color: iconColor) }
+    }
+    func reorderAccounts(_ accounts: [Account]) async throws { try repository.edit { try $0.reorderAccounts(accounts) } }
+    func deleteAccount(_ account: Account) async throws { try repository.edit { $0.deleteAccount(account.id) } }
 #if DEBUG
-    static func preview(
-        accounts: [Account],
-        selectedAccountID: UUID? = nil
-    ) -> AccountStore {
-        let store = AccountStore()
-        store.accounts = accounts
-        store.selectedAccountID = selectedAccountID
-        store.hasLoaded = true
-        return store
+    static func preview(accounts: [Account], selectedAccountID: UUID? = nil) -> AccountStore {
+        let store = AccountStore(); store.subscription = nil; store.isPreview = true; store.accounts = accounts; store.selectedAccountID = selectedAccountID; return store
     }
 #endif
-
-    var selectedAccount: Account? {
-        accounts.first { $0.id == selectedAccountID }
-    }
-
-    var selectionTitle: String {
-        selectedAccount?.name ?? "All Accounts"
-    }
-
-    func loadAccounts(force: Bool = false) async {
-        guard force || !hasLoaded else { return }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            accounts = try await apiClient.accounts()
-            hasLoaded = true
-
-            if let selectedAccountID,
-               !accounts.contains(where: { $0.id == selectedAccountID }) {
-                self.selectedAccountID = nil
-            }
-        } catch {
-            alertMessage = error.localizedDescription
-        }
-    }
-
-    @discardableResult
-    func createAccount(
-        name: String,
-        type: AccountType,
-        currency: String,
-        icon: String,
-        iconColor: AccountIconColor
-    ) async throws -> Account {
-        let account = try await apiClient.createAccount(
-            AccountRequest(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                type: type,
-                currency: currency.uppercased(),
-                icon: icon,
-                iconColor: iconColor
-            )
-        )
-
-        accounts.append(account)
-        selectedAccountID = account.id
-        hasLoaded = true
-
-        return account
-    }
-
-    @discardableResult
-    func updateAccount(
-        id: UUID,
-        name: String,
-        type: AccountType,
-        currency: String,
-        icon: String,
-        iconColor: AccountIconColor
-    ) async throws -> Account {
-        let account = try await apiClient.updateAccount(
-            id: id,
-            with: AccountRequest(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                type: type,
-                currency: currency.uppercased(),
-                icon: icon,
-                iconColor: iconColor
-            )
-        )
-
-        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[index] = account
-        }
-
-        return account
-    }
-
-    func reorderAccounts(_ reorderedAccounts: [Account]) async throws {
-        let currentIDs = Set(accounts.map(\.id))
-        let reorderedIDs = reorderedAccounts.map(\.id)
-        guard reorderedAccounts.count == accounts.count,
-              Set(reorderedIDs) == currentIDs else {
-            return
-        }
-
-        let previousAccounts = accounts
-        accounts = reorderedAccounts
-
-        do {
-            accounts = try await apiClient.reorderAccounts(reorderedIDs)
-        } catch {
-            accounts = previousAccounts
-            throw error
-        }
-    }
-
-    func deleteAccount(_ account: Account) async throws {
-        _ = try await apiClient.deleteAccount(id: account.id)
-        accounts.removeAll { $0.id == account.id }
-
-        if selectedAccountID == account.id {
-            selectedAccountID = nil
-        }
-    }
 }
