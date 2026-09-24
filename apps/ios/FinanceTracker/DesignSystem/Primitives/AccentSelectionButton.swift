@@ -1,15 +1,40 @@
 import SwiftUI
 
 struct AccentSelectionButton: View {
+    /// Selection artwork for rows that already provide their own button and tap target.
+    struct Indicator: View {
+        let isSelected: Bool
+        @ScaledMetric private var size: CGFloat = 20
+
+        var body: some View {
+            Circle()
+                .fill(isSelected ? AppColor.accent : Color.clear)
+                .overlay {
+                    Circle()
+                        .strokeBorder(isSelected ? Color.clear : Color.secondary, lineWidth: 1.5)
+                }
+                .overlay {
+                    AppIcon("check", size: 14)
+                        .foregroundStyle(AppColor.onAccent)
+                        .opacity(isSelected ? 1 : 0)
+                }
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
+    }
+
     enum Appearance {
         case filled
         case glass
+        case icon
+        case iconBadge
     }
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ScaledMetric(relativeTo: .caption) private var iconBadgeSize = 20
     @ScaledMetric(relativeTo: .caption) private var iconSpacing = AppSpacing.compact
+    @ScaledMetric private var iconTileSize = AppControlSize.minimumTapTarget
 
     let title: String
     let isSelected: Bool
@@ -41,10 +66,46 @@ struct AccentSelectionButton: View {
                 filledButton
             case .glass:
                 glassButton
+            case .icon:
+                iconButton
+            case .iconBadge:
+                iconBadgeButton
             }
         }
         .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var iconButton: some View {
+        Button(action: action) {
+            AppIcon(iconName ?? "label", size: 20)
+                .foregroundStyle(isSelected ? AppColor.onAccent : AppColor.accent)
+                .frame(width: iconTileSize, height: iconTileSize)
+                .background(
+                    isSelected ? AppColor.accent : Color.secondary.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: AppRadius.medium)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: AppRadius.medium))
+        }
+        .buttonStyle(FilledSelectionStyle())
+    }
+
+    private var iconBadgeButton: some View {
+        Button(action: action) {
+            AppIcon(iconName ?? "label", size: 22)
+                .foregroundStyle(
+                    isSelected
+                        ? AppColor.foreground(on: selectionTint)
+                        : AppColor.iconForeground(for: selectionTint)
+                )
+                .frame(width: iconTileSize, height: iconTileSize)
+                .background(
+                    isSelected ? selectionTint : selectionTint.opacity(0.14),
+                    in: Circle()
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(FilledSelectionStyle())
     }
 
     private var filledButton: some View {

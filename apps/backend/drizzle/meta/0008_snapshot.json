@@ -804,18 +804,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "merchant": {
-          "name": "merchant",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payee": {
-          "name": "payee",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "description": {
           "name": "description",
           "type": "text",
@@ -853,6 +841,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "counterparty": {
+          "name": "counterparty",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {

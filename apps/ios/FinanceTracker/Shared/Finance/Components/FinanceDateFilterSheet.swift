@@ -48,8 +48,6 @@ struct FinanceDateFilterSheet: View {
         .scrollEdgeFades(background: AppColor.elevatedSurface)
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(contentHeight)])
         .presentationDragIndicator(.visible)
-        .legacySheetAppearance()
-        .presentationBackground(AppColor.elevatedSurface)
     }
 
     private var header: some View {
@@ -86,7 +84,7 @@ struct FinanceDateFilterSheet: View {
             Spacer(minLength: 0)
 
             Button { dismiss() } label: {
-                AppIcon("xmark", size: 18)
+                AppIcon("xmark", size: AppControlSize.iconButtonGlyph)
                     .foregroundStyle(.secondary)
                     .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
                     .modifier(CapsuleControlBackground(appearance: .glass))

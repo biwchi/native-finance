@@ -91,21 +91,25 @@ export function convertExchangeAmount(
 
 function parseDecimal(value: string): { numerator: bigint; denominator: bigint } | null {
   const normalized = value.trim().replaceAll(",", "");
-  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null;
-  const [whole = "0", fraction = ""] = normalized.split(".");
+  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
+  const negative = normalized.startsWith("-");
+  const [whole = "0", fraction = ""] = (negative ? normalized.slice(1) : normalized).split(".");
   const denominator = 10n ** BigInt(fraction.length);
   return {
-    numerator: BigInt(`${whole}${fraction}`),
+    numerator: BigInt(`${whole}${fraction}`) * (negative ? -1n : 1n),
     denominator,
   };
 }
 
 function formatRatio(numerator: bigint, denominator: bigint, precision: number): string {
+  const sign = numerator < 0n ? -1n : 1n;
   const scale = 10n ** BigInt(precision);
-  const scaled = numerator * scale;
+  const scaled = numerator * sign * scale;
   let rounded = scaled / denominator;
   if ((scaled % denominator) * 2n >= denominator) rounded += 1n;
+  rounded *= sign;
+  const magnitude = rounded < 0n ? -rounded : rounded;
   const whole = rounded / scale;
-  const fraction = (rounded % scale).toString().padStart(precision, "0").replace(/0+$/, "");
+  const fraction = (magnitude % scale).toString().padStart(precision, "0").replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }

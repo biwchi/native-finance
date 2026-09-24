@@ -35,8 +35,9 @@ export async function listUpcomingTransactions(
       amount: schedule.amount,
       currency: schedule.currency,
       category: schedule.category,
-      merchant: schedule.merchant,
-      payee: schedule.payee,
+      counterparty: schedule.counterparty,
+
+
       note: schedule.note,
       frequency: schedule.frequency,
       startAt: schedule.startAt,

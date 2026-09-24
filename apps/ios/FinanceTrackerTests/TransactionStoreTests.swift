@@ -4,9 +4,168 @@ import XCTest
 
 @MainActor
 final class TransactionStoreTests: XCTestCase {
+    func testRecipientOrderSurvivesEditsNewRecipientsAndRelaunch() async throws {
+        let repository = try LocalTestData.repository()
+        let store = TransactionStore(repository: repository)
+        let zoe = try await store.createDebt(name: "Zoe")
+        let alice = try await store.createDebt(name: "Alice")
+        let bob = try await store.createDebt(name: "Bob")
+        try await store.reorderDebts([bob, zoe, alice])
+        _ = try await store.updateDebt(zoe, name: "Aaron", icon: "star", color: .purple)
+        // Reordering an older displayed row must keep its latest name and appearance.
+        try await store.reorderDebts([bob, zoe, alice])
+        let new = try await store.createDebt(name: "A new recipient")
+        let expected = [bob.id, zoe.id, alice.id, new.id]
+        XCTAssertEqual(store.debts.map(\.id), expected)
+        XCTAssertEqual(store.debts[1].name, "Aaron")
+        XCTAssertEqual(store.debts[1].icon, "star")
+        let reopened = TransactionStore(repository: try LocalFinanceRepository(path: repository.requireDatabase().pool.path))
+        XCTAssertEqual(reopened.debts.map(\.id), expected)
+        XCTAssertEqual(reopened.debts.compactMap(\.sortOrder), [0, 1, 2, 3])
+        let pendingCount = repository.snapshot.pending.count
+        for invalid in [[bob, zoe], [bob, zoe, alice, alice]] {
+            do {
+                try await store.reorderDebts(invalid)
+                XCTFail("Incomplete or duplicate recipient lists must be rejected")
+            } catch {}
+        }
+        XCTAssertEqual(repository.snapshot.pending.count, pendingCount)
+        XCTAssertEqual(store.debts.map(\.id), expected)
+    }
+
+    func testRecipientDeletionProtectsOutstandingLoansAndPersistsUnusedDeletion() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let store = TransactionStore(repository: repository)
+        let active = try await store.createDebt(name: "Alexey")
+        let unused = try await store.createDebt(name: "Unused")
+        let loan = try await store.createTransaction(TransactionRequest(
+            accountId: account.id, kind: .debt, amount: "50", categoryId: nil,
+            note: nil, occurredAt: LocalTestData.now, debtId: active.id
+        ))
+        let pendingCount = repository.snapshot.pending.count
+        do {
+            try await store.deleteDebt(active)
+            XCTFail("A recipient with an outstanding loan must remain available")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("outstanding loans"))
+        }
+        XCTAssertEqual(repository.snapshot.pending.count, pendingCount)
+        XCTAssertEqual(store.debtTransactions.map(\.id), [loan.id])
+        XCTAssertEqual(store.balance(accountID: account.id, currency: "USD", rates: nil), -50)
+        try await store.deleteDebt(unused)
+        XCTAssertEqual(store.debts.map(\.id), [active.id])
+        XCTAssertNil(repository.snapshot.pending.last?.mutation.changes.first?.data)
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        XCTAssertNil(reopened.snapshot.debts[unused.id])
+        XCTAssertNotNil(reopened.snapshot.transactions[loan.id])
+        try await store.deleteTransaction(loan)
+        try await store.deleteDebt(active)
+        XCTAssertTrue(store.debts.isEmpty)
+        XCTAssertEqual(store.balance(accountID: account.id, currency: "USD", rates: nil), 0)
+    }
+
+    func testRecipientsWithoutSavedOrderRemainReadableAndCanBeReordered() async throws {
+        let repository = try LocalTestData.repository(imported: false)
+        let ids = [UUID(), UUID()]
+        try repository.importSnapshot(SyncSnapshot(workspaceId: UUID(), generation: 1, cursor: "1", records:
+            zip(ids, ["Zoe", "Alice"]).map { id, name in
+                SyncRecord(entity: "debt", key: id.uuidString.lowercased(), version: "1", data: [
+                    "id": .string(id.uuidString), "name": .string(name),
+                    "icon": .string("user"), "color": .string("blue")
+                ])
+            }
+        ))
+        let store = TransactionStore(repository: repository)
+        XCTAssertEqual(store.debts.map(\.name), ["Alice", "Zoe"])
+        let added = try await store.createDebt(name: "Aaron")
+        XCTAssertEqual(store.debts.last?.id, added.id)
+        try await store.reorderDebts(Array(store.debts.reversed()))
+        XCTAssertEqual(store.debts.map(\.name), ["Aaron", "Zoe", "Alice"])
+    }
+
+    func testQuickEntryTextSurvivesStoreRefreshButNotANewAppSession() async throws {
+        let repository = try LocalTestData.repository()
+        let store = TransactionStore(repository: repository)
+        let revision = repository.snapshot.revision
+        store.quickEntryText = "Coffee 4.50"
+        await store.loadTransactions(accountID: nil)
+        XCTAssertEqual(store.quickEntryText, "Coffee 4.50")
+        XCTAssertEqual(repository.snapshot.revision, revision, "Typing must not write to local storage")
+        XCTAssertNil(try repository.value(String.self, key: "quickEntryText"))
+
+        let reopened = TransactionStore(repository: try LocalFinanceRepository(path: repository.requireDatabase().pool.path))
+        XCTAssertEqual(reopened.quickEntryText, "")
+    }
+
+    func testSuccessfulQuickEntrySubmissionClearsTextAndPreservesReview() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let response = try quickEntryResponse(accountID: account.id)
+        let session = makeSession { _ in (200, response) }
+        defer { session.invalidateAndCancel(); TransactionTestProtocol.handler = nil }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://quick-entry.test")!, session: session), repository: repository)
+        store.quickEntryText = "  Coffee 4.50\n"
+        let review = try await store.interpretQuickEntry(text: "Coffee 4.50", defaultAccountID: account.id)
+        XCTAssertEqual(store.quickEntryText, "")
+        XCTAssertNil(try repository.value(String.self, key: "quickEntryText"))
+        let reopened = TransactionStore(repository: try LocalFinanceRepository(path: repository.requireDatabase().pool.path))
+        XCTAssertEqual(reopened.quickEntryText, "")
+        XCTAssertEqual(reopened.savedQuickEntryReview()?.id, review.id)
+        XCTAssertEqual(reopened.savedQuickEntryReview()?.prompt, "Coffee 4.50")
+    }
+
+    func testFailedQuickEntrySubmissionKeepsTextForRetry() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let session = makeSession { _ in throw URLError(.notConnectedToInternet) }
+        defer { session.invalidateAndCancel(); TransactionTestProtocol.handler = nil }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://quick-entry.test")!, session: session), repository: repository)
+        store.quickEntryText = "Coffee 4.50"
+        do {
+            _ = try await store.interpretQuickEntry(text: store.quickEntryText, defaultAccountID: account.id)
+            XCTFail("The mocked offline request must fail")
+        } catch {
+            XCTAssertEqual(store.quickEntryText, "Coffee 4.50")
+            XCTAssertNil(store.savedQuickEntryReview())
+            XCTAssertNil(try repository.value(String.self, key: "quickEntryText"))
+        }
+    }
+
+    func testQuickEntryResponseKeepsTextEditedWhileSubmitting() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let response = try quickEntryResponse(accountID: account.id)
+        let requested = expectation(description: "Interpretation request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        let session = makeSession { _ in
+            requested.fulfill()
+            guard releaseResponse.wait(timeout: .now() + 5) == .success else { throw URLError(.timedOut) }
+            return (200, response)
+        }
+        defer { releaseResponse.signal(); session.invalidateAndCancel(); TransactionTestProtocol.handler = nil }
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://quick-entry.test")!, session: session), repository: repository)
+        store.quickEntryText = "Coffee 4.50"
+        let submission = Task { try await store.interpretQuickEntry(text: store.quickEntryText, defaultAccountID: account.id) }
+        await fulfillment(of: [requested], timeout: 3)
+        store.quickEntryText = "Lunch 12"
+        releaseResponse.signal()
+        _ = try await submission.value
+        XCTAssertEqual(store.quickEntryText, "Lunch 12")
+        XCTAssertEqual(store.savedQuickEntryReview()?.prompt, "Coffee 4.50")
+    }
+
+    private func quickEntryResponse(accountID: UUID) throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "referenceNow": "2026-09-11T10:00:00Z",
+            "transactions": [["id": UUID().uuidString, "kind": "expense", "accountId": accountID.uuidString,
+                "amount": "4.5", "currency": "USD", "counterparty": "Cafe", "occurredAt": "2026-09-11T10:00:00Z"]],
+        ])
+    }
+
     func testDebtScreensRenderInLightAndDark() async throws {
         let recipient = Debt(id: UUID(), name: "Alexey", icon: "star", color: .purple)
-        let account = Account(id: UUID(), name: "Main account", type: .checking, currency: "USD",
+        let account = Account(id: UUID(), name: "Main account", currency: "USD",
             icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
         var loan = transaction(accountID: account.id, kind: .debt, amount: "125.50")
         loan.debtId = recipient.id
@@ -93,10 +252,10 @@ final class TransactionStoreTests: XCTestCase {
         XCTAssertNil(model.debtID)
     }
 
-    func testCategoryIconCatalogHasRichDistinctGroups() {
-        XCTAssertEqual(CategoryIconCatalog.groups.count, 11)
-        XCTAssertTrue(CategoryIconCatalog.groups.allSatisfy { $0.icons.count >= 16 })
-        XCTAssertEqual(Set(CategoryIconCatalog.choices).count, CategoryIconCatalog.choices.count)
+    func testAppIconCatalogHasRichDistinctGroups() {
+        XCTAssertEqual(AppIconCatalog.groups.count, 11)
+        XCTAssertTrue(AppIconCatalog.groups.allSatisfy { $0.icons.count >= 16 })
+        XCTAssertEqual(Set(AppIconCatalog.choices).count, AppIconCatalog.choices.count)
     }
 
     func testExtendedCategoryColorsUseStableAPINames() throws {
@@ -158,11 +317,11 @@ final class TransactionStoreTests: XCTestCase {
 
 
 
-    func testUpcomingIncomeUsesPayeeAndPositiveAmount() {
+    func testUpcomingIncomeUsesCounterpartyAndPositiveAmount() {
         let upcoming = UpcomingTransaction(
             id: UUID(), accountId: UUID(), kind: .income, amount: "2100", currency: "USD",
-            category: nil, merchant: "Ignored merchant", payee: "Salary", note: "Monthly pay",
-            frequency: .monthly, occurredAt: .now
+            category: nil, note: "Monthly pay",
+            frequency: .monthly, occurredAt: .now, counterparty: "Salary"
         )
         XCTAssertEqual(upcoming.title, "Salary")
         XCTAssertTrue(upcoming.amountText.hasPrefix("+"))
@@ -172,7 +331,7 @@ final class TransactionStoreTests: XCTestCase {
         let item = upcomingTransaction()
         let model = AddTransactionViewModel(transaction: item)
         XCTAssertEqual(model.accountID, item.accountId)
-        XCTAssertEqual(model.merchant, "Netflix")
+        XCTAssertEqual(model.counterparty, "Netflix")
         XCTAssertEqual(model.occurredAt, item.occurredAt)
         XCTAssertEqual(model.recurrenceFrequency, .monthly)
         XCTAssertEqual(model.recurrenceEndAt, item.endAt)
@@ -218,7 +377,7 @@ final class TransactionStoreTests: XCTestCase {
 
 
     private func upcomingTransaction(id: UUID = UUID(), accountID: UUID = UUID(), amount: String = "14.99") -> UpcomingTransaction {
-        UpcomingTransaction(id: id, accountId: accountID, kind: .expense, amount: amount, currency: "USD", category: nil, merchant: "Netflix", payee: nil, note: nil, frequency: .monthly, occurredAt: ISO8601DateFormatter().date(from: "2100-01-31T12:00:00Z")!, endAt: ISO8601DateFormatter().date(from: "2100-12-31T12:00:00Z"))
+        UpcomingTransaction(id: id, accountId: accountID, kind: .expense, amount: amount, currency: "USD", category: nil, note: nil, frequency: .monthly, occurredAt: ISO8601DateFormatter().date(from: "2100-01-31T12:00:00Z")!, endAt: ISO8601DateFormatter().date(from: "2100-12-31T12:00:00Z"), counterparty: "Netflix")
     }
 
     private func transaction(

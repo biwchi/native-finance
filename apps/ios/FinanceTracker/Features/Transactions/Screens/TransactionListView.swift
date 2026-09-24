@@ -4,6 +4,8 @@ import SwiftUI
 struct TransactionListView: View {
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
+    @AppStorage(AppPreferences.defaultCurrencyKey) private var reportingCurrency = AppPreferences.initialCurrency
+    @StateObject private var rates = ExchangeRateStore()
     @State private var editingTransaction: FinanceTransaction?
     @State private var presentedAlert: TransactionListAlert?
     @State private var deletingTransactionID: UUID?
@@ -41,7 +43,10 @@ struct TransactionListView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(4))
         .environment(\.defaultMinListRowHeight, 0)
-        .sheet(item: $editingTransaction) { transaction in
+        .task(id: rateScope) {
+            await rates.load(currencies: currencies, reportingCurrency: currency)
+        }
+        .appSheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .environmentObject(accountStore)
                 .environmentObject(transactionStore)
@@ -85,7 +90,9 @@ struct TransactionListView: View {
             TransactionRow(
                 transaction: transaction,
                 account: accountStore.accounts.first { $0.id == transaction.accountId },
-                timestampStyle: recentLimit == nil ? .time : .dateAndTime
+                timestampStyle: recentLimit == nil ? .time : .dateAndTime,
+                displayCurrency: accountStore.selectedAccount?.currency,
+                exchangeRates: rates.snapshot
             )
                 .contentShape(Rectangle())
         }
@@ -105,6 +112,10 @@ struct TransactionListView: View {
         }
         return groups.keys.sorted(by: >).map { (day: $0, transactions: groups[$0] ?? []) }
     }
+
+    private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
+    private var currencies: Set<String> { Set(transactionStore.transactions(for: accountStore.selectedAccountID).map(\.currency)) }
+    private var rateScope: String { "\(currency):\(currencies.sorted().joined(separator: ","))" }
 
     private var emptyDescription: String {
         if let account = accountStore.selectedAccount {

@@ -69,7 +69,7 @@ function account(name: string): Account {
   return {
     id: crypto.randomUUID(),
     name,
-    type: "checking",
+    initialBalance: "0",
     currency: "KZT",
     icon: "card",
     iconColor: "red",

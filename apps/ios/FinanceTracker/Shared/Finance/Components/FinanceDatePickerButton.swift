@@ -15,7 +15,7 @@ struct FinanceDatePickerButton: View {
     @State private var savedCustom: FinanceDateFilter?
     @GestureState private var isDragging = false
     @State private var contentOffset: CGFloat = 0
-    @State private var isSettling = false
+    @State private var labelTransition: LabelTransition?
     @State private var labelWidth: CGFloat = 1
     @State private var isPressed = false
     @State private var isHolding = false
@@ -28,7 +28,7 @@ struct FinanceDatePickerButton: View {
             }
 
             Button {
-                guard !isSettling else { return }
+                resetLabelTransition()
                 if let onChooseDate {
                     onChooseDate()
                 } else {
@@ -64,7 +64,7 @@ struct FinanceDatePickerButton: View {
         .contentShape(Capsule())
         .highPriorityGesture(periodDrag)
         .frame(maxWidth: isToolbarItem ? nil : .infinity, alignment: .center)
-        .sheet(isPresented: $isShowingFilter) {
+        .appSheet(isPresented: $isShowingFilter, layout: .content, background: AppColor.elevatedSurface) {
             FinanceDateFilterSheet(selection: selection, savedCustom: savedCustom, calendar: calendar) { result, custom in
                 selection = result
                 savedCustom = custom
@@ -90,7 +90,12 @@ struct FinanceDatePickerButton: View {
             // Keep this choice until the gesture settles.
             allowsMultiplePeriods = true
         }
-        .onChange(of: selection) { _, filter in rememberCustom(filter) }
+        .onChange(of: selection) { _, filter in
+            rememberCustom(filter)
+            if let labelTransition, filter != labelTransition.target {
+                resetLabelTransition()
+            }
+        }
         .onChange(of: isDragging) { _, dragging in
             // A cancelled gesture should settle back just like a short swipe.
             if !dragging, !isSettling, contentOffset != 0 {
@@ -120,6 +125,8 @@ struct FinanceDatePickerButton: View {
     private var isInteracting: Bool {
         isHolding
     }
+
+    private var isSettling: Bool { labelTransition != nil }
 
     private var isPressActive: Bool {
         isEnabled && (isPressed || isDragging)
@@ -196,7 +203,8 @@ struct FinanceDatePickerButton: View {
     }
 
     private func label(for offset: Int) -> some View {
-        PeriodLabel(selection: selection, offset: offset, calendar: calendar, locale: locale, isToolbarItem: isToolbarItem)
+        PeriodLabel(selection: labelTransition?.source ?? selection, offset: offset,
+                    calendar: calendar, locale: locale, isToolbarItem: isToolbarItem)
             .equatable()
     }
 
@@ -207,17 +215,18 @@ struct FinanceDatePickerButton: View {
     private var periodDrag: some Gesture {
         DragGesture(minimumDistance: 16)
             .updating($isDragging) { _, dragging, _ in
-                guard isEnabled, selection.preset != .allTime, !isSettling else { return }
+                guard isEnabled, selection.preset != .allTime else { return }
                 dragging = true
             }
             .onChanged { value in
-                guard isEnabled, selection.preset != .allTime, !isSettling,
+                guard isEnabled, selection.preset != .allTime,
                       abs(value.translation.width) > abs(value.translation.height) else { return }
+                if isSettling { resetLabelTransition() }
                 // Persist the last displayed position across GestureState's reset.
                 contentOffset = max(-maximumDragDistance, min(maximumDragDistance, value.translation.width))
             }
             .onEnded { value in
-                guard isEnabled, selection.preset != .allTime, !isSettling,
+                guard isEnabled, selection.preset != .allTime,
                       abs(value.translation.width) > abs(value.translation.height) else { return }
                 let distance = value.translation.width
                 let projected = value.predictedEndTranslation.width
@@ -237,32 +246,45 @@ struct FinanceDatePickerButton: View {
     }
 
     private func navigate(by step: Int) {
-        guard isEnabled, selection.preset != .allTime, !isSettling else { return }
+        guard isEnabled, selection.preset != .allTime else { return }
+        if isSettling { resetLabelTransition() }
         let original = selection
         let target = step == 0 ? selection : selection.shifted(by: step, calendar: calendar)
-        guard !reduceMotion else {
+        // Update the screen immediately. Only the label strip waits for the spring.
+        withTransaction(Transaction(animation: nil)) {
             selection = target
-            contentOffset = 0
-            isHolding = false
-            allowsMultiplePeriods = false
+        }
+        guard !reduceMotion else {
+            resetLabelTransition()
             return
         }
 
-        isSettling = true
+        let transition = LabelTransition(source: original, target: selection)
+        labelTransition = transition
         withAnimation(settlingAnimation, completionCriteria: .removed) {
             contentOffset = -CGFloat(step) * pageStride
         } completion: {
-            // An external filter change takes precedence over an animation in flight.
-            // Rebase the pager without a slide, while allowing the summary's
-            // value-driven numeric transitions to animate the new amounts.
-            withTransaction(Transaction(animation: nil)) {
-                if selection == original { selection = target }
-                contentOffset = 0
-                isSettling = false
-                isHolding = false
-                allowsMultiplePeriods = false
-            }
+            // An interrupted animation must not reset a newer interaction.
+            guard labelTransition?.id == transition.id else { return }
+            resetLabelTransition()
         }
+    }
+
+    private func resetLabelTransition() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            labelTransition = nil
+            contentOffset = 0
+            isHolding = false
+            allowsMultiplePeriods = false
+        }
+    }
+
+    private struct LabelTransition {
+        let id = UUID()
+        let source: FinanceDateFilter
+        let target: FinanceDateFilter
     }
 
     private struct PeriodLabel: View, Equatable {

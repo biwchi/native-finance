@@ -3,6 +3,33 @@ import XCTest
 
 @MainActor
 final class AddTransactionViewModelTests: XCTestCase {
+    func testEditingKeepsTheOriginalCurrencyUntilExplicitlyCorrectedOrMoved() {
+        let id = UUID()
+        let transaction = Self.transaction(accountID: id, category: nil)
+        let changedAccount = Account(id: id, name: "Card", currency: "KZT", icon: "wallet", iconColor: .blue, createdAt: "", updatedAt: "")
+        let model = AddTransactionViewModel(transaction: transaction)
+        XCTAssertEqual(model.currency(for: changedAccount), "USD")
+        XCTAssertFalse(model.hasChanges(from: transaction))
+        model.setCurrency("kzt")
+        XCTAssertEqual(model.currency(for: changedAccount), "KZT")
+        XCTAssertEqual(model.amountText, "12.5")
+        XCTAssertTrue(model.hasChanges(from: transaction))
+        model.setCurrency("USD")
+        XCTAssertFalse(model.hasChanges(from: transaction))
+
+        let destination = Account(id: UUID(), name: "Cash", currency: "EUR", icon: "wallet", iconColor: .blue, createdAt: "", updatedAt: "")
+        model.setAccountID(destination.id)
+        XCTAssertEqual(model.currency(for: destination), "EUR")
+        model.setAccountID(id)
+        XCTAssertEqual(model.currency(for: changedAccount), "USD")
+
+        let newEntry = AddTransactionViewModel()
+        newEntry.setAccountID(id)
+        XCTAssertEqual(newEntry.currency(for: changedAccount), "KZT")
+        let draft = AddTransactionViewModel(transaction: transaction, preservesOriginalCurrency: false)
+        XCTAssertEqual(draft.currency(for: changedAccount), "KZT")
+    }
+
     func testTransactionModeSwipesCycleInBothDirectionsAndWrap() {
         let modes = QuickTransactionMode.allCases
         var selection = QuickTransactionMode.income
@@ -55,7 +82,21 @@ final class AddTransactionViewModelTests: XCTestCase {
         XCTAssertEqual(expression.canonicalResult, "5.5")
     }
 
-    func testAmountExpressionRejectsDivisionByZeroAndNonPositiveResults() {
+    func testAmountExpressionClearResetsInputAndAcceptsTheNextDigit() {
+        var expression = AmountExpression(rawValue: "125.50")
+
+        expression.clear()
+
+        XCTAssertTrue(expression.rawValue.isEmpty)
+        XCTAssertNil(expression.result)
+        XCTAssertNil(expression.canonicalResult)
+
+        expression.enter("7")
+        XCTAssertEqual(expression.rawValue, "7")
+        XCTAssertEqual(expression.canonicalResult, "7")
+    }
+
+    func testAmountExpressionRejectsDivisionByZeroAndNormalizesNegativeResults() {
         var divisionByZero = AmountExpression()
         ["8", "/", "0"].forEach { divisionByZero.enter($0) }
         XCTAssertNil(divisionByZero.result)
@@ -64,7 +105,12 @@ final class AddTransactionViewModelTests: XCTestCase {
         var negative = AmountExpression()
         ["2", "-", "5"].forEach { negative.enter($0) }
         XCTAssertEqual(negative.result, -3)
-        XCTAssertNil(negative.canonicalResult)
+        XCTAssertEqual(negative.canonicalResult, "3")
+
+        var leadingMinus = AmountExpression()
+        ["-", "1", "2", ".", "5"].forEach { leadingMinus.enter($0) }
+        XCTAssertEqual(leadingMinus.result, Decimal(string: "-12.5"))
+        XCTAssertEqual(leadingMinus.canonicalResult, "12.5")
     }
 
     func testEditingAmountAppendsDigitsToTheNormalizedStoredValue() {
@@ -274,7 +320,7 @@ final class AddTransactionViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isResolvingCategory)
     }
 
-    func testSelectedAccountWinsThenLastUsedIsFallback() {
+    func testAccountSelectionUsesSelectedThenLastUsedThenFirstAccount() {
         let first = Self.account(name: "Cash")
         let second = Self.account(name: "Card")
 
@@ -296,8 +342,18 @@ final class AddTransactionViewModelTests: XCTestCase {
             accounts: [first, second]
         )
 
+        let firstAccountViewModel = AddTransactionViewModel(
+            resolver: StubCategoryResolver { _, _, _ in nil }
+        )
+        firstAccountViewModel.configureAccount(
+            selectedAccountID: nil,
+            lastUsedAccountID: nil,
+            accounts: [first, second]
+        )
+
         XCTAssertEqual(selectedViewModel.accountID, second.id)
         XCTAssertEqual(fallbackViewModel.accountID, first.id)
+        XCTAssertEqual(firstAccountViewModel.accountID, first.id)
     }
 
     func testSavingRequiresOnlyAccountAndPositiveUnambiguousAmount() {
@@ -366,7 +422,6 @@ final class AddTransactionViewModelTests: XCTestCase {
         Account(
             id: UUID(),
             name: name,
-            type: .cash,
             currency: "USD",
             icon: "banknote.fill",
             iconColor: .green,

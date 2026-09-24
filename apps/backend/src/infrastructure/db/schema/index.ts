@@ -7,3 +7,4 @@ export * from "./exchange-rate.schema.ts";
 export * from "./recurring-schedule.schema.ts";
 export * from "./transaction.schema.ts";
 export * from "./sync.schema.ts";
+export * from "./goal.schema.ts";

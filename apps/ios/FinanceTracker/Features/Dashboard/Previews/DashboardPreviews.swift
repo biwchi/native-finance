@@ -21,7 +21,6 @@ private enum DashboardPreviewData {
     static let account = Account(
         id: UUID(),
         name: "Everyday card",
-        type: .checking,
         currency: "KZT",
         icon: "credit-card",
         iconColor: .blue,

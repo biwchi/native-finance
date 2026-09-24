@@ -8,12 +8,9 @@ struct QuickEntryDraftPayload: Decodable {
     let amount: String
     let currency: String
     let categoryId: UUID?
-    let merchant: String?
-    let payee: String?
     let note: String?
     let occurredAt: Date
     let recurrence: QuickEntryRecurrence?
-    let sourceText: String
     let conversion: QuickEntryConversion?
-    let warnings: [String]
+    var counterparty: String? = nil
 }

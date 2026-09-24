@@ -7,20 +7,25 @@ struct FinancesView: View {
     var body: some View {
         AppList(usesScrollEdgeFades: false) {
             AppSection {
-                NavigationLink {
+                AppNavigationLink {
                     RecurringTransactionsView(allAccounts: true)
                 } label: {
                     destination("Recurring", detail: "Bills, subscriptions & regular income", icon: "repeat")
                 }
-                NavigationLink {
+                AppNavigationLink {
                     DebtsView()
                 } label: {
                     destination("Debts", detail: "Money owed to you, by recipient", icon: "user")
                 }
-                NavigationLink {
+                AppNavigationLink {
                     BudgetOverviewView(initialMonth: initialMonth)
                 } label: {
                     destination("Budget", detail: "Spending, pools & category limits", icon: "percentage-circle")
+                }
+                AppNavigationLink {
+                    GoalsView()
+                } label: {
+                    destination("Goals", detail: "Save for what matters to you", icon: "target")
                 }
             } footer: {
                 Text("Keep track of your plans and commitments in one place.")

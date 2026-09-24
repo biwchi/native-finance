@@ -9,7 +9,6 @@ struct BudgetSettingsView: View {
     let currency: String
     let budget: MonthlyBudget?
 
-    @State private var hasMonthlyLimit: Bool
     @State private var monthlyLimit: String
     @State private var groups: [BudgetGroupDraft]
     @State private var standaloneAssignments: [BudgetCategoryDraft]
@@ -26,7 +25,6 @@ struct BudgetSettingsView: View {
         self.budget = budget
 
         let assignments = budget?.categoryAssignments ?? []
-        _hasMonthlyLimit = State(initialValue: budget?.monthlyLimit != nil)
         _monthlyLimit = State(initialValue: BudgetAmountParser.editable(budget?.monthlyLimit))
         _groups = State(
             initialValue: (budget?.groups ?? []).map { group in
@@ -66,7 +64,6 @@ struct BudgetSettingsView: View {
             if budget != nil {
                 AppSection {
                     Button("Clear budget", role: .destructive) {
-                        hasMonthlyLimit = false
                         monthlyLimit = ""
                         groups = []
                         standaloneAssignments = []
@@ -76,10 +73,9 @@ struct BudgetSettingsView: View {
         }
         .animateListChanges(value: groups.map(\.id))
         .animateListChanges(value: limitedAssignments.map(\.id))
-        .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .disabled(isSaving)
         .scrollDismissesKeyboard(.interactively)
-        .navigationBarBackButtonHidden(isSaving)
+        .appBackNavigationDisabled(isSaving)
         .safeAreaInset(edge: .bottom) {
             saveBar
         }
@@ -95,34 +91,28 @@ struct BudgetSettingsView: View {
 
     private var monthlyLimitSection: some View {
         AppSection {
-            Toggle(isOn: $hasMonthlyLimit.animation(.snappy)) {
-                Label("Monthly limit", icon: "calendar")
-            }
-
-            if hasMonthlyLimit {
-                BudgetAmountField(
-                    title: "Limit",
-                    text: $monthlyLimit,
-                    currency: currency
-                )
-                .transition(.opacity)
-            }
+            BudgetAmountField(
+                title: "Monthly limit",
+                text: $monthlyLimit,
+                currency: currency
+            )
         } header: {
             Text("Monthly budget")
         } footer: {
-            Text("These limits apply to every month. Changes also apply when viewing previous months.")
+            Text("Leave blank for no monthly limit. These limits apply to every month, including previous months.")
         }
     }
 
     private var groupsSection: some View {
-        AppSection("Spending pools") {
+        AppSection {
             ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                 groupRow(group, index: index)
             }
 
-            NavigationLink {
+            AppNavigationLink {
                 BudgetGroupEditorView(
                     group: BudgetGroupDraft(),
+                    isNew: true,
                     categories: expenseCategories,
                     currency: currency,
                     unavailableCategoryIDs: assignedCategoryIDs
@@ -132,6 +122,10 @@ struct BudgetSettingsView: View {
             } label: {
                 Label("Add pool", icon: "plus")
             }
+        } header: {
+            Text("Spending pools")
+        } footer: {
+            Text("Group categories under one shared spending limit.")
         }
     }
 
@@ -140,7 +134,7 @@ struct BudgetSettingsView: View {
         let limit = BudgetAmountParser.parse(group.limit) ?? 0
         let tint = groupTint(index)
 
-        return NavigationLink {
+        return AppNavigationLink {
             BudgetGroupEditorView(
                 group: group,
                 categories: expenseCategories,
@@ -161,13 +155,13 @@ struct BudgetSettingsView: View {
     }
 
     private var categoryLimitsSection: some View {
-        AppSection("Category limits") {
+        AppSection {
             ForEach(limitedAssignments) { reference in
                 categoryLimitRow(reference)
             }
 
             if !availableLimitCategoryIDs.isEmpty {
-                NavigationLink {
+                AppNavigationLink {
                     BudgetCategoryLimitEditor(
                         assignment: nil,
                         categories: expenseCategories.filter {
@@ -183,11 +177,15 @@ struct BudgetSettingsView: View {
                     Label("Add category limit", icon: "plus")
                 }
             }
+        } header: {
+            Text("Category limits")
+        } footer: {
+            Text("Set limits for individual categories, including those in a pool.")
         }
     }
 
     private func categoryLimitRow(_ reference: BudgetAssignmentReference) -> some View {
-        NavigationLink {
+        AppNavigationLink {
             BudgetCategoryLimitEditor(
                 assignment: reference,
                 categories: expenseCategories.filter {
@@ -348,7 +346,7 @@ struct BudgetSettingsView: View {
 
     private func makeRequest() throws -> MonthlyBudgetRequest {
         let totalLimit: String?
-        if hasMonthlyLimit {
+        if !monthlyLimit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard let amount = BudgetAmountParser.normalized(monthlyLimit) else {
                 throw BudgetDraftError("Enter a monthly limit greater than zero.")
             }

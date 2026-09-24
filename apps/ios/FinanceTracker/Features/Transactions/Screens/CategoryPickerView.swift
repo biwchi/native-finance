@@ -22,7 +22,7 @@ struct CategoryPickerView: View {
                         Text("No category")
                             .foregroundStyle(.primary)
                         Spacer()
-                        selectionIndicator(isSelected: selection == nil)
+                        AccentSelectionButton.Indicator(isSelected: selection == nil)
                     }
                     .contentShape(Rectangle())
                 }
@@ -43,67 +43,36 @@ struct CategoryPickerView: View {
                 .foregroundStyle(.tint)
             }
 
-            AppSection(kind == .expense ? "Expense categories" : "Income categories") {
-                ForEach(filteredCategories) { category in
-                    let children = transactionStore.subcategories(of: category)
-
-                    if searchText.isEmpty && !children.isEmpty {
-                        NavigationLink(value: category) {
-                            CategorySelectionRow(
-                                category: category,
-                                title: category.name,
-                                isSelected: selection == category.id ||
-                                    children.contains(where: { $0.id == selection })
-                            )
-                        }
-                    } else {
-                        Button {
-                            select(category.id)
-                        } label: {
-                            CategorySelectionRow(
-                                category: category,
-                                title: transactionStore.categoryPath(category),
-                                isSelected: selection == category.id
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(selection == category.id ? .isSelected : [])
-                    }
-                }
-
-                if filteredCategories.isEmpty {
-                    if searchText.isEmpty {
-                        ContentUnavailableView(
-                            "No categories yet",
-                            iconName: "label",
-                            description: Text("Create a category to organize your transactions.")
-                        )
-                    } else {
-                        ContentUnavailableView(
-                            "No categories found",
-                            iconName: "search",
-                            description: Text("No results for “\(searchText)”.")
+            AppSection {
+                CategoryListRows(
+                    categories: transactionStore.categories(for: kind),
+                    query: query,
+                    emptyDescription: "Create a category to organize your transactions."
+                ) { category, isSubcategory in
+                    Button {
+                        select(category.id)
+                    } label: {
+                        CategoryListRow(
+                            category: category,
+                            isSubcategory: isSubcategory,
+                            accessory: .checkmark(isSelected: selection == category.id)
                         )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(selection == category.id ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(selection == category.id ? .isSelected : [])
                 }
             }
         }
         .listStyle(.insetGrouped)
+        .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search categories")
-        .navigationDestination(for: TransactionCategory.self) { parent in
-            SubcategoryPickerView(
-                parent: parent,
-                subcategories: transactionStore.subcategories(of: parent),
-                selection: selection,
-                onSelect: select
-            )
-        }
         .task {
             guard !transactionStore.isLoadingCategories else { return }
             await transactionStore.loadCategories()
         }
-        .sheet(isPresented: $isPresentingNewCategory, onDismiss: {
+        .appSheet(isPresented: $isPresentingNewCategory, onDismiss: {
             if didCreateCategory {
                 onSelect(selection)
             }
@@ -118,21 +87,6 @@ struct CategoryPickerView: View {
         }
     }
 
-    private var categories: [TransactionCategory] {
-        transactionStore.rootCategories(for: kind)
-    }
-
-    private var searchText: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var filteredCategories: [TransactionCategory] {
-        guard !searchText.isEmpty else { return categories }
-        return transactionStore.categories(for: kind).filter {
-            transactionStore.categoryPath($0).localizedStandardContains(searchText)
-        }
-    }
-
     private func select(_ categoryID: UUID?) {
         selection = categoryID
         onSelect(categoryID)
@@ -144,14 +98,5 @@ struct CategoryPickerView: View {
             .frame(width: 36, height: 36)
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: AppRadius.small))
             .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func selectionIndicator(isSelected: Bool) -> some View {
-        if isSelected {
-            AppIcon("check", size: 17)
-                .foregroundStyle(.tint)
-                .accessibilityHidden(true)
-        }
     }
 }

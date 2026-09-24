@@ -1,59 +1,217 @@
+import SwiftUI
 import UIKit
+import ObjectiveC
 
-/// Styles the native back item, retaining UIKit's pop gesture and navigation menu.
+/// Destination toolbars declare their back control before SwiftUI builds the
+/// transition. UIKit only supplies the native pop gesture and ancestor menu.
+@MainActor
 enum LegacyNavigationAppearance {
-    static func needsUpdate(_ navigationController: UINavigationController) -> Bool {
-        let bar = navigationController.navigationBar
-        let itemAppearances = navigationController.viewControllers.flatMap { controller in
-            let item = controller.navigationItem
-            return [item.standardAppearance, item.compactAppearance, item.scrollEdgeAppearance, item.compactScrollEdgeAppearance]
-        }
-        return ([bar.standardAppearance, bar.compactAppearance, bar.scrollEdgeAppearance, bar.compactScrollEdgeAppearance] + itemAppearances)
-            .compactMap { $0 }
-            .contains { $0.backIndicatorImage.size.width != AppControlSize.minimumTapTarget }
+    private static var coordinatorKey: UInt8 = 0
+
+    static func needsUpdate(_ navigation: UINavigationController) -> Bool {
+        guard #unavailable(iOS 26.0) else { return false }
+        return objc_getAssociatedObject(navigation, &coordinatorKey) == nil
     }
 
-    static func apply(to navigationController: UINavigationController) {
-        let bar = navigationController.navigationBar
-        let image = backImage(traits: bar.traitCollection)
-        func appearance(_ original: UINavigationBarAppearance?, transparent: Bool = false) -> UINavigationBarAppearance {
-            let result = original?.copy() ?? UINavigationBarAppearance()
-            if original == nil, transparent { result.configureWithTransparentBackground() }
-            result.setBackIndicatorImage(image, transitionMaskImage: image)
-            return result
+    static func apply(to navigation: UINavigationController) {
+        guard #unavailable(iOS 26.0) else { return }
+        if let coordinator = objc_getAssociatedObject(navigation, &coordinatorKey) as? Coordinator {
+            coordinator.install()
+            return
         }
-        bar.standardAppearance = appearance(bar.standardAppearance)
-        bar.compactAppearance = appearance(bar.compactAppearance)
-        bar.scrollEdgeAppearance = appearance(bar.scrollEdgeAppearance, transparent: true)
-        bar.compactScrollEdgeAppearance = appearance(bar.compactScrollEdgeAppearance, transparent: true)
-        navigationController.viewControllers.forEach { controller in
-            let item = controller.navigationItem
-            item.backButtonDisplayMode = .minimal
-            if let original = item.standardAppearance { item.standardAppearance = appearance(original) }
-            if let original = item.compactAppearance { item.compactAppearance = appearance(original) }
-            if let original = item.scrollEdgeAppearance { item.scrollEdgeAppearance = appearance(original) }
-            if let original = item.compactScrollEdgeAppearance { item.compactScrollEdgeAppearance = appearance(original) }
+        let coordinator = Coordinator(navigation)
+        objc_setAssociatedObject(navigation, &coordinatorKey, coordinator, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        coordinator.install()
+    }
+
+    // Do not forward optional callbacks to UIKit's original gesture delegate:
+    // those callbacks retain restrictions tied to the hidden native back item.
+    private final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var navigation: UINavigationController?
+        private var observations: [NSKeyValueObservation] = []
+
+        init(_ navigation: UINavigationController) { self.navigation = navigation }
+
+        func install() {
+            guard let gesture = navigation?.interactivePopGestureRecognizer else { return }
+            if gesture.delegate !== self {
+                gesture.delegate = self
+            }
+            // SwiftUI may reset the recognizer after hiding the native back item.
+            if observations.isEmpty {
+                observations = [
+                    gesture.observe(\.delegate) { [weak self] _, _ in self?.install() },
+                    gesture.observe(\.isEnabled) { [weak self] _, _ in self?.restoreEnabledState() }
+                ]
+            }
+            restoreEnabledState()
+        }
+
+        private func restoreEnabledState() {
+            guard let navigation, navigation.viewControllers.count > 1,
+                  let gesture = navigation.interactivePopGestureRecognizer, !gesture.isEnabled else { return }
+            gesture.isEnabled = true
+        }
+
+        // The native delegate also rejects the initial event when the native
+        // back item is hidden. Overriding shouldBegin alone never receives a pan.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive event: UIEvent) -> Bool {
+            canPop
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            canPop
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { canPop }
+
+        private var canPop: Bool {
+            guard let navigation, navigation.viewControllers.count > 1,
+                  navigation.transitionCoordinator == nil else { return false }
+            if let button = Self.backButton(in: navigation.navigationBar) { return button.isEnabled }
+            return false
+        }
+
+        private static func backButton(in view: UIView) -> BackButton? {
+            if let button = view as? BackButton { return button }
+            return view.subviews.lazy.compactMap { backButton(in: $0) }.first
         }
     }
 
-    private static func backImage(traits: UITraitCollection) -> UIImage {
-        let size = CGSize(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
-        return UIGraphicsImageRenderer(size: size).image { _ in
-            let circle = UIBezierPath(ovalIn: CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5))
-            UIColor.secondarySystemGroupedBackground.resolvedColor(with: traits).withAlphaComponent(0.9).setFill()
-            circle.fill()
-            UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.08).setStroke()
-            circle.lineWidth = 0.5
-            circle.stroke()
-            let chevron = UIImage(systemName: "chevron.backward", withConfiguration:
-                UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))?
-                .withTintColor(UIColor.label.resolvedColor(with: traits), renderingMode: .alwaysOriginal)
-            if let chevron {
-                chevron.draw(at: CGPoint(x: (size.width - chevron.size.width) / 2,
-                                        y: (size.height - chevron.size.height) / 2))
+    struct Destination: ViewModifier {
+        @State private var isBackDisabled = false
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if #available(iOS 26.0, *) {
+                content
+            } else {
+                content
+                    .navigationBarBackButtonHidden(true)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Control()
+                                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                                .disabled(isBackDisabled)
+                        }
+                    }
+                    .onPreferenceChange(BackDisabled.self) { isBackDisabled = $0 }
             }
         }
-        .withRenderingMode(.alwaysOriginal)
-        .withAlignmentRectInsets(UIEdgeInsets(top: 6, left: 0, bottom: 6, right: 12))
+    }
+
+    struct BackDisabled: PreferenceKey {
+        static let defaultValue = false
+        static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+    }
+
+    private struct Control: UIViewRepresentable {
+        @Environment(\.dismiss) private var dismiss
+        @Environment(\.isEnabled) private var isEnabled
+
+        func makeUIView(context: Context) -> BackButton { BackButton() }
+        func updateUIView(_ button: BackButton, context: Context) {
+            button.isEnabled = isEnabled
+            button.backAction = { dismiss() }
+        }
+    }
+
+    final class BackButton: UIButton {
+        var backAction: (() -> Void)?
+        private let surface = UIHostingController(rootView: BackSurface())
+
+        init() {
+            super.init(frame: CGRect(x: 0, y: 0, width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget))
+            var configuration = UIButton.Configuration.plain()
+            configuration.image = UIImage(systemName: "chevron.backward")
+            configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+            configuration.baseForegroundColor = .label
+            configuration.contentInsets = .zero
+            self.configuration = configuration
+            accessibilityLabel = String(localized: "Back")
+            accessibilityIdentifier = "legacyNavigationBackButton"
+            surface.view.backgroundColor = .clear
+            surface.view.isUserInteractionEnabled = false
+            surface.view.accessibilityElementsHidden = true
+            insertSubview(surface.view, at: 0)
+            addAction(UIAction { [weak self] _ in
+                guard let self, self.isEnabled else { return }
+                self.backAction?()
+            }, for: .touchUpInside)
+            menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.ancestorActions() ?? [])
+            }])
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            var responder: UIResponder? = self
+            while let current = responder {
+                if let navigation = current as? UINavigationController {
+                    LegacyNavigationAppearance.apply(to: navigation)
+                    break
+                }
+                responder = current.next
+            }
+        }
+
+        override var intrinsicContentSize: CGSize {
+            CGSize(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            surface.view.frame = bounds
+            sendSubviewToBack(surface.view)
+        }
+
+        override var isHighlighted: Bool {
+            didSet { alpha = isHighlighted ? 0.55 : (isEnabled ? 1 : 0.35) }
+        }
+
+        override var isEnabled: Bool {
+            didSet { alpha = isEnabled ? 1 : 0.35 }
+        }
+
+        func ancestorActions() -> [UIAction] {
+            var responder: UIResponder? = self
+            while let current = responder {
+                if let navigation = current as? UINavigationController {
+                    return navigation.viewControllers.dropLast().reversed().map { ancestor in
+                        let title = ancestor.navigationItem.title.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Back")
+                        return UIAction(title: title) { [weak navigation, weak ancestor] _ in
+                            guard let navigation, let ancestor, navigation.transitionCoordinator == nil else { return }
+                            navigation.popToViewController(ancestor, animated: true)
+                        }
+                    }
+                }
+                responder = current.next
+            }
+            return []
+        }
+    }
+
+    private struct BackSurface: View {
+        var body: some View {
+            Color.clear.modifier(LegacyGlassSurface(shape: Circle()))
+        }
+    }
+}
+
+extension View {
+    func legacyNavigationDestination() -> some View {
+        modifier(LegacyNavigationAppearance.Destination())
+    }
+
+    @ViewBuilder
+    func appBackNavigationDisabled(_ disabled: Bool) -> some View {
+        if #available(iOS 26.0, *) {
+            navigationBarBackButtonHidden(disabled)
+        } else {
+            preference(key: LegacyNavigationAppearance.BackDisabled.self, value: disabled)
+        }
     }
 }

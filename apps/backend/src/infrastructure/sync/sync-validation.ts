@@ -16,6 +16,10 @@ export function money(value: unknown, optional = false): string | null {
   if (typeof value !== "string" || !/^(?!0+(?:\.0{1,4})?$)(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(value)) throw new Error("Enter a positive amount with at most four decimal places");
   return value;
 }
+export function transactionMoney(value: unknown): string {
+  if (typeof value !== "string" || !/^(?!-?0+(?:\.0{1,4})?$)-?(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(value)) throw new Error("Enter a non-zero amount with at most four decimal places");
+  return value.startsWith("-") ? value.slice(1) : value;
+}
 export function date(value: unknown, optional = false): string | null {
   if (value == null && optional) return null;
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new Error("Invalid date");
@@ -33,6 +37,13 @@ export function sortOrder(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 2147483647) throw new Error("Invalid sort order");
   return value;
 }
+export function calendarDay(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Invalid goal deadline");
+  const parsed = new Date(`${value}T12:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error("Invalid goal deadline");
+  return value;
+}
 export const colors = ["red", "coral", "orange", "amber", "yellow", "lime", "green", "mint", "teal", "turquoise", "cyan", "sky", "blue", "navy", "indigo", "violet", "purple", "lavender", "pink", "rose", "brown", "slate", "gray"] as const;
 
 export function normalizeChange(change: SyncChange): SyncChange {
@@ -45,15 +56,27 @@ export function normalizeChange(change: SyncChange): SyncChange {
   const times = change.entity === "debt" || change.entity === "exclusion" ? {} : { createdAt: date(d.createdAt), updatedAt: date(d.updatedAt) };
   let data: Record<string, unknown>;
   switch (change.entity) {
+    case "goal":
+      data = { id, ...times, name: text(d.name, 120), accountId: identifier(d.accountId), targetAmount: money(d.targetAmount), icon: text(d.icon, 80), color: choice(d.color, colors), deadline: calendarDay(d.deadline), sortOrder: sortOrder(d.sortOrder) };
+      break;
     case "account":
-      data = { id, ...times, name: text(d.name, 120), type: choice(d.type, ["cash", "checking", "savings", "credit", "investment"]), currency: currency(d.currency), icon: text(d.icon, 80), iconColor: choice(d.iconColor, ["blue", "indigo", "purple", "pink", "red", "orange", "green", "teal", "gray"]), sortOrder: sortOrder(d.sortOrder) }; break;
+      data = { id, ...times, name: text(d.name, 120), currency: currency(d.currency), icon: text(d.icon, 80), iconColor: choice(d.iconColor, ["blue", "indigo", "purple", "pink", "red", "orange", "green", "teal", "gray"]), sortOrder: sortOrder(d.sortOrder) };
+      // Older queued account edits omit this field and must preserve the saved balance.
+      if (d.initialBalance !== undefined) {
+        if (typeof d.initialBalance !== "string" || !/^-?(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(d.initialBalance)) throw new Error("Enter an initial balance with at most four decimal places");
+        data.initialBalance = d.initialBalance;
+      }
+      break;
     case "category":
       data = { id, ...times, name: text(d.name, 80), kind: choice(d.kind, ["expense", "income"]), parentId: optionalId(d.parentId), icon: text(d.icon, 80, true), color: d.color == null ? null : choice(d.color, colors), sortOrder: sortOrder(d.sortOrder ?? 1000) }; break;
     case "debt":
-      data = { id, name: text(d.name, 200), icon: text(d.icon ?? "user", 80), color: choice(d.color ?? "blue", colors) }; break;
+      data = { id, name: text(d.name, 200), icon: text(d.icon ?? "user", 80), color: choice(d.color ?? "blue", colors) };
+      // Legacy edits must preserve the recipient's saved position.
+      if (d.sortOrder !== undefined) data.sortOrder = sortOrder(d.sortOrder);
+      break;
     case "transaction":
     case "schedule": {
-      data = { id, ...times, accountId: identifier(d.accountId), kind: choice(d.kind, ["expense", "income", "debt"]), amount: money(d.amount), currency: currency(d.currency), categoryId: optionalId(d.categoryId), merchant: text(d.merchant, 500, true), payee: text(d.payee, 500, true), note: text(d.note, 2000, true) };
+      data = { id, ...times, accountId: identifier(d.accountId), kind: choice(d.kind, ["expense", "income", "debt"]), amount: transactionMoney(d.amount), currency: currency(d.currency), categoryId: optionalId(d.categoryId), counterparty: text(d.counterparty, 2000, true), note: text(d.note, 2000, true) };
       if (change.entity === "transaction") Object.assign(data, { debtId: optionalId(d.debtId), recurringScheduleId: optionalId(d.recurringScheduleId), occurredAt: date(d.occurredAt), scheduledFor: date(d.scheduledFor, true) });
       else Object.assign(data, { frequency: choice(d.frequency, ["daily", "weekly", "monthly", "yearly"]), startAt: date(d.startAt), lastOccurrenceAt: date(d.lastOccurrenceAt), nextScheduledFor: date(d.nextScheduledFor, true), nextOccurrenceAt: date(d.nextOccurrenceAt, true), endAt: date(d.endAt, true) });
       break;

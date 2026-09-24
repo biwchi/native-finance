@@ -130,7 +130,7 @@ final class MonthlySummaryTests: XCTestCase {
     @MainActor
     func testDashboardLayoutAtSeveralWidths() async throws {
         let now = Date.now
-        let account = Account(id: UUID(), name: "Everyday card", type: .checking, currency: "KZT",
+        let account = Account(id: UUID(), name: "Everyday card", currency: "KZT",
                               icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
         let budget = MonthlyBudget(id: UUID(), accountId: account.id, currency: "KZT", monthlyLimit: "10000", groups: [], categoryAssignments: [],
                                    createdAt: now, updatedAt: now)

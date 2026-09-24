@@ -8,9 +8,11 @@ struct CategorySettingsView: View {
     @State private var pendingDeletion: TransactionCategory?
     @State private var errorMessage: String?
     @State private var isDeleting = false
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        AppList {
+        AppList(usesCompactTopSpacing: true) {
             AppSection {
                 Picker("Type", selection: $kind) {
                     ForEach([TransactionKind.expense, .income]) { kind in
@@ -18,23 +20,15 @@ struct CategorySettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .padding(.vertical, AppSpacing.extraSmall)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
 
-            AppSection(kind == .expense ? "Expense categories" : "Income categories") {
-                ForEach(categories) { category in
-                    row(category)
-
-                    ForEach(transactionStore.subcategories(of: category)) { subcategory in
-                        row(subcategory, isSubcategory: true)
-                    }
-                }
-
-                if categories.isEmpty {
-                    ContentUnavailableView(
-                        "No categories",
-                        iconName: "label",
-                        description: Text("Tap + to add one.")
-                    )
+            AppSection {
+                CategoryListRows(categories: transactionStore.categories(for: kind), query: query) { category, isSubcategory in
+                    row(category, isSubcategory: isSubcategory)
                 }
             }
 
@@ -45,25 +39,33 @@ struct CategorySettingsView: View {
                 }
             }
         }
+        .listSectionSpacing(.custom(AppSpacing.large))
         .animateListChanges(value: transactionStore.categories.map(\.id))
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            CategorySearchField(query: $query, isFocused: $isSearchFocused)
+                .padding(.horizontal, AppSpacing.extraLarge)
+                .padding(.vertical, AppSpacing.medium)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Group {
                     Button {
+                        isSearchFocused = false
                         editor = CategoryEditor(category: nil, kind: kind)
                     } label: {
                         Label("Add category", icon: "plus")
                     }
                 }
-                .legacyToolbarControl()
+                .legacyToolbarIcon()
             }
         }
         .task {
             await transactionStore.loadCategories()
         }
-        .sheet(item: $editor) { editor in
+        .appSheet(item: $editor) { editor in
             CategoryEditorView(editor: editor)
                 .environmentObject(transactionStore)
                 .presentationDetents([.large])
@@ -87,10 +89,6 @@ struct CategorySettingsView: View {
         .disabled(isDeleting)
     }
 
-    private var categories: [TransactionCategory] {
-        transactionStore.rootCategories(for: kind)
-    }
-
     private func row(
         _ category: TransactionCategory,
         isSubcategory: Bool = false
@@ -99,6 +97,7 @@ struct CategorySettingsView: View {
             category: category,
             isSubcategory: isSubcategory,
             onEdit: {
+                isSearchFocused = false
                 editor = CategoryEditor(
                     category: category,
                     kind: category.kind

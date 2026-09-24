@@ -132,7 +132,7 @@ function account(id: string, currency: string): Account {
   return {
     id,
     name: id,
-    type: "checking",
+    initialBalance: "0",
     currency,
     icon: "creditcard.fill",
     iconColor: "blue",

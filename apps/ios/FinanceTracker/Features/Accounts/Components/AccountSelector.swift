@@ -10,7 +10,6 @@ struct AccountSelector: View {
     @EnvironmentObject private var transactionStore: TransactionStore
     // The picker needs all currencies even when the dashboard is showing one account.
     @StateObject private var exchangeRateStore = ExchangeRateStore()
-    @ScaledMetric(relativeTo: .body) private var iconBadgeSize = 36
 
     @AppStorage(AppPreferences.defaultCurrencyKey)
     private var reportingCurrency = AppPreferences.initialCurrency
@@ -149,11 +148,7 @@ struct AccountSelector: View {
     }
 
     private var selectedIconBadge: some View {
-        AppIcon(selectedIcon, size: 24)
-            .foregroundStyle(AppColor.iconForeground(for: selectedColor))
-            .frame(width: iconBadgeSize, height: iconBadgeSize)
-            .background(selectedColor.opacity(0.14), in: Circle())
-            .accessibilityHidden(true)
+        AccountIconBadge(iconName: selectedIcon, color: selectedColor)
     }
 
     private var selectionSubtitle: String {
@@ -219,7 +214,7 @@ struct AccountSelector: View {
                 )
             )
         } else {
-            AppIcons.resolve(iconName).image().renderingMode(.template)
+            AppIcons.image(named: iconName).renderingMode(.template)
                 .foregroundStyle(.primary)
         }
 #else

@@ -131,7 +131,7 @@ final class SyncCoordinator: ObservableObject {
                     guard response.mutationId == item.id else { throw APIClientError.invalidResponse }
                     try repository.acknowledge(response, for: item)
                 } catch {
-                    if case APIClientError.requestFailed(let status, _) = error, [400, 401, 403, 409, 410, 413, 422].contains(status) {
+                    if case APIClientError.requestFailed(let status, _, _) = error, [400, 401, 403, 409, 410, 413, 422].contains(status) {
                         try repository.reject(item, message: "This change could not be accepted. Review its values or accept the server version.")
                         continue
                     }
@@ -153,6 +153,15 @@ final class SyncCoordinator: ObservableObject {
                 try repository.receive(page)
                 if page.hasMore != true { break }
             } while true
+            if try repository.needsSyncReviewRefresh {
+                let latest = try await transport.syncBootstrap()
+                try Task.checkCancellation()
+                if latest.generation != (try repository.value(Int.self, key: "generation") ?? 1) {
+                    try repository.receiveWorkspaceReset(latest)
+                } else if try repository.reconcileCompletedChanges(with: latest) {
+                    requested = true
+                }
+            }
             materializeDueTransactions()
             try repository.saveValue(0, key: "syncFailures")
             try repository.saveValue(Date.distantPast, key: "syncRetryAt")

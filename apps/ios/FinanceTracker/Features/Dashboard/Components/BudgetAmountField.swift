@@ -19,8 +19,12 @@ struct BudgetAmountField: View {
                     .monospacedDigit()
                     .keyboardType(.decimalPad)
                     .focused($isFocused)
+                    .accessibilityLabel(title)
             }
         }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { isFocused = true }
     }
 
     private var displayedText: Binding<String> {

@@ -30,6 +30,9 @@ final class LocalDatabase {
         migrator.registerMigration("global-budgets-v2") { db in
             try migrateGlobalBudgets(db)
         }
+        migrator.registerMigration("quick-entry-session-text-v3") { db in
+            try db.execute(sql: "DELETE FROM metadata WHERE key='quickEntryText'")
+        }
         try migrator.migrate(pool)
         try pool.write { db in
             if try metadata(UUID.self, "clientID", db: db) == nil { try setMetadata(UUID(), "clientID", db: db) }

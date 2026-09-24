@@ -10,9 +10,13 @@ struct AddTransactionView: View {
     let transaction: FinanceTransaction?
     let upcomingTransaction: UpcomingTransaction?
     let quickEntryDraft: QuickEntryDraft?
+    let isCSVImport: Bool
     let initialCommand: String?
     let initialAccountID: UUID?
     let onSaveDraft: ((QuickEntryDraft) -> Void)?
+    let onBottomActionBarHeightChange: (CGFloat) -> Void
+    private let initialKind: TransactionKind
+    private let initialRecurring: Bool
 
     @StateObject private var viewModel: AddTransactionViewModel
     @StateObject private var exchangeRateStore = ExchangeRateStore()
@@ -33,14 +37,20 @@ struct AddTransactionView: View {
         initialAccountID: UUID? = nil,
         initialKind: TransactionKind = .expense,
         initialRecurring: Bool = false,
+        isCSVImport: Bool = false,
+        onBottomActionBarHeightChange: @escaping (CGFloat) -> Void = { _ in },
         onSaveDraft: ((QuickEntryDraft) -> Void)? = nil
     ) {
         self.transaction = transaction
         self.upcomingTransaction = upcomingTransaction
         quickEntryDraft = draft
+        self.isCSVImport = isCSVImport
         self.initialCommand = initialCommand
         self.initialAccountID = initialAccountID
         self.onSaveDraft = onSaveDraft
+        self.onBottomActionBarHeightChange = onBottomActionBarHeightChange
+        self.initialKind = initialKind
+        self.initialRecurring = initialRecurring
         let original: (any EditableTransaction)?
         if let draft {
             original = draft
@@ -50,6 +60,7 @@ struct AddTransactionView: View {
             original = transaction
         }
         let model = AddTransactionViewModel(transaction: original)
+        if isCSVImport, let draft { model.setCurrency(draft.currency) }
         if original == nil, initialKind != .expense { model.setKind(initialKind, categories: []) }
         if original == nil, initialRecurring { model.setRecurring(true) }
         _viewModel = StateObject(wrappedValue: model)
@@ -87,28 +98,29 @@ struct AddTransactionView: View {
                 }
                 .interactiveDismissDisabled(isSaving)
                 .navigationDestination(for: AddTransactionRoute.self) { route in
-                    switch route {
-                    case .categoryPicker:
-                        CategoryPickerView(
-                            selection: categoryBinding,
-                            kind: viewModel.kind,
-                            onSelect: selectCategory
-                        )
-                    case .details:
-                        QuickTransactionDetailsView(
-                            merchant: merchantBinding,
-                            payee: payeeBinding,
-                            note: noteBinding,
-                            supportsRecurrence: mode != .transfer && mode != .debt,
-                            isRecurring: recurringBinding,
-                            frequency: recurrenceFrequencyBinding,
-                            hasEndDate: hasRecurrenceEndDateBinding,
-                            endDate: recurrenceEndDateBinding
-                        )
-                    }
+                    Group {
+                        switch route {
+                        case .categoryPicker:
+                            CategoryPickerView(
+                                selection: categoryBinding,
+                                kind: viewModel.kind,
+                                onSelect: selectCategory
+                            )
+                        case .details:
+                            QuickTransactionDetailsView(
+                                counterparty: counterpartyBinding,
+                                note: noteBinding,
+                                supportsRecurrence: !isCSVImport && mode != .transfer && mode != .debt,
+                                isRecurring: recurringBinding,
+                                frequency: recurrenceFrequencyBinding,
+                                hasEndDate: hasRecurrenceEndDateBinding,
+                                endDate: recurrenceEndDateBinding,
+                                currency: transaction != nil || upcomingTransaction != nil ? currencyBinding : nil
+                            )
+                        }
+                    }.legacyNavigationDestination()
                 }
         }
-        .legacySheetAppearance()
         .onChange(of: mode) { _, newMode in
             handleModeChange(newMode)
         }
@@ -125,7 +137,7 @@ struct AddTransactionView: View {
             applyInitialCommandIfNeeded()
         }
         .task(id: accountBalanceScopeKey) {
-            guard let selectedAccount else { return }
+            guard !isCSVImport, let selectedAccount else { return }
             await exchangeRateStore.load(currencies: accountCurrencies, reportingCurrency: selectedAccount.currency)
         }
         .alert(errorAlertTitle, isPresented: errorAlertBinding) {
@@ -137,7 +149,7 @@ struct AddTransactionView: View {
 
     @ViewBuilder
     private var transactionModeSelector: some View {
-        if !isLockedTransferDraft {
+        if canChangeMode {
             TransactionModeSelector(modes: availableModes, selection: $mode)
                 .disabled(isSaving)
         }
@@ -147,13 +159,13 @@ struct AddTransactionView: View {
         Button {
             dismiss()
         } label: {
-            AppIcon("xmark", size: 18)
+            AppIcon("xmark", size: AppControlSize.iconButtonGlyph)
                 .foregroundStyle(.primary)
                 .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .modifier(TransactionGlassSurface(shape: Circle()))
+        .modifier(TransactionGlassSurface(shape: Circle(), isToolbarControl: true))
         .accessibilityLabel("Close")
         .disabled(isSaving)
     }
@@ -167,14 +179,15 @@ struct AddTransactionView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollEdgeFades()
+        .scrollEdgeFades(background: AppColor.sheetBackground)
+        .background(AppColor.sheetBackground.ignoresSafeArea())
         .disabled(isSaving)
     }
 
     private var entryControls: some View {
         VStack(spacing: AppSpacing.medium) {
             TransactionAmountPanel(expression: amountExpression, formattedAmount: displayAmount)
-                .modifier(TransactionModeSwipe(modes: availableModes, selection: $mode, isActive: !isLockedTransferDraft))
+                .modifier(TransactionModeSwipe(modes: availableModes, selection: $mode, isActive: canChangeMode))
             TransactionMetadataBar(
                 accounts: accountStore.accounts,
                 selectedAccountID: viewModel.accountID,
@@ -188,11 +201,14 @@ struct AddTransactionView: View {
                 }
             }
             classificationSelector
-            TransactionKeypad { key in
+            TransactionKeypad(onClear: clearAmount) { key in
                 amountExpression.enter(key)
                 viewModel.setAmountText(amountExpression.canonicalResult ?? "")
             }
             submitButton
+                .reportScanDraftBottomBarHeight {
+                    onBottomActionBarHeightChange($0 + AppSpacing.small)
+                }
         }
         .padding(.horizontal, AppSpacing.large)
         .padding(.vertical, AppSpacing.small)
@@ -204,7 +220,6 @@ struct AddTransactionView: View {
         Group {
             if mode == .debt {
                 DebtRecipientPicker(selection: Binding(get: { viewModel.debtID }, set: viewModel.setDebtID))
-                    .frame(height: 84)
             } else {
                 TransactionClassificationSelector(
                     mode: mode,
@@ -217,7 +232,7 @@ struct AddTransactionView: View {
                 )
             }
         }
-        .padding(.vertical, AppSpacing.extraSmall)
+        .padding(.vertical, AppSpacing.small)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge))
         .background {
             Color.clear
@@ -243,17 +258,25 @@ struct AddTransactionView: View {
         amountExpression = AmountExpression(rawValue: viewModel.amountText)
     }
 
+    private func clearAmount() {
+        amountExpression.clear()
+        viewModel.setAmountText("")
+    }
+
     private var availableModes: [QuickTransactionMode] {
+        if isCSVImport { return [.income, .expense, .debt] }
         if quickEntryDraft != nil {
             return accountStore.accounts.count > 1 ? [.income, .expense, .transfer] : [.income, .expense]
         }
         if upcomingTransaction != nil || transaction?.recurrence != nil { return [.income, .expense] }
         if isEditing { return [.income, .expense, .debt] }
+        if initialRecurring { return [.income, .expense] }
+        if initialKind == .debt { return [.debt] }
         return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.income, .expense, .debt]
     }
 
-    private var isLockedTransferDraft: Bool {
-        quickEntryDraft?.mode == .transfer
+    private var canChangeMode: Bool {
+        availableModes.count > 1
     }
 
     private var submitButton: some View {
@@ -273,11 +296,16 @@ struct AddTransactionView: View {
     }
 
     private var isSubmitDisabled: Bool {
+        if hasZeroAmount { return isSaving }
         if mode == .debt && !viewModel.canSave { return true }
         if let quickEntryDraft {
             return isSaving || !hasDraftChanges(from: quickEntryDraft)
         }
         return isSaving || originalTransaction.map { !viewModel.hasChanges(from: $0) } == true
+    }
+
+    private var hasZeroAmount: Bool {
+        amountExpression.rawValue.isEmpty || amountExpression.result == 0
     }
 
     private var isEditing: Bool { originalTransaction != nil }
@@ -310,9 +338,11 @@ struct AddTransactionView: View {
     }
 
     private var accountCurrencies: Set<String> {
-        Set(transactionStore.allTransactions.lazy
+        let stored = Set(transactionStore.allTransactions.lazy
             .filter { $0.accountId == viewModel.accountID }
             .map(\.currency))
+        guard let draft = quickEntryDraft else { return stored }
+        return stored.union(accountStore.accounts.map(\.currency)).union([draft.currency])
     }
 
     private var accountBalanceScopeKey: String {
@@ -422,13 +452,19 @@ struct AddTransactionView: View {
 
     private var displayAmount: String {
         let value = amountExpression.result ?? .zero
-        guard let currency = selectedAccount?.currency else { return MoneyFormatter.number(value) }
+        guard let currency = viewModel.currency(for: selectedAccount) else { return MoneyFormatter.number(value) }
         return MoneyFormatter.format(value, currency: currency)
     }
 
+    private var currencyBinding: Binding<String> {
+        Binding(
+            get: { viewModel.currency(for: selectedAccount) ?? AppPreferences.initialCurrency },
+            set: viewModel.setCurrency
+        )
+    }
+
     private var hasExtraDetails: Bool {
-        !viewModel.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !viewModel.payee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !viewModel.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             !viewModel.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             viewModel.isRecurring
     }
@@ -462,7 +498,26 @@ struct AddTransactionView: View {
         Binding(
             get: { viewModel.accountID },
             set: { accountID in
+                let savedCurrency = viewModel.currency(for: selectedAccount)
+                if quickEntryDraft != nil, !isCSVImport,
+                   let sourceCurrency = viewModel.currency(for: selectedAccount),
+                   let target = accountStore.accounts.first(where: { $0.id == accountID }),
+                   sourceCurrency != target.currency,
+                   let currentAmount = amountExpression.result, currentAmount != 0 {
+                    guard let converted = exchangeRateStore.convert(currentAmount, from: sourceCurrency, to: target.currency) else {
+                        errorMessage = "Exchange rates are unavailable. Try changing the account when rates are available."
+                        return
+                    }
+                    var value = converted
+                    var rounded = Decimal()
+                    NSDecimalRound(&rounded, &value, 4, .plain)
+                    let amount = NSDecimalNumber(decimal: rounded).stringValue
+                    amountExpression = AmountExpression(rawValue: amount)
+                    viewModel.setAmountText(amount)
+                }
                 viewModel.setAccountID(accountID)
+                if isCSVImport, let savedCurrency { viewModel.setCurrency(savedCurrency) }
+                if quickEntryDraft != nil, !isCSVImport, let target = selectedAccount { viewModel.setCurrency(target.currency) }
                 if destinationAccountID == accountID {
                     destinationAccountID = nil
                 }
@@ -474,12 +529,8 @@ struct AddTransactionView: View {
         Binding(get: { viewModel.occurredAt }, set: viewModel.setOccurredAt)
     }
 
-    private var merchantBinding: Binding<String> {
-        Binding(get: { viewModel.merchant }, set: viewModel.setMerchant)
-    }
-
-    private var payeeBinding: Binding<String> {
-        Binding(get: { viewModel.payee }, set: viewModel.setPayee)
+    private var counterpartyBinding: Binding<String> {
+        Binding(get: { viewModel.counterparty }, set: viewModel.setCounterparty)
     }
 
     private var noteBinding: Binding<String> {
@@ -585,12 +636,17 @@ struct AddTransactionView: View {
 
     private func save() async {
         guard !isSaving else { return }
+        if hasZeroAmount {
+            dismiss()
+            return
+        }
         guard let accountID = viewModel.accountID else {
             errorMessage = "Choose an account."
             return
         }
-        guard let amount = amountExpression.canonicalResult else {
-            errorMessage = "Enter an amount greater than zero."
+        guard let amount = amountExpression.canonicalResult,
+              let decimalAmount = Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX")), decimalAmount != 0 else {
+            errorMessage = "Enter a non-zero amount."
             return
         }
         if mode == .debt && viewModel.debtID == nil {
@@ -604,6 +660,10 @@ struct AddTransactionView: View {
             }
             guard selectedAccount?.currency == destinationAccount?.currency else {
                 errorMessage = "Transfers currently require accounts with the same currency."
+                return
+            }
+            guard viewModel.currency(for: selectedAccount) == selectedAccount?.currency else {
+                errorMessage = "Select the source account again to convert this draft before transferring."
                 return
             }
         } else if let endAt = viewModel.recurrenceEndAt,
@@ -668,8 +728,9 @@ struct AddTransactionView: View {
         updated.mode = mode
         updated.accountId = accountID
         updated.destinationAccountId = mode == .transfer ? destinationAccountID : nil
+        updated.debt = mode == .debt ? transactionStore.debts.first { $0.id == viewModel.debtID } : nil
         updated.amount = amountChanged ? amount : draft.amount
-        updated.currency = selectedAccount?.currency ?? draft.currency
+        updated.currency = viewModel.currency(for: selectedAccount) ?? draft.currency
         if mode == .transfer {
             updated.category = nil
         } else if viewModel.categoryID == draft.category?.id {
@@ -677,11 +738,10 @@ struct AddTransactionView: View {
         } else {
             updated.category = transactionStore.categories.first { $0.id == viewModel.categoryID }
         }
-        updated.merchant = optionalText(viewModel.merchant)
-        updated.payee = optionalText(viewModel.payee)
+        updated.counterparty = viewModel.counterparty.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.note = optionalText(viewModel.note)
         updated.occurredAt = viewModel.occurredAt
-        updated.isRecurring = mode != .transfer && viewModel.isRecurring
+        updated.isRecurring = !isCSVImport && mode != .transfer && mode != .debt && viewModel.isRecurring
         updated.recurrenceFrequency = viewModel.recurrenceFrequency
         updated.recurrenceEndAt = updated.isRecurring ? viewModel.recurrenceEndAt : nil
 
@@ -697,10 +757,9 @@ struct AddTransactionView: View {
                 fromAccountId: sourceID,
                 toAccountId: destinationID,
                 amount: amount,
-                merchant: optionalText(viewModel.merchant),
-                payee: optionalText(viewModel.payee),
                 note: optionalText(viewModel.note),
-                occurredAt: viewModel.occurredAt
+                occurredAt: viewModel.occurredAt,
+                counterparty: viewModel.counterparty
             )
         )
     }
@@ -716,8 +775,6 @@ struct AddTransactionView: View {
             kind: kind,
             amount: amount,
             categoryId: categoryID,
-            merchant: optionalText(viewModel.merchant),
-            payee: optionalText(viewModel.payee),
             note: optionalText(viewModel.note),
             occurredAt: viewModel.occurredAt,
             debtId: kind == .debt ? viewModel.debtID : nil,
@@ -726,7 +783,9 @@ struct AddTransactionView: View {
                     frequency: viewModel.recurrenceFrequency,
                     endAt: viewModel.recurrenceEndAt
                 )
-                : nil
+                : nil,
+            currency: transaction != nil || upcomingTransaction != nil ? viewModel.currency(for: selectedAccount) : nil,
+            counterparty: viewModel.counterparty
         )
     }
 

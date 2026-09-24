@@ -19,23 +19,26 @@ struct TransactionClassificationSelector: View {
         } else {
             ZStack {
                 if let expandedCategoryItems {
-                    CenteredSelectionCarousel(
-                        items: expandedCategoryItems,
-                        selection: $categorySelection
-                    )
+                    categoryCarousel(items: expandedCategoryItems)
                     .id(expandedCategoryID)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else {
-                    CenteredSelectionCarousel(
-                        items: categoryItems,
-                        selection: $categorySelection
-                    )
+                    categoryCarousel(items: categoryItems)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .frame(height: 84)
+            .frame(height: CenteredSelectionCarousel<QuickCategoryCarouselID>.preferredHeight)
             .clipped()
             .animation(.snappy(duration: 0.3), value: expandedCategoryID)
         }
+    }
+
+    private func categoryCarousel(
+        items: [CenteredSelectionCarouselItem<QuickCategoryCarouselID>]
+    ) -> some View {
+        CenteredSelectionCarousel(
+            items: items,
+            selection: $categorySelection
+        )
     }
 }

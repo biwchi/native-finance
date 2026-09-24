@@ -32,7 +32,7 @@ export async function updateRecurringTransaction(
 ): Promise<Result<{ updated: true }, UpdateRecurringError>> {
   const prepared = await prepareTransaction(input.transaction, dependencies);
   if (!prepared.ok) return prepared;
-  const { values, recurrence } = prepared.value;
+  const { values: preparedValues, recurrence } = prepared.value;
   const expectedOccurredAt = new Date(input.expectedOccurredAt);
   const now = (dependencies.now ?? (() => new Date()))();
 
@@ -55,7 +55,7 @@ export async function updateRecurringTransaction(
       !nextDate ||
       nextDate <= now ||
       nextDate.getTime() !== expectedOccurredAt.getTime() ||
-      values.occurredAt <= now
+      preparedValues.occurredAt <= now
     ) {
       return error(
         "stale_occurrence",
@@ -65,6 +65,12 @@ export async function updateRecurringTransaction(
     const recorded = firstRecorded?.occurredAt.getTime() === nextDate.getTime()
       ? firstRecorded
       : null;
+    const values = {
+      ...preparedValues,
+      currency: input.transaction.currency?.toUpperCase() ?? (schedule.accountId === input.transaction.accountId
+        ? recorded?.currency ?? schedule.currency
+        : preparedValues.currency),
+    };
 
     await store.deleteFutureTransactions(schedule.id, now, recorded?.id);
     if (recorded) {

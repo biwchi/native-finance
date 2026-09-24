@@ -13,15 +13,27 @@ enum AppColor {
     static let orangeIconBackground = Color("OrangeIconBackgroundColor")
     static let blueIcon = Color("BlueIconColor")
     static let blueIconBackground = Color("BlueIconBackgroundColor")
+    static let purpleIcon = Color("PurpleIconColor")
 
     static let background = Color(uiColor: .systemBackground)
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
+    // Match the page color even when iOS presents the sheet at an elevated level.
+    static let sheetBackground = Color(uiColor: UIColor { traits in
+        let baseTraits = UITraitCollection(traitsFrom: [traits, UITraitCollection(userInterfaceLevel: .base)])
+        return UIColor.systemGroupedBackground.resolvedColor(with: baseTraits)
+    })
     static let elevatedSurface = Color(uiColor: .secondarySystemGroupedBackground)
     static let controlFill = Color(uiColor: .tertiarySystemFill)
+    static let disabledControlFill = Color(uiColor: .systemGray4)
+    static let disabledControlForeground = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .lightGray : .darkGray
+    })
     static let keypadUtilityFill = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark ? .secondarySystemBackground : .systemGray4
     })
     static let separator = Color(uiColor: .separator)
+    static let cameraBackground = Color.black
+    static let cameraForeground = Color.white
 
     static let positive = Color(uiColor: .systemGreen)
     // Text on glass needs stronger contrast than the system's light-mode status fills.

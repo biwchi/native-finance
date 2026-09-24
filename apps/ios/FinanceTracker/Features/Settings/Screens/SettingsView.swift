@@ -32,6 +32,9 @@ struct SettingsView: View {
     @AppStorage(AppPreferences.preferSimpleTransactionEntryKey)
     private var preferSimpleTransactionEntry = false
 
+    @AppStorage(AppPreferences.openScanDraftsAutomaticallyKey)
+    private var openScanDraftsAutomatically = false
+
     @Environment(\.openURL) private var openURL
     @AppStorage(AppPreferences.firstWeekdayKey) private var firstWeekday = 0
     @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
@@ -47,43 +50,32 @@ struct SettingsView: View {
     var body: some View {
         AppForm {
             if repository.snapshot.pending.contains(where: { $0.issue != nil }) {
-                AppSection { NavigationLink("Review changes") { SyncReviewView() } }
+                AppSection { AppNavigationLink("Review changes") { SyncReviewView() } }
             }
-            AppSection { NavigationLink("Exchange rates") { RateDetailsView() } }
             AppSection {
-                NavigationLink {
+                AppNavigationLink {
                     CategorySettingsView()
                 } label: {
                     Label("Categories", icon: "label")
                 }
 
-                NavigationLink {
+                AppNavigationLink {
                     CurrencyPickerView(
                         selection: $defaultCurrency,
-                        currencyCodes: AppPreferences.currencyCodes
+                        currencyCodes: AppPreferences.currencyCodes,
+                        title: "Default currency"
                     )
-                    .navigationTitle("Default currency")
                 } label: {
-                    if #available(iOS 26.0, *) {
-                        currencySettingsLabel
-                    } else {
-                        // Native legacy row sizing otherwise removes padding from this two-line label.
-                        currencySettingsLabel
-                            .environment(\.defaultMinListRowHeight, 0)
-                            .padding(.vertical, AppSpacing.large)
-                    }
-                }
-                .legacyListRows(verticalPadding: 0)
-
-                Toggle(isOn: isDarkTheme) {
-                    Label("Dark theme", icon: "half-moon")
+                    currencySettingsLabel
                 }
             }
 
             AppSection {
-                Picker(selection: $firstWeekday) {
-                    Text("System default").tag(0)
-                    ForEach(1...7, id: \.self) { day in
+                Toggle(isOn: isDarkTheme) {
+                    Label("Dark theme", icon: "half-moon")
+                }
+                Picker(selection: selectedFirstWeekday) {
+                    ForEach(AppPreferences.firstWeekdayOptions, id: \.self) { day in
                         Text(Calendar.current.weekdaySymbols[day - 1]).tag(day)
                     }
                 } label: {
@@ -92,37 +84,33 @@ struct SettingsView: View {
                 Toggle(isOn: $roundTotals) {
                     Label("Round totals", icon: "cash")
                 }
-            } header: {
-                Text("Display")
-            } footer: {
-                Text("Show totals as whole numbers on Home and Budget. Transaction amounts keep their full precision.")
-            }
-
-            AppSection {
                 Toggle(isOn: $useAllocatedBudgetForSummary) {
-                    Label("Use pool and category limits", icon: "percentage-circle")
+                    Label("Budget summary", icon: "percentage-circle")
                 }
                 .accessibilityIdentifier("useAllocatedBudgetForSummary")
             } header: {
-                Text("Budget summary")
+                Text("Display")
             } footer: {
-                Text("When no monthly limit is set, Home and Budget use the total of your pools and category limits outside pools. Turn off to show a budget summary only with a monthly limit.")
+                Text("Rounding affects displayed totals only. Budget summaries use pool and category limits when no monthly limit is set.")
             }
 
             AppSection {
                 Toggle(isOn: $preferSimpleTransactionEntry) {
                     Label("Use quick entry", icon: "input-field")
                 }
+                Toggle(isOn: $openScanDraftsAutomatically) {
+                    Label("Open scan drafts automatically", icon: "scan-barcode")
+                }
             } header: {
                 Text("Add transactions")
             } footer: {
-                Text("The Add button opens a multiline entry above the keyboard, then shows the transaction form for review.")
+                Text("Type transactions, then review them before saving. Scan drafts stay in the activity pill unless automatic opening is on.")
             }
 
             AppSection {
-                Picker(selection: $recurringReminderDays) {
+                Picker(selection: selectedRecurringReminderDays) {
                     ForEach(AppPreferences.recurringReminderDaysRange, id: \.self) { days in
-                        Text(days == 0 ? "On the day" : days == 1 ? "1 day before" : "\(days) days before")
+                        Text(days == 1 ? "1 day before" : "\(days) days before")
                             .tag(days)
                     }
                 } label: {
@@ -131,7 +119,20 @@ struct SettingsView: View {
             } header: {
                 Text("Recurring reminders")
             } footer: {
-                Text("Show the nearest upcoming recurring transaction on Home, starting this many days before it is due.")
+                Text("Choose how early upcoming transactions appear on Home.")
+            }
+
+            AppSection {
+                AppNavigationLink { CSVExportView() } label: {
+                    Label("Export CSV", icon: "arrow-up-right")
+                }
+                AppNavigationLink { CSVImportView() } label: {
+                    Label("Import CSV", icon: "arrow-down-left")
+                }
+            } header: {
+                Text("CSV tables")
+            } footer: {
+                Text("Export your transactions or review a CSV file before adding it. Files are processed on this device.")
             }
 
             AppSection("Support") {
@@ -181,13 +182,17 @@ struct SettingsView: View {
         }
         .toggleStyle(SwitchToggleStyle(tint: AppColor.switchTrack))
         .navigationTitle("Settings")
+        .onAppear {
+            firstWeekday = AppPreferences.normalizedFirstWeekday(firstWeekday)
+            recurringReminderDays = AppPreferences.normalizedRecurringReminderDays(recurringReminderDays)
+        }
         .confirmationDialog(deletionAction.title + "?", isPresented: $showsDeleteWarning, titleVisibility: .visible) {
             Button("Continue", role: .destructive) { showsDeleteConfirmation = true }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(deletionAction.explanation + " This cannot be undone. You’ll type confirm in the next step.")
         }
-        .sheet(isPresented: $showsDeleteConfirmation) {
+        .appSheet(isPresented: $showsDeleteConfirmation) {
             DeleteDataConfirmationView(title: deletionAction.title, explanation: deletionAction.explanation) { confirmation in
                 switch deletionAction {
                 case .allData:
@@ -237,19 +242,27 @@ struct SettingsView: View {
         )
     }
 
-    private var currencyLabel: String {
-        guard let name = Locale.current.localizedString(forCurrencyCode: defaultCurrency) else {
-            return defaultCurrency
-        }
-        return "\(defaultCurrency) · \(name)"
+    private var selectedFirstWeekday: Binding<Int> {
+        Binding(
+            get: { AppPreferences.normalizedFirstWeekday(firstWeekday) },
+            set: { firstWeekday = $0 }
+        )
+    }
+
+    private var selectedRecurringReminderDays: Binding<Int> {
+        Binding(
+            get: { AppPreferences.normalizedRecurringReminderDays(recurringReminderDays) },
+            set: { recurringReminderDays = $0 }
+        )
     }
 
     private var currencySettingsLabel: some View {
-        LabeledContent {
-            Text(currencyLabel)
-                .foregroundStyle(.secondary)
-        } label: {
+        HStack {
             Label("Default currency", icon: "cash")
+            Spacer()
+            Text(defaultCurrency)
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
     }
 }

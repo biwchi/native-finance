@@ -14,7 +14,6 @@ struct DebtsView: View {
     @AppStorage(AppPreferences.defaultCurrencyKey) private var currency = AppPreferences.initialCurrency
     @StateObject private var rates = ExchangeRateStore()
     @State private var isAdding = false
-    @State private var isCreatingRecipient = false
     @State private var isManagingRecipients = false
     @State private var returningTransaction: FinanceTransaction?
     @State private var editingTransaction: FinanceTransaction?
@@ -34,18 +33,19 @@ struct DebtsView: View {
                 } description: {
                     Text("Track money you lend and see how much each person owes you.")
                 } actions: {
-                    PrimaryActionButton("Lend money", appearance: .prominent) { isAdding = true }
+                    PrimaryActionButton("Lend money") { isAdding = true }
+                        .frame(width: 240)
+                        .padding(.top, AppSpacing.small)
                 }
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(recipientGroups) { group in
                     AppSection {
-                        recipientSummary(group)
                         ForEach(group.transactions) { transaction in
                             debtRow(transaction)
                         }
                     } header: {
-                        Text(group.name)
+                        recipientHeader(group)
                     }
                 }
             }
@@ -56,17 +56,29 @@ struct DebtsView: View {
         .listSectionSpacing(.custom(AppSpacing.large))
         .financePage()
         .navigationTitle("Debts")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Group {
-                    Menu {
-                        Button { isAdding = true } label: { Label("Lend money", icon: "plus") }
-                        Button("Manage recipients") { isManagingRecipients = true }
-                        Button { isCreatingRecipient = true } label: { Label("New recipient", icon: "user") }
-                    } label: { Label("Add debt", icon: "plus") }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { isAdding = true } label: {
+                    AppIcon("plus", size: 24)
                 }
-                .legacyToolbarControl()
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Lend money")
+                .accessibilityIdentifier("addDebtButton")
+                .legacyToolbarIcon()
+            }
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { isManagingRecipients = true } label: {
+                    AppIcon("settings", size: 22)
+                }
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Debt settings")
+                .accessibilityHint("Manage recipients")
+                .accessibilityIdentifier("debtSettingsButton")
+                .legacyToolbarIcon()
             }
         }
         .task {
@@ -78,10 +90,13 @@ struct DebtsView: View {
         .task(id: rateScope) {
             await rates.load(currencies: Set(currencies), reportingCurrency: currency)
         }
-        .sheet(isPresented: $isManagingRecipients) { DebtRecipientsView() }
-        .sheet(isPresented: $isAdding) { AddTransactionView(initialKind: .debt) }
-        .sheet(isPresented: $isCreatingRecipient) { DebtEditorView { _ in } }
-        .sheet(item: $editingTransaction) { transaction in
+        .appSheet(isPresented: $isManagingRecipients) { DebtRecipientsView() }
+        .appSheet(isPresented: $isAdding) {
+            AddTransactionView(initialKind: .debt)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .appSheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -91,7 +106,7 @@ struct DebtsView: View {
             set: { if !$0 { returningTransaction = nil } }
         ), titleVisibility: .visible) {
             if let transaction = returningTransaction {
-                Button("Delete debt · money returned", role: .destructive) {
+                Button("Returned", role: .destructive) {
                     Task { await markReturned(transaction) }
                 }
             }
@@ -120,12 +135,12 @@ struct DebtsView: View {
         .disabled(deletingIDs.contains(transaction.id))
         .opacity(deletingIDs.contains(transaction.id) ? 0.5 : 1)
         .circleSwipeActions(isEnabled: !deletingIDs.contains(transaction.id)) {
-            CircleSwipeAction(title: "Delete · returned", icon: "trash") {
+            CircleSwipeAction(title: "Returned", icon: "trash") {
                 returningTransaction = transaction
             }
         }
         .contextMenu {
-            Button("Delete · money returned", role: .destructive) {
+            Button("Returned", role: .destructive) {
                 returningTransaction = transaction
             }
             .disabled(deletingIDs.contains(transaction.id))
@@ -148,13 +163,23 @@ struct DebtsView: View {
             let transactions = entry.value.sorted { $0.occurredAt > $1.occurredAt }
             return RecipientGroup(id: entry.key, recipient: recipient, transactions: transactions)
         }
-        return groups.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return groups.sorted { left, right in
+            switch (left.recipient, right.recipient) {
+            case let (lhs?, rhs?): Debt.orderedBefore(lhs, rhs)
+            case (_?, nil): true
+            case (nil, _?): false
+            case (nil, nil): left.name.localizedStandardCompare(right.name) == .orderedAscending
+            }
+        }
     }
 
     @ViewBuilder
     private var summary: some View {
         if let total = transactionStore.outstandingDebt(currency: currency, rates: rates.snapshot) {
-            FinanceHighlightCard(title: "Owed to you", amount: total, currency: currency, detail: "Across all accounts") {
+            FinanceHighlightCard(
+                title: "Owed to you", amount: total, currency: currency,
+                surface: .clearGlass
+            ) {
                 Divider()
                 MonthlySummaryRow {
                     Text("\(recipientGroups.count) \(recipientGroups.count == 1 ? "recipient" : "recipients")")
@@ -163,8 +188,6 @@ struct DebtsView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                Text("Swipe a transaction to mark the money as returned.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         } else if transactionStore.state == .loaded {
             VStack(alignment: .leading, spacing: AppSpacing.small) {
@@ -179,34 +202,39 @@ struct DebtsView: View {
                     .font(.caption).foregroundStyle(.secondary)
 
             }
-            .padding(.vertical, AppSpacing.small)
+            .padding(AppSpacing.large)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .financeCardSurface(.clearGlass, fallbackColor: AppColor.elevatedSurface, cornerRadius: AppRadius.extraLarge)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         } else {
             FinanceSummaryUnavailable(state: transactionStore.state, rateState: rates.state)
         }
     }
 
-    private func recipientSummary(_ group: RecipientGroup) -> some View {
-        HStack(alignment: .center, spacing: AppSpacing.medium) {
-            if let recipient = group.recipient { DebtIcon(debt: recipient) }
-            VStack(alignment: .leading, spacing: AppSpacing.extraSmall) {
-                Text("Outstanding").font(.subheadline).foregroundStyle(.secondary)
+    private func recipientHeader(_ group: RecipientGroup) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.medium) {
+            Text(group.name)
+            Spacer(minLength: AppSpacing.small)
+            VStack(alignment: .trailing, spacing: AppSpacing.extraSmall) {
                 if let converted = FinanceOverviewData.converted(group.transactions, to: currency, using: rates) {
                     Text(MoneyFormatter.format(
                         converted.reduce(Decimal.zero) { $0 + (Decimal(string: $1.amount) ?? 0) },
                         currency: currency, roundToWhole: roundTotals
                     ))
-                    .font(.title3.weight(.semibold)).monospacedDigit()
                 } else {
                     ForEach(Set(group.transactions.map(\.currency)).sorted(), id: \.self) { code in
                         let amount = group.transactions.filter { $0.currency == code }
                             .reduce(Decimal.zero) { $0 + (Decimal(string: $1.amount) ?? 0) }
                         Text(MoneyFormatter.format(amount, currency: code, roundToWhole: roundTotals))
-                            .font(.headline).monospacedDigit()
                     }
                 }
             }
+            .monospacedDigit()
+            .multilineTextAlignment(.trailing)
         }
-        .padding(.vertical, AppSpacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

@@ -37,12 +37,14 @@ struct BudgetCategoryLimitEditor: View {
     var body: some View {
         AppForm {
             AppSection("Category") {
-                Picker("Category", selection: $categoryID) {
-                    ForEach(categories) { category in
-                        Text(category.name).tag(Optional(category.id))
-                    }
+                AppNavigationLink {
+                    BudgetLimitCategoryPicker(categories: categories, selection: $categoryID)
+                } label: {
+                    LabeledContent(
+                        "Category",
+                        value: categories.first { $0.id == categoryID }?.name ?? "Select category"
+                    )
                 }
-                .pickerStyle(.navigationLink)
             }
 
             AppSection("Limit") {
@@ -56,7 +58,7 @@ struct BudgetCategoryLimitEditor: View {
                         Text(group.name).tag(Optional(group.id))
                     }
                 }
-                .pickerStyle(.navigationLink)
+                .pickerStyle(.menu)
             }
         }
         .navigationTitle("Category limit")
@@ -79,6 +81,51 @@ struct BudgetCategoryLimitEditor: View {
                 }
                 .legacyToolbarControl()
             }
+        }
+    }
+}
+
+private struct BudgetLimitCategoryPicker: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let categories: [TransactionCategory]
+    @Binding var selection: UUID?
+
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
+
+    var body: some View {
+        AppList {
+            AppSection {
+                CategoryListRows(
+                    categories: categories,
+                    query: query,
+                    emptyDescription: "Add expense categories in Settings."
+                ) { category, isSubcategory in
+                    Button {
+                        isSearchFocused = false
+                        selection = category.id
+                        dismiss()
+                    } label: {
+                        CategoryListRow(
+                            category: category,
+                            isSubcategory: isSubcategory,
+                            accessory: .checkmark(isSelected: selection == category.id)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(selection == category.id ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(selection == category.id ? .isSelected : [])
+                }
+            }
+        }
+        .navigationTitle("Category")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            CategorySearchField(query: $query, isFocused: $isSearchFocused)
+                .padding(.horizontal, AppSpacing.extraLarge)
+                .padding(.vertical, AppSpacing.medium)
         }
     }
 }

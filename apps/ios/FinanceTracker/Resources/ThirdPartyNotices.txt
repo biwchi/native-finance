@@ -24,6 +24,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+Simple Icons
+https://github.com/simple-icons/simple-icons
+Revision: b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76
+License: CC0-1.0
+
+The Simple Icons project is released under CC0. Brand names and logos remain
+trademarks of their respective owners. Inclusion does not imply affiliation,
+endorsement, or that a trademark owner has licensed every use of its mark.
+See https://github.com/simple-icons/simple-icons/blob/develop/DISCLAIMER.md
+
+Bybit wordmark
+Source: https://www.bybit.com/press
+
+The wordmark was cropped from Bybit's official press asset and converted to a
+monochrome template image. Bybit's name and logo remain its trademarks.
+Inclusion does not imply affiliation, endorsement, or a trademark license.
+
+USDC symbol
+Copyright Circle Internet Group, Inc.
+Source: https://www.circle.com/pressroom
+
+The USDC symbol is included as an official brand asset and remains subject to
+Circle's brand use policy and logo guidelines.
+
 Hugeicons Free Icons - Stroke Rounded
 https://www.npmjs.com/package/@hugeicons/core-free-icons
 Version: 4.2.2

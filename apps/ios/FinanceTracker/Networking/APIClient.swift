@@ -4,13 +4,18 @@ import Foundation
 struct APIClient: SyncTransport, RateTransport {
     let baseURL: URL
     let session: URLSession
+    private let documentSession: URLSession
+    let apiToken: String?
 
     init(
         baseURL: URL = APIClient.configuredBaseURL,
-        session: URLSession = APIClient.defaultSession
+        session: URLSession = APIClient.defaultSession,
+        apiToken: String? = APIClient.configuredAPIToken
     ) {
         self.baseURL = baseURL
         self.session = session
+        self.documentSession = session === APIClient.defaultSession ? APIClient.defaultDocumentSession : session
+        self.apiToken = apiToken
     }
 
     func debts() async throws -> [Debt] {
@@ -236,7 +241,15 @@ struct APIClient: SyncTransport, RateTransport {
     func interpretQuickEntry(
         _ quickEntry: QuickEntryRequest
     ) async throws -> QuickEntryInterpretationResponse {
-        try await post(
+        if quickEntry.document != nil {
+            var request = URLRequest(url: apiURL.appending(path: "quick-entry").appending(path: "interpret"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try Self.jsonEncoder.encode(quickEntry)
+            request.timeoutInterval = 180
+            return try await send(request, using: documentSession)
+        }
+        return try await post(
             quickEntry,
             to: apiURL.appending(path: "quick-entry").appending(path: "interpret")
         )
@@ -359,18 +372,24 @@ struct APIClient: SyncTransport, RateTransport {
         return try await send(request)
     }
 
-    private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
+    private func send<Response: Decodable>(_ request: URLRequest, using requestSession: URLSession? = nil) async throws -> Response {
+        var request = request
+        if let apiToken, !apiToken.isEmpty {
+            request.setValue(apiToken, forHTTPHeaderField: "X-API-Key")
+        }
+
+        let (data, response) = try await (requestSession ?? session).data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIClientError.invalidResponse
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = try? JSONDecoder().decode(APIErrorResponse.self, from: data).message
+            let response = try? JSONDecoder().decode(APIErrorResponse.self, from: data)
             throw APIClientError.requestFailed(
                 status: httpResponse.statusCode,
-                message: message
+                message: response?.message,
+                code: response?.code
             )
         }
 
@@ -418,6 +437,13 @@ struct APIClient: SyncTransport, RateTransport {
         return decoder
     }
 
+    private static let defaultDocumentSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 180
+        return URLSession(configuration: configuration)
+    }()
+
     private static let defaultSession: URLSession = {
         #if DEBUG && !targetEnvironment(simulator)
         let configuration = URLSessionConfiguration.default
@@ -439,5 +465,14 @@ struct APIClient: SyncTransport, RateTransport {
         }
 
         return url
+    }
+
+    private static var configuredAPIToken: String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "API_TOKEN") as? String else {
+            return nil
+        }
+
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
 }

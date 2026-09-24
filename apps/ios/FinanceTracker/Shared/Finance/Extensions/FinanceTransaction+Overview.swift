@@ -9,15 +9,14 @@ extension FinanceTransaction {
             amount: amount,
             currency: currency,
             category: category,
-            merchant: merchant,
-            payee: payee,
             note: note,
             occurredAt: occurredAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
             debtId: debtId,
             debt: debt,
-            recurrence: recurrence
+            recurrence: recurrence,
+            counterparty: counterparty
         )
     }
 }

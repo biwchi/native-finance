@@ -31,7 +31,7 @@ enum QuickTransactionMode: String, Codable, CaseIterable, Identifiable {
         case .expense: "arrow-up-right"
         case .income: "arrow-down-left"
         case .transfer: "coins-swap"
-        case .debt: "user"
+        case .debt: "hand-coins"
         }
     }
 
@@ -40,7 +40,7 @@ enum QuickTransactionMode: String, Codable, CaseIterable, Identifiable {
         case .expense: AppColor.warningText
         case .income: AppColor.positiveText
         case .transfer: AppColor.informative
-        case .debt: AppColor.informative
+        case .debt: AppColor.purpleIcon
         }
     }
 }

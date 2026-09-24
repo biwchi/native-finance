@@ -1,11 +1,10 @@
-import { integer, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { integer, numeric, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 
-import { accountType } from "./enums.schema.ts";
 
 export const accounts = pgTable("accounts", {
   id: uuid().defaultRandom().primaryKey(),
   name: varchar({ length: 120 }).notNull(),
-  type: accountType().notNull(),
+  initialBalance: numeric({ precision: 19, scale: 4 }).default("0").notNull(),
   currency: varchar({ length: 3 }).notNull(),
   icon: varchar({ length: 80 }).default("creditcard.fill").notNull(),
   iconColor: varchar({ length: 20 }).default("blue").notNull(),

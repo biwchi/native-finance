@@ -68,8 +68,9 @@ export async function deleteRecurringTransaction(
         amount: schedule.amount,
         currency: schedule.currency,
         categoryId: schedule.categoryId,
-        merchant: schedule.merchant,
-        payee: schedule.payee,
+        counterparty: schedule.counterparty,
+
+
         note: schedule.note,
         occurredAt: input.occurredAt,
       });

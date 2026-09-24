@@ -40,6 +40,34 @@ actor TestSyncServer: SyncTransport {
 
 @MainActor
 final class SyncCoordinatorTests: XCTestCase {
+    func testRecipientOrderAndDeletionSyncBetweenDevices() async throws {
+        let server = TestSyncServer()
+        let first = try LocalTestData.repository(imported: false)
+        try first.importSnapshot(try await server.syncBootstrap())
+        let firstWorker = SyncCoordinator(repository: first, transport: server)
+        let firstStore = TransactionStore(repository: first)
+        let alice = try await firstStore.createDebt(name: "Alice")
+        let zoe = try await firstStore.createDebt(name: "Zoe")
+        await firstWorker.waitUntilIdle()
+        let second = try LocalTestData.repository(imported: false)
+        try second.importSnapshot(try await server.syncBootstrap())
+        let secondWorker = SyncCoordinator(repository: second, transport: server)
+        defer { firstWorker.cancel(); secondWorker.cancel() }
+        let secondStore = TransactionStore(repository: second)
+        try await secondStore.reorderDebts([zoe, alice])
+        await secondWorker.waitUntilIdle()
+        firstWorker.requestSync()
+        await firstWorker.waitUntilIdle()
+        XCTAssertEqual(firstStore.debts.map(\.id), [zoe.id, alice.id])
+        try await firstStore.deleteDebt(alice)
+        await firstWorker.waitUntilIdle()
+        secondWorker.requestSync()
+        await secondWorker.waitUntilIdle()
+        XCTAssertEqual(secondStore.debts.map(\.id), [zoe.id])
+        XCTAssertTrue(first.snapshot.pending.isEmpty)
+        XCTAssertTrue(second.snapshot.pending.isEmpty)
+    }
+
     func testLocalCommitImmediatelyStartsOneWorkerWithoutWaitingForServer() async throws {
         let server = TestSyncServer(); let repository = try LocalTestData.repository(imported: false)
         try repository.importSnapshot(try await server.syncBootstrap()); await server.configure(hold: true)
@@ -58,7 +86,7 @@ final class SyncCoordinatorTests: XCTestCase {
         let worker = SyncCoordinator(repository: repository, transport: server)
         let account = try LocalTestData.account(repository)
         await server.waitForHeldPush()
-        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "Edited during upload", type: .checking, currency: "USD", icon: "wallet", color: .blue) }
+        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "Edited during upload", currency: "USD", icon: "wallet", color: .blue) }
         XCTAssertEqual(repository.snapshot.accounts[account.id]?.name, "Edited during upload")
         await server.release(); await worker.waitUntilIdle()
         XCTAssertTrue(repository.snapshot.pending.isEmpty)

@@ -9,6 +9,8 @@ struct AppList<Content: View>: View {
         List {
             content
         }
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, AppSpacing.large, for: .scrollContent)
         .legacyListAppearance(usesCompactTopSpacing: usesCompactTopSpacing)
         .scrollEdgeFades(enabled: usesScrollEdgeFades)
     }

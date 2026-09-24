@@ -5,8 +5,7 @@ enum FinanceOverviewData {
         _ transactions: [UpcomingTransaction], daysBefore: Int,
         now: Date = .now, calendar: Calendar = .current
     ) -> [UpcomingTransaction] {
-        let days = min(max(daysBefore, AppPreferences.recurringReminderDaysRange.lowerBound),
-                       AppPreferences.recurringReminderDaysRange.upperBound)
+        let days = AppPreferences.normalizedRecurringReminderDays(daysBefore)
         guard let end = calendar.date(byAdding: .day, value: days + 1, to: calendar.startOfDay(for: now)) else {
             return []
         }
@@ -49,7 +48,7 @@ enum FinanceOverviewData {
     static func matches(_ transaction: FinanceTransaction, query: String, accounts: [Account]) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return [transaction.debt?.name, transaction.kind == .debt ? "Debt" : nil, transaction.merchant, transaction.payee, transaction.note,
+        return [transaction.debt?.name, transaction.kind == .debt ? "Debt" : nil, transaction.counterparty, transaction.note,
                 transaction.category?.name, transaction.category == nil ? "Uncategorized" : nil,
                 transaction.amount, transaction.formattedAmount(),
                 accounts.first { $0.id == transaction.accountId }?.name]

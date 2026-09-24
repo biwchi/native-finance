@@ -7,6 +7,8 @@ app.listen({
   port: config.port,
   // A second dev server must not share traffic with a suspended or stale process.
   reusePort: false,
+  // Document extraction can take longer than Bun's default idle timeout.
+  idleTimeout: 180,
 });
 
 console.log(

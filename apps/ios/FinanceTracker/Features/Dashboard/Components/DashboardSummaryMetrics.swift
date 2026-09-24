@@ -223,7 +223,6 @@ struct DashboardSummaryMetrics: View {
             }
             .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.medium, .large] : [.height(180), .medium])
             .presentationDragIndicator(.visible)
-            .legacySheetAppearance()
         }
     }
 }

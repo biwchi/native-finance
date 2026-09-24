@@ -21,7 +21,7 @@ final class FinanceDateFilterTests: XCTestCase {
         XCTAssertEqual(filter.interval(calendar: sunday)?.start, date("2026-09-13T00:00:00Z"))
         XCTAssertFalse(filter.contains(date("2026-09-13T12:00:00Z"), now: now, calendar: monday))
         XCTAssertTrue(filter.contains(date("2026-09-13T12:00:00Z"), now: now, calendar: sunday))
-        for day in 1...7 {
+        for day in AppPreferences.firstWeekdayOptions {
             let selected = AppPreferences.calendar(firstWeekday: day, base: calendar)
             let start = try XCTUnwrap(filter.interval(calendar: selected)?.start)
             XCTAssertEqual(selected.component(.weekday, from: start), day)
@@ -29,6 +29,19 @@ final class FinanceDateFilterTests: XCTestCase {
         }
         XCTAssertEqual(AppPreferences.calendar(firstWeekday: 0, base: calendar), calendar)
         XCTAssertEqual(AppPreferences.calendar(firstWeekday: 8, base: calendar), calendar)
+    }
+
+    func testUnsupportedWeekStartsUseSupportedDeviceDayOrMonday() {
+        for deviceDay in 1...7 {
+            var deviceCalendar = calendar
+            deviceCalendar.firstWeekday = deviceDay
+            let expectedDay = [1, 2, 7].contains(deviceDay) ? deviceDay : 2
+            for savedDay in [0, 3, 4, 5, 6, 8] {
+                let resolved = AppPreferences.calendar(firstWeekday: savedDay, base: deviceCalendar)
+                XCTAssertEqual(resolved.firstWeekday, expectedDay)
+                XCTAssertEqual(resolved.timeZone, deviceCalendar.timeZone)
+            }
+        }
     }
 
     func testReadableLabelsOnlyIncludeYearWhenNeeded() {
@@ -234,7 +247,7 @@ final class FinanceDateFilterTests: XCTestCase {
                 let filter = FinanceDateFilter(preset: preset, anchor: now, customEnd: now)
                 let controller = UIHostingController(rootView:
                     AppColor.groupedBackground
-                        .sheet(isPresented: .constant(true)) {
+                        .appSheet(isPresented: .constant(true), layout: .content, background: AppColor.elevatedSurface) {
                             FinanceDateFilterSheet(selection: filter, calendar: self.calendar) { _, _ in }
                                 .environment(\.calendar, self.calendar)
                                 .environment(\.locale, self.locale)
@@ -389,6 +402,6 @@ final class FinanceDateFilterTests: XCTestCase {
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
     private func transaction(_ kind: TransactionKind, _ amount: Int, _ at: String) -> FinanceTransaction {
         FinanceTransaction(id: UUID(), accountId: UUID(), kind: kind, amount: String(amount), currency: "USD",
-                           category: nil, merchant: nil, note: nil, occurredAt: date(at), createdAt: date(at), updatedAt: date(at))
+                           category: nil, note: nil, occurredAt: date(at), createdAt: date(at), updatedAt: date(at), counterparty: nil)
     }
 }

@@ -24,7 +24,7 @@ databaseDescribe("monthly budget API", () => {
       .insert(accounts)
       .values({
         name: `Budget test ${crypto.randomUUID()}`,
-        type: "checking",
+        initialBalance: "0",
         currency: "USD",
       })
       .returning();

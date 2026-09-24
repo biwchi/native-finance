@@ -8,3 +8,7 @@ export const transactionKindSchema = t.Union([
 export const amountSchema = t.String({
   pattern: "^(?=.{1,20}$)(?!0+(?:\\.0{1,4})?$)(?:0|[1-9]\\d{0,14})(?:\\.\\d{1,4})?$",
 });
+
+export const transactionAmountSchema = t.String({
+  pattern: "^(?=.{1,21}$)(?!-?0+(?:\\.0{1,4})?$)-?(?:0|[1-9]\\d{0,14})(?:\\.\\d{1,4})?$",
+});

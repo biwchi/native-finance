@@ -29,7 +29,7 @@ databaseDescribe("transaction editing", () => {
     for (const currency of ["KZT", "USD"]) {
       const [account] = await db.insert(accounts).values({
         name: `Transaction edit test ${crypto.randomUUID()}`,
-        type: "checking",
+        initialBalance: "0",
         currency,
       }).returning();
       accountIds.push(account!.id);
@@ -48,6 +48,14 @@ databaseDescribe("transaction editing", () => {
     for (const id of accountIds) {
       await db.delete(accounts).where(eq(accounts.id, id));
     }
+  });
+
+  it("edits and clears the counterparty", async () => {
+    const changed = await update({ ...draft(), counterparty: " Urbo Coffee " });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ counterparty: "Urbo Coffee" });
+    const cleared = await update({ ...draft(), counterparty: null });
+    expect(await cleared.json()).toMatchObject({ counterparty: null });
   });
 
   it("updates the same record and persists its category, amount, note, and date", async () => {
@@ -104,6 +112,16 @@ databaseDescribe("transaction editing", () => {
     } finally {
       await db.update(accounts).set({ currency: "KZT" }).where(eq(accounts.id, accountId));
     }
+  });
+
+  it("corrects a transaction currency explicitly without converting its amount", async () => {
+    const response = await update({ ...draft(), currency: "rub" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ amount: "12.5000", currency: "RUB" });
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId));
+    expect(account?.currency).toBe("KZT");
+    const savedAgain = await update({ ...draft(), note: "Only the note changed" });
+    expect(await savedAgain.json()).toMatchObject({ amount: "12.5000", currency: "RUB" });
   });
 
   it("deletes a transaction and returns 404 when deleting it again", async () => {

@@ -16,11 +16,11 @@ const repository = createDrizzleSyncRepository(db);
 const clientId = crypto.randomUUID();
 const now = "2026-01-15T12:00:00.000Z";
 let snapshot: SyncSnapshot;
-const account = () => ({ id: crypto.randomUUID(), name: `Local ${crypto.randomUUID()}`, type: "checking", currency: "USD", icon: "wallet", iconColor: "blue", sortOrder: 0, createdAt: now, updatedAt: now });
+const account = () => ({ id: crypto.randomUUID(), name: `Local ${crypto.randomUUID()}`, initialBalance: "0", currency: "USD", icon: "wallet", iconColor: "blue", sortOrder: 0, createdAt: now, updatedAt: now });
 const change = (entity: SyncChange["entity"], data: Record<string, unknown>, baseVersion: string | null = null, key = String(data.id)): SyncChange => ({ entity, key, baseVersion, data });
 const mutation = (changes: SyncChange[], rest: Partial<SyncMutation> = {}): SyncMutation => ({ clientId, mutationId: crypto.randomUUID(), generation: snapshot.generation, workspaceId: snapshot.workspaceId, authoredAt: now, changes, ...rest });
-const txn = (accountId: string, id: string = crypto.randomUUID()) => ({ id, accountId, kind: "expense", amount: "10.1250", currency: "USD", categoryId: null, debtId: null, recurringScheduleId: null, scheduledFor: null, merchant: null, payee: null, note: null, occurredAt: now, createdAt: now, updatedAt: now });
-const schedule = (accountId: string) => ({ id: crypto.randomUUID(), accountId, kind: "expense", amount: "10.1250", currency: "USD", categoryId: null, merchant: null, payee: null, note: null, frequency: "monthly", startAt: "2026-01-31T12:00:00.000Z", lastOccurrenceAt: "2026-01-31T12:00:00.000Z", nextOccurrenceAt: "2026-02-28T12:00:00.000Z", nextScheduledFor: null, endAt: null, createdAt: now, updatedAt: now });
+const txn = (accountId: string, id: string = crypto.randomUUID()) => ({ id, accountId, kind: "expense", amount: "10.1250", currency: "USD", categoryId: null, debtId: null, recurringScheduleId: null, scheduledFor: null, counterparty: null, note: null, occurredAt: now, createdAt: now, updatedAt: now });
+const schedule = (accountId: string) => ({ id: crypto.randomUUID(), accountId, kind: "expense", amount: "10.1250", currency: "USD", categoryId: null, counterparty: null, note: null, frequency: "monthly", startAt: "2026-01-31T12:00:00.000Z", lastOccurrenceAt: "2026-01-31T12:00:00.000Z", nextOccurrenceAt: "2026-02-28T12:00:00.000Z", nextScheduledFor: null, endAt: null, createdAt: now, updatedAt: now });
 const generate = (id: string, through = "2026-02-28T12:00:00.000Z") => materializeRecurringSchedule({ scheduleId: id, through: new Date(through) }, { transactions: createDrizzleTransactionRepository(db) });
 
 suite("persistent two-way synchronization", () => {
@@ -29,9 +29,88 @@ suite("persistent two-way synchronization", () => {
     await repository.push(mutation([], { reset: true }));
     snapshot = await repository.bootstrap();
   });
+  it("syncs the counterparty, clears it, and carries it into recurring payments", async () => {
+    const a = account();
+    const t = { ...txn(a.id), counterparty: "Urbo Coffee" };
+    const plan = { ...schedule(a.id), counterparty: "Subscription business" };
+    const saved = await repository.push(mutation([change("account", a), change("transaction", t), change("schedule", plan)]));
+    expect(saved.status).toBe("accepted");
+    expect(saved.records.find(r => r.key === t.id)?.data?.counterparty).toBe("Urbo Coffee");
+    const cleared = await repository.push(mutation([change("transaction", { ...t, counterparty: null }, saved.records.find(r => r.key === t.id)!.version)]));
+    expect(cleared.status).toBe("accepted");
+    expect(cleared.records.find(r => r.key === t.id)?.data?.counterparty).toBeNull();
+    await generate(plan.id);
+    const generated = (await repository.bootstrap()).records.find(r => r.entity === "transaction" && r.data?.recurringScheduleId === plan.id)!;
+    expect(generated.data?.counterparty).toBe("Subscription business");
+    const duplicate = await repository.push(mutation([{ ...change("transaction", generated.data!), origin: "generated" }]));
+    expect(duplicate.status).toBe("accepted");
+  });
+
+  it("syncs recipient order and keeps it when an older client edits the name", async () => {
+    const alice = { id: crypto.randomUUID(), name: "Alice", icon: "user", color: "blue", sortOrder: 0 };
+    const zoe = { ...alice, id: crypto.randomUUID(), name: "Zoe", sortOrder: 1 };
+    const saved = await repository.push(mutation([change("debt", alice), change("debt", zoe)]));
+    expect(saved.status).toBe("accepted");
+    const reordered = await repository.push(mutation([
+      change("debt", { ...alice, sortOrder: 1 }, saved.records.find(r => r.key === alice.id)!.version),
+      change("debt", { ...zoe, sortOrder: 0 }, saved.records.find(r => r.key === zoe.id)!.version),
+    ]));
+    expect(reordered.status).toBe("accepted");
+    const { sortOrder: _, ...legacy } = alice;
+    const edited = await repository.push(mutation([
+      change("debt", { ...legacy, name: "Renamed" }, reordered.records.find(r => r.key === alice.id)!.version),
+    ]));
+    expect(edited.status).toBe("accepted");
+    expect(edited.records.find(r => r.key === alice.id)?.data).toMatchObject({ name: "Renamed", sortOrder: 1 });
+    const added = { ...legacy, id: crypto.randomUUID(), name: "New recipient" };
+    const created = await repository.push(mutation([change("debt", added)]));
+    expect(created.status).toBe("accepted");
+    expect(created.records.find(r => r.key === added.id)?.data?.sortOrder).toBe(2);
+    const records = (await repository.bootstrap()).records.filter(r => r.entity === "debt" && r.data);
+    expect(records.sort((a, b) => Number(a.data!.sortOrder) - Number(b.data!.sortOrder)).map(r => r.key)).toEqual([zoe.id, alice.id, added.id]);
+  });
+
+  it("deletes unused recipients but protects recipients that still have loans", async () => {
+    const a = account();
+    const recipient = { id: crypto.randomUUID(), name: "Alexey", icon: "user", color: "blue", sortOrder: 0 };
+    const loan = { ...txn(a.id), kind: "debt", debtId: recipient.id };
+    const saved = await repository.push(mutation([change("account", a), change("debt", recipient), change("transaction", loan)]));
+    expect(saved.status).toBe("accepted");
+    const removal: SyncChange = { entity: "debt", key: recipient.id, baseVersion: saved.records.find(r => r.key === recipient.id)!.version, data: null };
+    const blocked = await repository.push(mutation([removal]));
+    expect(blocked.status).toBe("rejected");
+    expect(blocked.message).toContain("outstanding loans");
+    expect((await repository.bootstrap()).records.find(r => r.key === loan.id)?.data?.amount).toBe("10.1250");
+    const returned = await repository.push(mutation([{ entity: "transaction", key: loan.id, baseVersion: saved.records.find(r => r.key === loan.id)!.version, data: null }]));
+    expect(returned.status).toBe("accepted");
+    const deleted = await repository.push(mutation([removal]));
+    expect(deleted.status).toBe("accepted");
+    expect(deleted.records.find(r => r.key === recipient.id)?.data).toBeNull();
+    expect((await repository.bootstrap()).records.some(r => r.key === recipient.id && r.data)).toBeFalse();
+  });
+  it("syncs an initial balance once, preserves it on legacy edits, and never creates income", async () => {
+    const a = { ...account(), initialBalance: "-1234.5678" };
+    const request = mutation([change("account", a)]);
+    const saved = await repository.push(request);
+    expect(saved.status).toBe("accepted");
+    expect(saved.records[0]?.data?.initialBalance).toBe("-1234.5678");
+    expect(saved.records[0]?.data).not.toHaveProperty("type");
+    expect(await repository.push(request)).toEqual(saved);
+    const { initialBalance: _, ...legacy } = a;
+    const renamed = await repository.push(mutation([change("account", { ...legacy, name: "Renamed", type: "checking" }, saved.records[0]!.version)]));
+    expect(renamed.status).toBe("accepted");
+    expect(renamed.records[0]?.data?.initialBalance).toBe("-1234.5678");
+    expect(await db.select().from(transactions)).toHaveLength(0);
+    const updated = await repository.push(mutation([change("account", { ...a, initialBalance: "999999999999999.9999" }, renamed.records[0]!.version)]));
+    expect(updated.records[0]?.data?.initialBalance).toBe("999999999999999.9999");
+    expect((await repository.bootstrap()).records.find(r => r.key === a.id)?.data?.initialBalance).toBe("999999999999999.9999");
+    const invalid = await repository.push(mutation([change("account", { ...a, initialBalance: "1.23456" }, updated.records[0]!.version)]));
+    expect(invalid.status).toBe("rejected");
+    expect((await db.select().from(accounts))[0]?.initialBalance).toBe("999999999999999.9999");
+  });
   it("imports original IDs, decimal strings and legacy writes", async () => {
     const a = account();
-    await db.insert(accounts).values({ ...a, createdAt: new Date(now), updatedAt: new Date(now), type: "checking" });
+    await db.insert(accounts).values({ ...a, createdAt: new Date(now), updatedAt: new Date(now), initialBalance: "0" });
     const before = await repository.bootstrap();
     expect(before.records.find(r => r.key === a.id)?.data?.id).toBe(a.id);
     const t = txn(a.id);
@@ -47,6 +126,31 @@ suite("persistent two-way synchronization", () => {
     expect(await repository.push(request)).toEqual(saved);
     expect(await db.select().from(transactions)).toHaveLength(1);
     expect((await repository.push({ ...request, authoredAt: "2026-01-16T00:00:00.000Z" })).status).toBe("rejected");
+  });
+
+  it("syncs historical currency, offline entries and recurring occurrences after changing account currency", async () => {
+    const a = { ...account(), currency: "RUB" };
+    const s = { ...schedule(a.id), currency: "RUB", amount: "200" };
+    const t = { ...txn(a.id), currency: "RUB", amount: "200" };
+    const initial = await repository.push(mutation([change("account", a), change("schedule", s), change("transaction", t)]));
+    expect(initial.status).toBe("accepted");
+    const accountVersion = initial.records.find(r => r.entity === "account" && r.key === a.id)!.version;
+    const changed = await repository.push(mutation([change("account", { ...a, currency: "KZT" }, accountVersion)]));
+    expect(changed.status).toBe("accepted");
+    expect(changed.records.every(r => r.entity === "account")).toBeTrue();
+
+    const offline = { ...txn(a.id), currency: "RUB", amount: "200" };
+    const occurrence = { ...txn(a.id, occurrenceId(s.id, new Date(s.nextOccurrenceAt))), currency: "RUB", amount: "200",
+      recurringScheduleId: s.id, scheduledFor: s.nextOccurrenceAt, occurredAt: s.nextOccurrenceAt };
+    expect((await repository.push(mutation([change("transaction", offline), { ...change("transaction", occurrence), origin: "generated" }]))).status).toBe("accepted");
+    const transactionVersion = initial.records.find(r => r.entity === "transaction" && r.key === t.id)!.version;
+    const correction = await repository.push(mutation([change("transaction", { ...t, currency: "KZT" }, transactionVersion)]));
+    expect(correction.status).toBe("accepted");
+    expect(correction.records.find(r => r.key === t.id)?.data).toMatchObject({ currency: "KZT", amount: "200.0000" });
+    const stored = await repository.bootstrap();
+    expect(stored.records.find(r => r.key === s.id)?.data?.currency).toBe("RUB");
+    expect(stored.records.find(r => r.key === offline.id)?.data?.currency).toBe("RUB");
+    expect(stored.records.find(r => r.key === occurrence.id)?.data?.currency).toBe("RUB");
   });
   it("rolls back a transfer or reviewed batch when any record is invalid", async () => {
     const a = account(); const b = account();
@@ -84,6 +188,24 @@ suite("persistent two-way synchronization", () => {
     const deleted = await repository.changes(page.cursor, snapshot.generation);
     expect(deleted.records.find(r => r.key === t.id)?.data).toBeNull();
     expect(deleted.records.find(r => r.entity === "budget")?.data).toBeNull();
+  });
+  it("accepts repeated deletions after a cascade without masking competing live edits", async () => {
+    const a = account(); const t = txn(a.id);
+    const saved = await repository.push(mutation([change("account", a), change("transaction", t)]));
+    const version = saved.records.find(r => r.entity === "transaction" && r.key === t.id)!.version;
+    await db.delete(accounts).where(eq(accounts.id, a.id));
+    const removal = mutation([{ entity: "transaction", key: t.id, baseVersion: version, data: null }]);
+    const response = await repository.push(removal);
+    expect(response.status).toBe("accepted");
+    expect(response.records.find(r => r.entity === "transaction" && r.key === t.id)?.data).toBeNull();
+    expect(await repository.push(removal)).toEqual(response);
+    expect((await repository.push(mutation([{ entity: "transaction", key: crypto.randomUUID(), baseVersion: "1", data: null }]))).status).toBe("accepted");
+
+    const b = account();
+    const first = await repository.push(mutation([change("account", b)]));
+    const originalVersion = first.records[0]!.version;
+    await repository.push(mutation([change("account", { ...b, name: "New name" }, originalVersion)]));
+    expect((await repository.push(mutation([{ entity: "account", key: b.id, baseVersion: originalVersion, data: null }]))).status).toBe("conflict");
   });
   it("keeps one budget per account and applies updates and clears globally", async () => {
     const a = account(); const b = account(); const changes = [change("account", a), change("account", b)];

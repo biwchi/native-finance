@@ -1,7 +1,72 @@
 import XCTest
+import SwiftUI
 @testable import FinanceTracker
 
 final class MoneyFormatterTests: XCTestCase {
+    @MainActor
+    func testConvertedRowsRenderInBothAppearancesAndAtAccessibilitySizes() throws {
+        let now = Date(timeIntervalSince1970: 0)
+        let account = Account(id: UUID(), name: "Everyday card", currency: "KZT", icon: "wallet", iconColor: .blue, createdAt: "", updatedAt: "")
+        let transaction = FinanceTransaction(id: UUID(), accountId: account.id, kind: .expense, amount: "200", currency: "RUB", category: nil,
+            note: "Coffee", occurredAt: now, createdAt: now, updatedAt: now)
+        let rates = ExchangeRateSnapshot(baseCurrency: "RUB", reportingCurrency: "KZT",
+            quotes: [ExchangeRateQuote(currency: "KZT", rate: "5", effectiveDate: "2026-09-11")], fetchedAt: now, stale: false)
+        for scheme in [ColorScheme.light, .dark] {
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let content = VStack(spacing: 24) {
+                    TransactionRow(transaction: transaction, account: account, displayCurrency: "KZT", exchangeRates: rates)
+                    TransactionRow(transaction: transaction, account: account, recurrenceDetails: "Monthly · 28 February", style: .upcoming,
+                                   displayCurrency: "KZT", exchangeRates: rates)
+                }
+                .padding(20)
+                .frame(width: 350)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(Color(uiColor: .systemBackground))
+                .environment(\.colorScheme, scheme)
+                .environment(\.dynamicTypeSize, size)
+                let renderer = ImageRenderer(content: content)
+                renderer.scale = 2
+                let image = try XCTUnwrap(renderer.uiImage)
+                XCTAssertEqual(image.size.width, 350)
+                XCTAssertGreaterThan(image.size.height, 100)
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "Currency-rows-\(scheme)-\(size)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
+    func testTransactionDisplayConvertsWithoutChangingTheOriginalAndFallsBackWithoutRates() {
+        let now = Date(timeIntervalSince1970: 0)
+        let rates = ExchangeRateSnapshot(baseCurrency: "USD", reportingCurrency: "USD", quotes: [
+            ExchangeRateQuote(currency: "RUB", rate: "100", effectiveDate: "2026-09-11"),
+            ExchangeRateQuote(currency: "KZT", rate: "500", effectiveDate: "2026-09-11")
+        ], fetchedAt: now, stale: false)
+        for kind in TransactionKind.allCases {
+            let transaction = FinanceTransaction(id: UUID(), accountId: UUID(), kind: kind, amount: "200", currency: "RUB",
+                category: nil, note: nil, occurredAt: now, createdAt: now, updatedAt: now)
+            let accountDisplay = TransactionAmountDisplay(transaction, currency: "KZT", rates: rates)
+            XCTAssertEqual(accountDisplay.primary, kind == .income ? "≈+₸1 000" : "≈-₸1 000")
+            XCTAssertEqual(accountDisplay.original, kind == .income ? "+₽200" : "-₽200")
+            let allAccountsDisplay = TransactionAmountDisplay(transaction, currency: nil, rates: rates)
+            XCTAssertEqual(allAccountsDisplay.primary, kind == .income ? "+₽200" : "-₽200")
+            XCTAssertNil(allAccountsDisplay.original)
+            let upcomingDisplay = TransactionAmountDisplay(transaction, currency: "KZT", rates: rates, showExpenseSign: false)
+            XCTAssertEqual(upcomingDisplay.primary, kind == .income ? "≈+₸1 000" : "≈₸1 000")
+            for currency in ["RUB", "rub", "EUR"] {
+                let unchanged = TransactionAmountDisplay(transaction, currency: currency, rates: rates)
+                XCTAssertEqual(unchanged.primary, transaction.formattedAmount())
+                XCTAssertNil(unchanged.original)
+            }
+            let unavailable = TransactionAmountDisplay(transaction, currency: "KZT", rates: nil)
+            XCTAssertEqual(unavailable.primary, transaction.formattedAmount())
+            XCTAssertNil(unavailable.original)
+            XCTAssertEqual(transaction.amount, "200")
+            XCTAssertEqual(transaction.currency, "RUB")
+        }
+    }
+
     func testCompactTotalsPreserveSignsAndRoundAcrossUnitBoundaries() throws {
         for (raw, expected) in [
             ("18973175.02", "₽19M"), ("18675011.86", "₽18,7M"),
@@ -100,8 +165,9 @@ final class MoneyFormatterTests: XCTestCase {
             )
             let upcoming = UpcomingTransaction(
                 id: UUID(), accountId: transaction.accountId, kind: kind, amount: transaction.amount,
-                currency: transaction.currency, category: nil, merchant: nil, payee: nil, note: nil,
-                frequency: .monthly, occurredAt: date
+                currency: transaction.currency, category: nil, note: nil,
+                frequency: .monthly, occurredAt: date,
+                counterparty: nil
             )
             XCTAssertEqual(transaction.formattedAmount(), kind == .income ? "+₸62 253,40" : "-₸62 253,40")
             XCTAssertEqual(upcoming.amountText, kind == .income ? "+₸62 253,40" : "₸62 253,40")

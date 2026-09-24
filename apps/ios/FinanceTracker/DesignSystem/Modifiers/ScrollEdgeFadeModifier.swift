@@ -65,7 +65,9 @@ struct ScrollEdgeFadeModifier<Background: View>: ViewModifier {
                         // Include floating bottom controls, but do not scale the fade to keyboard height.
                         .frame(height: (min(proxy.safeAreaInsets.bottom, 160) + 40) * 2 / 3)
                         .frame(maxHeight: .infinity, alignment: .bottom)
-                        .ignoresSafeArea(.container, edges: .bottom)
+                        // Extend past both the bottom controls and the keyboard.
+                        // Only the decoration ignores keyboard avoidance.
+                        .ignoresSafeArea(edges: .bottom)
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -112,6 +114,18 @@ struct ScrollEdgeFadeModifier<Background: View>: ViewModifier {
 }
 
 extension View {
+    func horizontalScrollFades(width: CGFloat = AppSpacing.large) -> some View {
+        mask {
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: width)
+                Rectangle().fill(.black)
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: width)
+            }
+        }
+    }
+
     @ViewBuilder
     func scrollEdgeFades(enabled: Bool = true, background: Color = AppColor.groupedBackground) -> some View {
         if enabled {

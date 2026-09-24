@@ -15,7 +15,7 @@ struct ComingUpSection: View {
                 UpcomingTransactionsContent(limit: 4, allAccounts: allAccounts, onEdit: onEdit)
             } header: {
                 FinanceSectionHeader("Coming up") {
-                    NavigationLink {
+                    AppNavigationLink {
                         RecurringTransactionsView(allAccounts: allAccounts)
                     } label: {
                         Text("See all")

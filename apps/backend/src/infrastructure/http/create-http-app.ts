@@ -6,6 +6,7 @@ import type { DebtRepository } from "../../domain/debts/debt.ts";
 import { createDebtsRouter } from "./routes/debts.router.ts";
 import { cors } from "@elysiajs/cors";
 import { Elysia } from "elysia";
+import { timingSafeEqual } from "node:crypto";
 
 import {
   createAccountsRouter,
@@ -47,6 +48,7 @@ export type HttpControllers = {
 export function createHttpApp(
   controllers: HttpControllers,
   corsOrigin: string,
+  apiToken?: string,
 ) {
   return new Elysia({ name: "finance-tracker-api" })
     .use(cors({ origin: corsOrigin }))
@@ -55,6 +57,12 @@ export function createHttpApp(
       status: "ok" as const,
     }))
     .group("/api/v1", (api) => api
+      .onBeforeHandle(({ request, set }) => {
+        if (hasValidApiToken(request, apiToken)) return;
+
+        set.status = 401;
+        return { message: "Unauthorized" };
+      })
       .use(controllers.sync ? createSyncRouter(controllers.sync) : new Elysia())
       .use(controllers.appData ? createSettingsRouter(controllers.appData) : new Elysia())
       .use(controllers.debts ? createDebtsRouter(controllers.debts) : new Elysia())
@@ -65,4 +73,21 @@ export function createHttpApp(
       .use(createQuickEntryRouter(controllers.quickEntry))
       .use(createTransactionsRouter(controllers.transactions))
     );
+}
+
+export function hasValidApiToken(
+  request: Request,
+  expectedToken?: string,
+): boolean {
+  if (!expectedToken) return true;
+
+  const suppliedToken = request.headers.get("x-api-key");
+  if (!suppliedToken) return false;
+
+  const encoder = new TextEncoder();
+  const expected = encoder.encode(expectedToken);
+  const supplied = encoder.encode(suppliedToken);
+
+  return expected.byteLength === supplied.byteLength
+    && timingSafeEqual(expected, supplied);
 }

@@ -71,12 +71,12 @@ struct DashboardSummaryCard: View {
                             tint: !showsMetrics && (insights.remaining ?? 0) < 0 ? BudgetStatus.overLimit.tint : AppColor.accent
                         )
                         budgetUsage(limit)
-                            .modifier(DashboardNumericAmount(amount: insights.spent))
+                            .modifier(DashboardNumericAmount(amount: insights.budgetUsed))
                             .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: limit)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("\(spoken(insights.spent)) of \(spoken(limit)) used")
+                            .accessibilityLabel("\(spoken(insights.budgetUsed)) of \(spoken(limit)) used")
                         trend
                     }
                 }
@@ -173,7 +173,7 @@ struct DashboardSummaryCard: View {
     }
 
     private func budgetUsage(_ limit: Decimal) -> Text {
-        Text(money(insights.spent).replacingOccurrences(of: " ", with: "\u{00A0}"))
+        Text(money(insights.budgetUsed).replacingOccurrences(of: " ", with: "\u{00A0}"))
             .foregroundStyle(.primary)
         + Text(" of \(money(limit).replacingOccurrences(of: " ", with: "\u{00A0}")) used")
     }

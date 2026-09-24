@@ -6,14 +6,17 @@ struct DashboardInsights: Equatable {
     let previousSpent: Decimal
     let net: Decimal
     let monthlyLimit: Decimal?
+    var lent: Decimal = 0
+
+    var budgetUsed: Decimal { spent + lent }
 
     var remaining: Decimal? {
-        monthlyLimit.map { $0 - spent }
+        monthlyLimit.map { $0 - budgetUsed }
     }
 
     var budgetProgress: Decimal? {
         guard let monthlyLimit, monthlyLimit > 0 else { return nil }
-        return spent / monthlyLimit
+        return budgetUsed / monthlyLimit
     }
 
     var paceDifference: Decimal {
@@ -42,6 +45,7 @@ struct DashboardInsights: Equatable {
         var income = Decimal.zero
         var spent = Decimal.zero
         var previousSpent = Decimal.zero
+        var lent = Decimal.zero
 
         for transaction in transactions {
             guard let amount = Decimal(string: transaction.amount), !amount.isNaN else { continue }
@@ -50,6 +54,8 @@ struct DashboardInsights: Equatable {
                     income += amount
                 } else if transaction.kind == .expense {
                     spent += amount
+                } else if transaction.kind == .debt {
+                    lent += amount
                 }
             }
             if transaction.kind == .expense, let previous,
@@ -60,7 +66,7 @@ struct DashboardInsights: Equatable {
 
         return DashboardInsights(
             income: income, spent: spent, previousSpent: previousSpent, net: income - spent,
-            monthlyLimit: filter.preset == .month ? monthlyLimit : nil
+            monthlyLimit: filter.preset == .month ? monthlyLimit : nil, lent: lent
         )
     }
 

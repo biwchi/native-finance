@@ -1,5 +1,6 @@
 import type { Account } from "../../domain/accounts/account.ts";
 import type { Category } from "../../domain/categories/category.ts";
+import { validateQuickEntryDocument, type QuickEntryDocument } from "./quick-entry-document.ts";
 import type { AccountRepository } from "../accounts/account.repository.ts";
 import type { CategoryRepository } from "../categories/category.repository.ts";
 import type { ExchangeRateProvider } from "../exchange-rates/exchange-rate-provider.ts";
@@ -12,7 +13,7 @@ import {
 import { error, ok, type Result } from "../../domain/shared/result.ts";
 import type { RecurrenceFrequency } from "../../domain/transactions/transaction.ts";
 import {
-  quickEntryDraftLimit,
+  quickEntryDraftLimitFor,
   type QuickEntryInterpreter,
 } from "./quick-entry-interpreter.ts";
 
@@ -34,28 +35,26 @@ export type QuickEntryDraft = {
   amount: string;
   currency: string;
   categoryId: string | null;
-  merchant: string | null;
-  payee: string | null;
+  counterparty: string | null;
   note: string | null;
   occurredAt: string;
   recurrence: {
     frequency: RecurrenceFrequency;
     endAt: string | null;
   } | null;
-  sourceText: string;
   conversion: QuickEntryConversion | null;
-  warnings: string[];
 };
 
 export type QuickEntryResponse = {
   referenceNow: string;
   transactions: QuickEntryDraft[];
-  unparsedText: string[];
 };
 
 export type QuickEntryError =
   | "account_not_found"
   | "empty_quick_entry"
+  | "empty_extraction"
+  | "invalid_document"
   | "exchange_rates_unavailable"
   | "invalid_ai_response"
   | "quick_entry_unavailable"
@@ -64,11 +63,13 @@ export type QuickEntryError =
 export async function interpretQuickEntry(
   input: {
     text: string;
+    photo?: string;
+    document?: QuickEntryDocument;
     defaultAccountId: string;
     locale: string;
     timeZone: string;
     context?: {
-      accounts: Pick<Account, "id" | "name" | "type" | "currency" | "icon" | "iconColor">[];
+      accounts: Pick<Account, "id" | "name" | "currency" | "icon" | "iconColor">[];
       categories: (Pick<Category, "id" | "name" | "kind"> & Partial<Pick<Category, "parentId" | "icon" | "color" | "examples">>)[];
     };
   },
@@ -82,11 +83,16 @@ export async function interpretQuickEntry(
   },
 ): Promise<Result<QuickEntryResponse, QuickEntryError>> {
   const text = input.text.trim();
-  if (!text) return error("empty_quick_entry", "Quick entry cannot be empty");
+  if (!text && !input.photo && !input.document) return error("empty_quick_entry", "Quick entry cannot be empty");
+  if (input.document) {
+    if (input.photo) return error("invalid_document", "Choose one photo or document at a time.");
+    const message = validateQuickEntryDocument(input.document);
+    if (message) return error("invalid_document", message);
+  }
 
   const referenceNow = (dependencies.now ?? (() => new Date()))();
   const [accounts, categories]: [Account[], Category[]] = input.context ? [
-    input.context.accounts.map((a, sortOrder) => ({ ...a, id: canonicalId(a.id), currency: normalizeCurrency(a.currency), sortOrder, createdAt: referenceNow, updatedAt: referenceNow })),
+    input.context.accounts.map((a, sortOrder) => ({ ...a, initialBalance: "0", id: canonicalId(a.id), currency: normalizeCurrency(a.currency), sortOrder, createdAt: referenceNow, updatedAt: referenceNow })),
     input.context.categories.map((c, sortOrder) => ({ icon: null, color: null, examples: [], ...c, parentId: c.parentId ? canonicalId(c.parentId) : null, id: canonicalId(c.id), systemKey: null, isSystem: false, sortOrder, createdAt: referenceNow, updatedAt: referenceNow })),
   ] : await Promise.all([dependencies.accounts.list(), dependencies.categories.list()]);
   const defaultAccount = accounts.find(
@@ -98,6 +104,8 @@ export async function interpretQuickEntry(
   try {
     interpreted = await dependencies.interpreter.interpret({
       text,
+      photo: input.photo,
+      document: input.document,
       referenceNow: referenceNow.toISOString(),
       timeZone: input.timeZone,
       locale: input.locale,
@@ -110,14 +118,19 @@ export async function interpretQuickEntry(
     return error("quick_entry_unavailable", message);
   }
 
-  if (interpreted.transactions.length > quickEntryDraftLimit) {
+  const draftLimit = quickEntryDraftLimitFor(input);
+  if (interpreted.transactions.length > draftLimit) {
     return error(
       "too_many_drafts",
-      `Quick Entry supports up to ${quickEntryDraftLimit} transactions at a time`,
+      `${input.document ? "Document import" : "Quick Entry"} supports up to ${draftLimit} transactions at a time`,
     );
   }
   if (interpreted.transactions.length === 0) {
-    return error("invalid_ai_response", "No transactions could be understood");
+    return error("empty_extraction", input.document
+      ? "No transactions could be read. Choose a document with readable transaction amounts."
+      : input.photo
+      ? "No purchases could be read. Try a clearer photo with a visible total."
+      : "No transactions could be understood");
   }
 
   const accountById = new Map(accounts.map((account) => [canonicalId(account.id), account]));
@@ -143,41 +156,38 @@ export async function interpretQuickEntry(
     sourceCurrency,
   ]))];
 
-  const exchangeRates = await getLatestExchangeRates({
+  const needsConversion = resolved.some(({ transaction, account, sourceCurrency }) => transaction.amount !== "" && sourceCurrency !== normalizeCurrency(account.currency));
+  const exchangeRates = needsConversion ? await getLatestExchangeRates({
     reportingCurrency: defaultAccount.currency,
     currencies,
   }, {
     repository: dependencies.exchangeRateRepository,
     provider: dependencies.exchangeRateProvider,
     now: dependencies.now,
-  });
-  if (!exchangeRates.ok) return exchangeRates;
+  }) : null;
+  if (exchangeRates && !exchangeRates.ok) return exchangeRates;
 
   const drafts: QuickEntryDraft[] = [];
   for (const { transaction, account, sourceCurrency } of resolved) {
-    if (!isPositiveAmount(transaction.amount)) {
+    const unresolvedAmount = transaction.amount === "";
+    if (!unresolvedAmount && !isNonZeroAmount(transaction.amount)) {
       return error("invalid_ai_response", "AI returned an invalid transaction amount");
     }
-    const destination = transaction.kind === "transfer"
+    const requestedDestination = transaction.kind === "transfer"
       ? accountById.get(canonicalId(transaction.destinationAccountId ?? "")) ?? null
       : null;
-    if (transaction.kind === "transfer" && (!destination || destination.id === account.id)) {
-      return error("invalid_ai_response", "AI returned an invalid transfer account");
-    }
-    if (destination && destination.currency !== account.currency) {
-      return error(
-        "invalid_ai_response",
-        "Transfers between accounts with different currencies are not supported yet",
-      );
-    }
+    const destination = requestedDestination && requestedDestination.id !== account.id
+      && requestedDestination.currency === account.currency ? requestedDestination : null;
 
     const targetCurrency = normalizeCurrency(account.currency);
-    const converted = convertExchangeAmount(
+    const converted = unresolvedAmount || sourceCurrency === targetCurrency
+      ? { amount: transaction.amount, rate: "1", effectiveDate: referenceNow.toISOString().slice(0, 10) }
+      : exchangeRates?.ok ? convertExchangeAmount(
       transaction.amount,
       sourceCurrency,
       targetCurrency,
       exchangeRates.value,
-    );
+    ) : null;
     if (!converted) {
       return error("exchange_rates_unavailable", "Exchange rates are temporarily unavailable");
     }
@@ -206,31 +216,25 @@ export async function interpretQuickEntry(
       amount: converted.amount,
       currency: targetCurrency,
       categoryId,
-      merchant: cleanText(transaction.merchant),
-      payee: cleanText(transaction.payee),
+      counterparty: cleanText(transaction.counterparty),
       note: cleanText(transaction.note),
       occurredAt: resolvedOccurredAt.toISOString(),
       recurrence,
-      sourceText: transaction.sourceText.trim() || text,
-      conversion: sourceCurrency === targetCurrency ? null : {
+      conversion: unresolvedAmount || sourceCurrency === targetCurrency ? null : {
         originalAmount: normalizeAmount(transaction.amount),
         originalCurrency: sourceCurrency,
         convertedAmount: converted.amount,
         convertedCurrency: targetCurrency,
         rate: converted.rate,
         effectiveDate: converted.effectiveDate,
-        stale: exchangeRates.value.stale,
+        stale: exchangeRates?.ok ? exchangeRates.value.stale : false,
       },
-      warnings: categoryId || transaction.kind === "transfer"
-        ? []
-        : ["No matching category was found"],
     });
   }
 
   return ok({
     referenceNow: referenceNow.toISOString(),
     transactions: drafts,
-    unparsedText: interpreted.unparsedText.map((value) => value.trim()).filter(Boolean),
   });
 }
 
@@ -264,7 +268,7 @@ function normalizeAmount(value: string): string {
   return value.trim().replace(/,/g, "");
 }
 
-function isPositiveAmount(value: string): boolean {
+function isNonZeroAmount(value: string): boolean {
   const amount = normalizeAmount(value);
-  return /^(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(amount) && Number(amount) > 0;
+  return /^-?(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(amount) && Number(amount) !== 0;
 }

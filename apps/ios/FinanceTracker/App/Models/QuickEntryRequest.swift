@@ -6,4 +6,6 @@ struct QuickEntryRequest: Encodable {
     let locale: String
     let timeZone: String
     var context: QuickEntryLocalContext? = nil
+    var photo: String? = nil
+    var document: ReceiptDocument? = nil
 }

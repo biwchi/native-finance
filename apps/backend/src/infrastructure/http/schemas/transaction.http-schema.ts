@@ -1,6 +1,6 @@
 import { t } from "elysia";
 
-import { amountSchema, transactionKindSchema } from "./finance.http-schema.ts";
+import { amountSchema, transactionAmountSchema, transactionKindSchema } from "./finance.http-schema.ts";
 
 const recurrenceFrequencySchema = t.Union([
   t.Literal("daily"),
@@ -23,11 +23,11 @@ export const recurringDeletionActionSchema = t.Union([
 export const transactionBodySchema = t.Object({
   accountId: t.String({ format: "uuid" }),
   kind: t.Union([transactionKindSchema, t.Literal("debt")]),
-  amount: amountSchema,
+  amount: transactionAmountSchema,
+  currency: t.Optional(t.String({ pattern: "^[A-Za-z]{3}$" })),
   debtId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
   categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
-  merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
-  payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+  counterparty: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   recurrence: t.Optional(t.Nullable(recurrenceBodySchema)),
   occurredAt: t.String({ format: "date-time" }),
@@ -37,8 +37,7 @@ export const transferBodySchema = t.Object({
   fromAccountId: t.String({ format: "uuid" }),
   toAccountId: t.String({ format: "uuid" }),
   amount: amountSchema,
-  merchant: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
-  payee: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+  counterparty: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   note: t.Optional(t.Nullable(t.String({ maxLength: 2_000 }))),
   occurredAt: t.String({ format: "date-time" }),
 });

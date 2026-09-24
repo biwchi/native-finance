@@ -24,7 +24,7 @@ export const categorySelection = {
 
 export const transactionSelection = {
   ...getTableColumns(transactions),
-  debt: { id: debts.id, name: debts.name, icon: debts.icon, color: debts.color },
+  debt: { id: debts.id, name: debts.name, icon: debts.icon, color: debts.color, sortOrder: debts.sortOrder },
   category: categorySelection,
   recurrence: {
     id: recurringSchedules.id,

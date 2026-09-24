@@ -27,14 +27,14 @@ struct BudgetOverviewView: View {
             if budgetIsLoaded {
                 if budgetStore.budget(accountID: accountStore.selectedAccountID) == nil {
                     AppSection {
-                        NavigationLink { editor } label: {
+                        AppNavigationLink { editor } label: {
                             Label("Set up a budget", icon: "percentage-circle")
                                 .font(.headline)
                         }
                     } footer: {
                         Text("Set a monthly limit, organize categories into pools, or give a category its own limit.")
                     }
-                } else if let budget = convertedBudget, let transactions = convertedExpenses {
+                } else if let budget = convertedBudget, let transactions = convertedBudgetTransactions {
                     limits(budget: budget, transactions: transactions)
                 }
             }
@@ -45,7 +45,7 @@ struct BudgetOverviewView: View {
         .listSectionSpacing(.custom(AppSpacing.large))
         .financePage()
         .navigationTitle("Budget")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .legacyLeadingNavigationTitle("Budget")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -57,13 +57,13 @@ struct BudgetOverviewView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Group {
                     if canEdit {
-                        NavigationLink { editor } label: {
+                        AppNavigationLink { editor } label: {
                             AppIcon("settings")
                         }
                         .accessibilityLabel("Budget settings")
                     }
                 }
-                .legacyToolbarControl()
+                .legacyToolbarIcon()
             }
         }
         .task(id: budgetScope) { await loadBudget() }
@@ -84,13 +84,10 @@ struct BudgetOverviewView: View {
     private var summary: some View {
         if budgetIsLoaded,
            budgetStore.budget(accountID: accountStore.selectedAccountID) == nil || convertedBudget != nil,
-                  let transactions = convertedExpenses {
-            let spent = transactions.reduce(Decimal.zero) { $0 + (Decimal(string: $1.amount) ?? 0) }
+                  let transactions = convertedBudgetTransactions {
             let limit = convertedBudget?.summaryLimit(useAllocatedBudget: useAllocatedBudgetForSummary)
             DashboardSummaryCard(
-                insights: DashboardInsights(
-                    income: 0, spent: spent, previousSpent: 0, net: -spent, monthlyLimit: limit
-                ),
+                insights: DashboardInsights.calculate(transactions: transactions, month: month, calendar: calendar, monthlyLimit: limit),
                 currency: currency,
                 showsMetrics: false,
                 spendingTitle: calendar.isDate(month, equalTo: .now, toGranularity: .month)
@@ -113,7 +110,7 @@ struct BudgetOverviewView: View {
         if !overview.attention.isEmpty {
             AppSection("Needs attention") {
                 ForEach(showsAllAttention ? overview.attention : Array(overview.attention.prefix(2))) { item in
-                    NavigationLink {
+                    AppNavigationLink {
                         spendingDestination(
                             title: item.progress.name,
                             scope: item.isPool ? .pool(item.progress.id) : .category(item.progress.id)
@@ -192,7 +189,7 @@ struct BudgetOverviewView: View {
                         .foregroundStyle(.secondary)
                         .listRowSeparator(.hidden)
                 }
-                NavigationLink {
+                AppNavigationLink {
                     spendingDestination(title: pool.progress.name, scope: .pool(pool.id))
                 } label: {
                     HStack(spacing: AppSpacing.medium) {
@@ -215,7 +212,7 @@ struct BudgetOverviewView: View {
     private func categoryRow(
         _ category: BudgetCategorySpending, outsidePool: Decimal? = nil
     ) -> some View {
-        NavigationLink {
+        AppNavigationLink {
             spendingDestination(title: category.name, scope: .category(category.id))
         } label: {
             BudgetLimitRow(
@@ -256,14 +253,14 @@ struct BudgetOverviewView: View {
     }
 
     private var currency: String { accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased() }
-    private var expenses: [FinanceTransaction] {
+    private var budgetTransactions: [FinanceTransaction] {
         let scoped = transactionStore.allTransactions.filter {
-            $0.kind == .expense && (accountStore.selectedAccountID == nil || $0.accountId == accountStore.selectedAccountID)
+            ($0.kind == .expense || $0.kind == .debt) && (accountStore.selectedAccountID == nil || $0.accountId == accountStore.selectedAccountID)
         }
         return FinanceOverviewData.transactions(scoped, in: month, calendar: calendar)
     }
-    private var convertedExpenses: [FinanceTransaction]? {
-        FinanceOverviewData.converted(expenses, to: currency, using: rates)
+    private var convertedBudgetTransactions: [FinanceTransaction]? {
+        FinanceOverviewData.converted(budgetTransactions, to: currency, using: rates)
     }
     private var convertedBudget: MonthlyBudget? {
         guard budgetIsLoaded else { return nil }
@@ -273,7 +270,7 @@ struct BudgetOverviewView: View {
     private var canEdit: Bool { true }
     private var budgetScope: String { budgetKey(accountID: accountStore.selectedAccountID) }
     private var currencies: Set<String> {
-        Set(expenses.map(\.currency) + [budgetIsLoaded ? budgetStore.budget(accountID: accountStore.selectedAccountID)?.currency : nil].compactMap { $0 })
+        Set(budgetTransactions.map(\.currency) + [budgetIsLoaded ? budgetStore.budget(accountID: accountStore.selectedAccountID)?.currency : nil].compactMap { $0 })
     }
     private var rateScope: String { "\(currency):\(currencies.sorted().joined(separator: ","))" }
     private func loadBudget(force: Bool = false) async {

@@ -36,6 +36,14 @@ final class LocalFinanceRepository: ObservableObject {
     func value<T: Decodable>(_ type: T.Type, key: String) throws -> T? { try requireDatabase().read { try metadata(type, key, db: $0) } }
     func saveValue<T: Encodable>(_ value: T, key: String) throws { try requireDatabase().write { try setMetadata(value, key, db: $0); try bumpLocalRevision($0) }; try reload() }
 
+    func saveValues(_ values: [String: JSONValue]) throws {
+        try requireDatabase().write { db in
+            for (key, value) in values { try setMetadata(value, key, db: db) }
+            try bumpLocalRevision(db)
+        }
+        try reload()
+    }
+
     @discardableResult
     func edit<T>(now: Date = .now, _ body: (inout LocalEditor) throws -> T) throws -> T {
         guard snapshot.imported else { throw LocalDataError(message: "Finish the initial import before adding data.") }
@@ -146,7 +154,7 @@ final class LocalFinanceRepository: ObservableObject {
         }
         try reload()
     }
-    private func accept(_ record: SyncRecord, pendingKeys: Set<String>, db: Database) throws {
+    func accept(_ record: SyncRecord, pendingKeys: Set<String>, db: Database) throws {
         // Older journal pages contain monthly identities retired by migration 0014.
         if record.entity == "budget", record.key.contains(":") { return }
         if let current = try String.fetchOne(db, sql: "SELECT version FROM records WHERE entity=? AND key=?", arguments: [record.entity, record.key]), let currentVersion = UInt64(current), let incomingVersion = UInt64(record.version), incomingVersion < currentVersion { return }
@@ -180,11 +188,13 @@ final class LocalFinanceRepository: ObservableObject {
             try setMetadata(Optional<Date>.none, "ratesRefreshedAt", db: db)
             try setMetadata(Optional<ExchangeRateSnapshot>.none, "rates", db: db)
             try setMetadata(Optional<QuickEntryReviewPresentation>.none, "quickEntryReview", db: db)
-            try setMetadata("", "quickEntryText", db: db)
+            try setMetadata([ScanDraftItem](), ScanDraftStore.metadataKey, db: db)
+            try setMetadata(Optional<[ScanDraftItem]>.none, ScanDraftStore.legacyMetadataKey, db: db)
             let mutation = SyncMutation(clientId: try metadata(UUID.self, "clientID", db: db)!, mutationId: UUID(), generation: try metadata(Int.self, "generation", db: db) ?? 1, authoredAt: .now, changes: [], reset: true, workspaceId: try metadata(UUID.self, "workspaceID", db: db))
             try storeOutbox(existingReset ?? PendingMutation(mutation: mutation, dependencies: [], attempts: 0, nextAttempt: .distantPast, sent: false, issue: nil), db: db)
             try bumpLocalRevision(db)
         }
+        ScanDraftStore.removeAllStagedFiles()
         try reload(); onMutation?()
     }
     func localVersion(entity: String, key: String) throws -> [String: JSONValue]? {
@@ -251,7 +261,7 @@ final class LocalFinanceRepository: ObservableObject {
             if keepLocal {
                 let clientID = try metadata(UUID.self, "clientID", db: db)!
                 // Restore parents before their dependents, in bounded, ordered commits.
-                let order = ["account":0, "category":1, "debt":2, "schedule":3, "transaction":4, "exclusion":5, "budget":6]
+                let order = ["account":0, "category":1, "debt":2, "schedule":3, "transaction":4, "exclusion":5, "budget":6, "goal":7]
                 visible.sort { (order[$0.entity] ?? 9, $0.data?["parentId"]?.string == nil ? 0 : 1) < (order[$1.entity] ?? 9, $1.data?["parentId"]?.string == nil ? 0 : 1) }
                 var predecessor: UUID?
                 for offset in stride(from: 0, to: visible.count, by: 500) {
@@ -276,9 +286,10 @@ final class LocalFinanceRepository: ObservableObject {
             guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
             var item = queue[index]
             guard item.mutation.generation == (try metadata(Int.self, "generation", db: db) ?? 1) else { throw LocalDataError(message: "These changes belong to an older workspace. Export or discard them before restoring current data.") }
+            let reviewIDs = Set(syncReviewGroups(queue).first(where: { $0.contains(where: { $0.id == id }) })?.map(\.id) ?? [id])
             if keepLocal {
                 // Submit the latest local graph, including fixes made after this operation was paused.
-                var replaced: Set<UUID> = [id]
+                var replaced = reviewIDs
                 var added = true
                 while added {
                     added = false
@@ -292,7 +303,10 @@ final class LocalFinanceRepository: ObservableObject {
                     let row = try Row.fetchOne(db, sql: "SELECT version,data FROM records WHERE entity=? AND key=?", arguments: [changes[i].entity, changes[i].key])
                     changes[i].baseVersion = row?["version"]
                     let bytes: Data? = row?["data"]
-                    changes[i].data = try bytes.map { try LocalJSON.decoder.decode([String: JSONValue].self, from: $0) }
+                    // An absent local row is not deletion intent. The outbox may still
+                    // contain the only saved copy after a legacy storage inconsistency.
+                    if let bytes { changes[i].data = try LocalJSON.decoder.decode([String: JSONValue].self, from: bytes) }
+                    try storeLocalRecord(entity: changes[i].entity, key: changes[i].key, data: changes[i].data, db: db)
                 }
                 let replacementID = UUID()
                 item.mutation.mutationId = replacementID; item.mutation.changes = changes
@@ -304,7 +318,7 @@ final class LocalFinanceRepository: ObservableObject {
                 for removedID in replaced where removedID != id { try db.execute(sql: "DELETE FROM outbox WHERE id=?", arguments: [removedID.uuidString]) }
             } else {
                 // Discard descendants too; retaining a dependent transfer/create would create an invalid graph.
-                var removed: Set<UUID> = [id]
+                var removed = reviewIDs
                 var changed = true
                 while changed { changed = false; for child in queue where !removed.contains(child.id) && !removed.isDisjoint(with: child.dependencies) { removed.insert(child.id); changed = true } }
                 let keys = Set(queue.filter { removed.contains($0.id) }.flatMap { $0.mutation.changes.map(\.identity) })

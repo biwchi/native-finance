@@ -4,6 +4,7 @@ import GRDB
 struct LocalSnapshot: Sendable {
     var revision = 0
     var accounts: [UUID: Account] = [:]
+    var goals: [UUID: SavingsGoal] = [:]
     var categories: [UUID: TransactionCategory] = [:]
     var debts: [UUID: Debt] = [:]
     var transactions: [UUID: StoredTransaction] = [:]
@@ -15,6 +16,9 @@ struct LocalSnapshot: Sendable {
     var rates: ExchangeRateSnapshot?
     var sortedAccounts: [Account] {
         accounts.values.sorted { ($0.sortOrder ?? 1000, $0.name, $0.createdAt) < ($1.sortOrder ?? 1000, $1.name, $1.createdAt) }
+    }
+    var sortedGoals: [SavingsGoal] {
+        goals.values.sorted { ($0.sortOrder, $0.createdAt, $0.id.uuidString) < ($1.sortOrder, $1.createdAt, $1.id.uuidString) }
     }
     var detailedTransactions: [FinanceTransaction] {
         transactions.values.map { $0.presentation(in: self) }.sorted {
@@ -39,6 +43,7 @@ struct LocalSnapshot: Sendable {
             let entity: String = row["entity"]
             switch entity {
             case "account": let v = try LocalJSON.decoder.decode(Account.self, from: data); result.accounts[v.id] = v
+            case "goal": let v = try LocalJSON.decoder.decode(SavingsGoal.self, from: data); result.goals[v.id] = v
             case "category": let v = try LocalJSON.decoder.decode(TransactionCategory.self, from: data); result.categories[v.id] = v
             case "debt": let v = try LocalJSON.decoder.decode(Debt.self, from: data); result.debts[v.id] = v
             case "transaction": let v = try LocalJSON.decoder.decode(StoredTransaction.self, from: data); result.transactions[v.id] = v

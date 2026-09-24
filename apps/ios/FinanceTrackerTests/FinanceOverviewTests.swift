@@ -4,6 +4,27 @@ import UIKit
 @testable import FinanceTracker
 
 final class FinanceOverviewTests: XCTestCase {
+    func testDebtsReduceBudgetWithoutChangingIncomeOrExpenseTotals() {
+        let month = date("2026-09-20T12:00:00Z")
+        func entry(_ kind: TransactionKind, _ amount: String, at occurredAt: Date) -> FinanceTransaction {
+            FinanceTransaction(id: UUID(), accountId: UUID(), kind: kind, amount: amount, currency: "KZT",
+                category: nil, note: nil, occurredAt: occurredAt, createdAt: occurredAt, updatedAt: occurredAt)
+        }
+        let rows = [entry(.debt, "588", at: month), entry(.debt, "3888", at: month),
+                    entry(.debt, "500", at: month), entry(.expense, "200", at: month),
+                    entry(.income, "1000", at: month), entry(.debt, "900", at: date("2026-08-01T00:00:00Z"))]
+        let result = DashboardInsights.calculate(transactions: rows, month: month, now: month,
+            calendar: calendar, monthlyLimit: 19999)
+        XCTAssertEqual(result.lent, 4976)
+        XCTAssertEqual(result.budgetUsed, 5176)
+        XCTAssertEqual(result.remaining, 14823)
+        XCTAssertEqual(result.budgetProgress, Decimal(5176) / Decimal(19999))
+        XCTAssertEqual(result.income, 1000)
+        XCTAssertEqual(result.spent, 200)
+        XCTAssertEqual(result.net, 800)
+        XCTAssertEqual(result.previousSpent, 0)
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -27,11 +48,18 @@ final class FinanceOverviewTests: XCTestCase {
 
     func testReminderWindowChangesAndEmptyResults() {
         let today = bill(10, at: "2026-09-15T18:00:00Z")
+        let tomorrow = bill(15, at: "2026-09-16T23:59:59Z")
         let nextWeek = bill(20, at: "2026-09-22T09:00:00Z")
-        XCTAssertEqual(FinanceOverviewData.upcomingReminders([nextWeek, today], daysBefore: 0,
-            now: now, calendar: calendar).map(\.id), [today.id])
-        XCTAssertEqual(FinanceOverviewData.upcomingReminders([nextWeek, today], daysBefore: 7,
-            now: now, calendar: calendar).map(\.id), [today.id, nextWeek.id])
+        let later = bill(30, at: "2026-09-23T00:00:00Z")
+        let rows = [later, nextWeek, tomorrow, today]
+        for days in [-1, 0, 1] {
+            XCTAssertEqual(FinanceOverviewData.upcomingReminders(rows, daysBefore: days,
+                now: now, calendar: calendar).map(\.id), [today.id, tomorrow.id])
+        }
+        for days in [7, 30] {
+            XCTAssertEqual(FinanceOverviewData.upcomingReminders(rows, daysBefore: days,
+                now: now, calendar: calendar).map(\.id), [today.id, tomorrow.id, nextWeek.id])
+        }
         XCTAssertTrue(FinanceOverviewData.upcomingReminders([nextWeek], daysBefore: 3,
             now: now, calendar: calendar).isEmpty)
         XCTAssertTrue(FinanceOverviewData.upcomingReminders([], daysBefore: 3,
@@ -67,9 +95,8 @@ final class FinanceOverviewTests: XCTestCase {
             for textSize in [DynamicTypeSize.large, .accessibility3] {
                 for count in [1, 2, 5] {
                     let transaction = UpcomingTransaction(id: UUID(), accountId: accountID, kind: .expense,
-                        amount: "12.99", currency: "USD", category: count == 5 ? nil : health,
-                        merchant: nil, payee: nil, note: count == 2 ? "Monthly checkup" : count == 5 ? "  \n " : nil,
-                        frequency: .monthly, occurredAt: date("2026-09-16T09:00:00Z"))
+                        amount: "12.99", currency: "USD", category: count == 5 ? nil : health, note: count == 2 ? "Monthly checkup" : count == 5 ? "  \n " : nil,
+                        frequency: .monthly, occurredAt: date("2026-09-16T09:00:00Z"), counterparty: nil)
                     let view = DashboardUpcomingReminder(transaction: transaction, count: count, now: now)
                         .padding(20)
                         .frame(width: 320)
@@ -447,13 +474,12 @@ final class FinanceOverviewTests: XCTestCase {
                                       icon: "gym", color: .lime, isSystem: false, examples: nil,
                                       sortOrder: nil, createdAt: now, updatedAt: now)
         let reminder = UpcomingTransaction(id: UUID(), accountId: accountID, kind: .expense,
-                                            amount: "20000", currency: "KZT", category: gym,
-                                            merchant: nil, payee: nil, note: "17:35", frequency: .daily,
-                                            occurredAt: now.addingTimeInterval(86_400))
+                                            amount: "20000", currency: "KZT", category: gym, note: "17:35", frequency: .daily,
+                                            occurredAt: now.addingTimeInterval(86_400), counterparty: nil)
         let groceries = TransactionCategory(id: UUID(), systemKey: nil, name: "Groceries", kind: .expense,
                                             icon: "cart", color: .green, isSystem: false, examples: nil,
                                             sortOrder: nil, createdAt: now, updatedAt: now)
-        let account = Account(id: accountID, name: "T Bank", type: .checking, currency: "RUB",
+        let account = Account(id: accountID, name: "T Bank", currency: "RUB",
                               icon: "bank", iconColor: .orange, createdAt: "", updatedAt: "")
         let purchase = FinanceTransaction(id: UUID(), accountId: accountID, kind: .expense,
                                           amount: "286", currency: "RUB", category: groceries,
@@ -524,14 +550,14 @@ final class FinanceOverviewTests: XCTestCase {
     private func transaction(_ amount: Decimal, at: String, category: TransactionCategory? = nil) -> FinanceTransaction {
         FinanceTransaction(id: UUID(), accountId: accountID, kind: .expense,
                            amount: NSDecimalNumber(decimal: amount).stringValue, currency: "USD",
-                           category: category, merchant: "Café", note: nil, occurredAt: date(at), createdAt: date(at), updatedAt: date(at))
+                           category: category, note: nil, occurredAt: date(at), createdAt: date(at), updatedAt: date(at), counterparty: "Café")
     }
     private func bill(_ amount: Decimal, at: String, frequency: RecurrenceFrequency = .monthly, kind: TransactionKind = .expense,
                       end: String? = nil, start: String? = nil, currency: String = "USD") -> UpcomingTransaction {
         UpcomingTransaction(id: UUID(), accountId: accountID, kind: kind,
                             amount: NSDecimalNumber(decimal: amount).stringValue, currency: currency,
-                            category: nil, merchant: nil, payee: nil, note: nil, frequency: frequency,
-                            occurredAt: date(at), endAt: end.map(date), startAt: start.map(date))
+                            category: nil, note: nil, frequency: frequency,
+                            occurredAt: date(at), endAt: end.map(date), startAt: start.map(date), counterparty: nil)
     }
     private func category(_ name: String, parentID: UUID? = nil) -> TransactionCategory {
         TransactionCategory(id: UUID(), systemKey: nil, name: name, kind: .expense, parentId: parentID,
@@ -580,9 +606,9 @@ extension FinanceOverviewTests {
         }
         let accountID = UUID()
         let currency = UserDefaults.standard.string(forKey: AppPreferences.defaultCurrencyKey) ?? AppPreferences.initialCurrency
-        let account = Account(id: accountID, name: "Everyday card", type: .cash, currency: currency, icon: "wallet", iconColor: .orange, createdAt: "", updatedAt: "")
+        let account = Account(id: accountID, name: "Everyday card", currency: currency, icon: "wallet", iconColor: .orange, createdAt: "", updatedAt: "")
         let transactions = (0..<30).map { index in
-            FinanceTransaction(id: UUID(), accountId: accountID, kind: index == 0 ? .income : .expense, amount: index == 0 ? "5000" : "25", currency: currency, category: nil, merchant: "Coffee \(index)", note: nil, occurredAt: .now, createdAt: .now, updatedAt: .now)
+            FinanceTransaction(id: UUID(), accountId: accountID, kind: index == 0 ? .income : .expense, amount: index == 0 ? "5000" : "25", currency: currency, category: nil, note: nil, occurredAt: .now, createdAt: .now, updatedAt: .now, counterparty: "Coffee \(index)")
         }
         let accounts = AccountStore.preview(accounts: [account])
         let store = TransactionStore.preview(transactions: transactions)

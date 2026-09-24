@@ -50,10 +50,24 @@ final class AccentControlContrastTests: XCTestCase {
                 AccentSelectionButton("MMMM", isSelected: true) {}.disabled(true),
                 scheme: scheme, fillOpacity: 0.45, minimumContrast: 3
             )
-            try assertVisibleContent(
-                PrimaryActionButton("MMMM") {}.disabled(true),
-                scheme: scheme, fillOpacity: 0.45, minimumContrast: 3
-            )
+            for appearance in PrimaryActionButton.Appearance.allCases {
+                let button = PrimaryActionButton("MMMM", appearance: appearance) {}.disabled(true)
+                try assertVisibleContent(button, scheme: scheme, fillColor: AppColor.disabledControlFill)
+                let renderer = ImageRenderer(content: button.frame(width: 200, height: 64).environment(\.colorScheme, scheme))
+                renderer.scale = 1
+                let image = try XCTUnwrap(renderer.cgImage)
+                var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &pixels, width: image.width, height: image.height,
+                    bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                for y in 24..<40 {
+                    for x in 92..<108 {
+                        XCTAssertEqual(pixels[(y * image.width + x) * 4 + 3], 255,
+                            "Disabled primary buttons must stay opaque in \(scheme), \(appearance)")
+                    }
+                }
+            }
         }
     }
 
@@ -114,7 +128,7 @@ final class AccentControlContrastTests: XCTestCase {
                         }
                     }
                 }
-                CategoryIconPicker(selection: .constant("cart"), color: .orange)
+                IconPicker(selection: .constant("cart"))
             }
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -287,7 +301,7 @@ final class AccentControlContrastTests: XCTestCase {
 
     func testTransactionGlassControlsRenderInBothAppearances() async throws {
         let account = Account(
-            id: UUID(), name: "Main account", type: .checking, currency: "USD",
+            id: UUID(), name: "Main account", currency: "USD",
             icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: ""
         )
         for scheme in [ColorScheme.light, .dark] {
@@ -322,6 +336,42 @@ final class AccentControlContrastTests: XCTestCase {
         }
     }
 
+    func testTransactionTypeSegmentsMatchToolbarHeight() async throws {
+        let modes: [QuickTransactionMode] = [.income, .expense]
+        for scheme in [ColorScheme.light, .dark] {
+            var previousWidth: CGFloat?
+            for mode in modes {
+                let control = TransactionModeSelector(modes: modes, selection: .constant(mode))
+                    .environment(\.dynamicTypeSize, .large)
+                    .preferredColorScheme(scheme)
+                let controller = UIHostingController(rootView: control)
+                let size = controller.sizeThatFits(in: CGSize(width: 320, height: 100))
+                XCTAssertEqual(size.height, AppControlSize.minimumTapTarget, accuracy: 0.5)
+                if let previousWidth {
+                    XCTAssertEqual(size.width, previousWidth, accuracy: 0.5, "Changing type must not resize the toolbar")
+                }
+                previousWidth = size.width
+            }
+            let controls = VStack(spacing: 20) {
+                ForEach(modes) { mode in
+                    HStack(spacing: AppSpacing.medium) {
+                        AppIcon("xmark", size: 18)
+                            .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                            .modifier(TransactionGlassSurface(shape: Circle(), isToolbarControl: true))
+                        TransactionModeSelector(modes: modes, selection: .constant(mode))
+                    }
+                }
+                TransactionModeSelector(modes: modes, selection: .constant(.expense))
+                    .disabled(true)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppColor.groupedBackground)
+            .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(controls, name: "Transaction-type-capsules-\(scheme)")
+        }
+    }
+
     func testTransactionGlassSelectorAtAccessibilitySize() async throws {
         for scheme in [ColorScheme.light, .dark] {
             let controls = TransactionModeSelector(modes: QuickTransactionMode.allCases, selection: .constant(.expense))
@@ -334,9 +384,152 @@ final class AccentControlContrastTests: XCTestCase {
         }
     }
 
+    func testCategoryTypeToolbarInBothAppearances() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let content = AppColor.groupedBackground
+                .appSheet(isPresented: .constant(true)) {
+                    CategoryEditorView(editor: CategoryEditor(category: nil, kind: .income))
+                        .environmentObject(TransactionStore.preview(transactions: []))
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                }
+                .preferredColorScheme(scheme)
+            try await attachGlassSnapshot(content, name: "Category-type-toolbar-\(scheme)", fullScreen: true)
+        }
+    }
+
+    private final class TypeSelectionFixture: ObservableObject {
+        @Published var mode = QuickTransactionMode.income
+    }
+
+    private struct TypeSelectionPreview: View {
+        @ObservedObject var fixture: TypeSelectionFixture
+        var animatesParent = false
+
+        var body: some View {
+            TransactionModeSelector(modes: QuickTransactionMode.allCases, selection: $fixture.mode)
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppColor.groupedBackground)
+                .ignoresSafeArea()
+                .animation(animatesParent ? .easeInOut(duration: 0.6) : nil, value: fixture.mode)
+        }
+    }
+
+    private final class TypeFrameRecorder: NSObject {
+        let window: UIWindow
+        var frames: [(milliseconds: Int, data: Data)] = []
+        private var displayLink: CADisplayLink?
+        private var startedAt = 0.0
+
+        init(window: UIWindow) { self.window = window }
+
+        func start() {
+            frames = []
+            startedAt = CACurrentMediaTime()
+            let link = CADisplayLink(target: self, selector: #selector(captureFrame))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        func stop() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func captureFrame() {
+            let milliseconds = Int((CACurrentMediaTime() - startedAt) * 1_000)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2
+            let data = autoreleasepool {
+                UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+                    XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: false))
+                }.pngData()!
+            }
+            frames.append((milliseconds, data))
+        }
+    }
+
+    func testTransactionTypeTransitionFrames() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for scheme in [ColorScheme.light, .dark] {
+            for (animationsDisabled, animatesParent) in [(false, false), (true, false), (false, true)] {
+                let fixture = TypeSelectionFixture()
+                let content = TypeSelectionPreview(fixture: fixture, animatesParent: animatesParent)
+                    .transaction { $0.disablesAnimations = animationsDisabled }
+                    .preferredColorScheme(scheme)
+                let controller = UIHostingController(rootView: content)
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: 390, height: 100)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+                controller.view.frame = window.bounds
+                try await Task.sleep(for: .milliseconds(250))
+                let recorder = TypeFrameRecorder(window: window)
+                defer { recorder.stop() }
+
+                func assertSettled(_ name: String, after milliseconds: Int = 250) throws {
+                    let settled = try XCTUnwrap(recorder.frames.first { $0.milliseconds >= milliseconds })
+                    let last = try XCTUnwrap(recorder.frames.last)
+                    let early = try XCTUnwrap(UIImage(data: settled.data)?.cgImage)
+                    let final = try XCTUnwrap(UIImage(data: last.data)?.cgImage)
+                    func pixels(_ image: CGImage) -> [UInt8] {
+                        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                        bytes.withUnsafeMutableBytes { buffer in
+                            let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
+                                                    bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                                    space: CGColorSpaceCreateDeviceRGB(),
+                                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                        }
+                        return bytes
+                    }
+                    let lhs = pixels(early)
+                    let rhs = pixels(final)
+                    let changed = stride(from: 0, to: lhs.count, by: 4).filter { offset in
+                        (0..<3).contains { abs(Int(lhs[offset + $0]) - Int(rhs[offset + $0])) > 12 }
+                    }.count
+                    XCTAssertLessThan(Double(changed) / Double(early.width * early.height), 0.001,
+                                      "\(name): pixels still changing after \(settled.milliseconds) ms with parent animation=\(animatesParent)")
+                }
+
+                func attachFrames(_ name: String) {
+                    XCTAssertGreaterThan(recorder.frames.count, 5)
+                    for (index, frame) in recorder.frames.enumerated() {
+                        let attachment = XCTAttachment(data: frame.data, uniformTypeIdentifier: "public.png")
+                        attachment.name = "Type-motion-\(scheme)-disabled-\(animationsDisabled)-parent-\(animatesParent)-\(name)-frame-\(index)-\(frame.milliseconds)ms"
+                        attachment.lifetime = .keepAlways
+                        add(attachment)
+                    }
+                }
+                // Adjacent transitions in both directions and jumps across the selector.
+                for mode in [QuickTransactionMode.expense, .transfer, .debt, .transfer, .expense, .income, .debt, .income] {
+                    let origin = fixture.mode
+                    recorder.start()
+                    fixture.mode = mode
+                    try await Task.sleep(for: .milliseconds(600))
+                    recorder.stop()
+                    attachFrames("\(origin.rawValue)-to-\(mode.rawValue)")
+                    try assertSettled("\(origin.rawValue)-to-\(mode.rawValue)")
+                }
+                recorder.start()
+                for mode in [QuickTransactionMode.debt, .expense, .transfer, .income] {
+                    fixture.mode = mode
+                    try await Task.sleep(for: .milliseconds(40))
+                }
+                try await Task.sleep(for: .milliseconds(600))
+                recorder.stop()
+                attachFrames("rapid-switch-income")
+                try assertSettled("rapid-switch-income", after: 410)
+            }
+        }
+    }
+
     func testTransactionGlassSheetInBothAppearances() async throws {
         let accounts = ["Main", "Savings"].map { name in
-            Account(id: UUID(), name: name, type: .checking, currency: "USD",
+            Account(id: UUID(), name: name, currency: "USD",
                     icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
         }
         let now = Date.now
@@ -360,7 +553,7 @@ final class AccentControlContrastTests: XCTestCase {
         }
         for scheme in [ColorScheme.light, .dark] {
             let content = Color(uiColor: .systemGroupedBackground)
-                .sheet(isPresented: .constant(true)) {
+                .appSheet(isPresented: .constant(true)) {
                     AddTransactionView()
                         .environmentObject(AccountStore.preview(accounts: accounts, selectedAccountID: accounts[0].id))
                         .environmentObject(TransactionStore.preview(transactions: transactions))
@@ -401,6 +594,7 @@ final class AccentControlContrastTests: XCTestCase {
         scheme: ColorScheme,
         sampleSize: Int = 24,
         fillOpacity: Double = 1,
+        fillColor: Color = AppColor.accent,
         minimumContrast: Double = 4.5,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -418,8 +612,7 @@ final class AccentControlContrastTests: XCTestCase {
         let width = image.width
         let height = image.height
         let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
-        let fill = try XCTUnwrap(UIColor(named: "AccentColor"), file: file, line: line)
-            .resolvedColor(with: traits)
+        let fill = UIColor(fillColor).resolvedColor(with: traits)
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0

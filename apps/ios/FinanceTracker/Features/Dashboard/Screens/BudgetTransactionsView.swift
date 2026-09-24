@@ -47,7 +47,9 @@ struct BudgetTransactionsView: View {
                         TransactionRow(
                             transaction: transaction,
                             account: accountStore.accounts.first { $0.id == transaction.accountId },
-                            timestampStyle: .dateAndTime
+                            timestampStyle: .dateAndTime,
+                            displayCurrency: accountID == nil ? nil : currency,
+                            exchangeRates: rates.snapshot
                         )
                         .contentShape(Rectangle())
                     }
@@ -61,7 +63,7 @@ struct BudgetTransactionsView: View {
         .financePage()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
-        .sheet(item: $editingTransaction) { transaction in
+        .appSheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)

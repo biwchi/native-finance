@@ -36,8 +36,16 @@ struct FinanceTrackerApp: App {
     private struct FinanceSessionView: View {
         @StateObject private var accountStore = AccountStore()
         @StateObject private var budgetStore = BudgetStore()
+        @StateObject private var goalStore = GoalStore()
         @StateObject private var exchangeRateStore = ExchangeRateStore()
-        @StateObject private var transactionStore = TransactionStore()
+        @StateObject private var transactionStore: TransactionStore
+        @StateObject private var scanDraftStore: ScanDraftStore
+
+        init() {
+            let transactions = TransactionStore()
+            _transactionStore = StateObject(wrappedValue: transactions)
+            _scanDraftStore = StateObject(wrappedValue: ScanDraftStore(transactionStore: transactions))
+        }
 
         var body: some View {
             MainView()
@@ -45,8 +53,13 @@ struct FinanceTrackerApp: App {
                 .modifier(PreferenceCalendarModifier())
                 .environmentObject(accountStore)
                 .environmentObject(budgetStore)
+                .environmentObject(goalStore)
                 .environmentObject(exchangeRateStore)
                 .environmentObject(transactionStore)
+                .environmentObject(scanDraftStore)
+                .onReceive(NotificationCenter.default.publisher(for: AppPreferences.dataDeletedNotification)) { _ in
+                    scanDraftStore.clearForWorkspaceReset()
+                }
         }
     }
 }

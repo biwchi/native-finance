@@ -11,7 +11,7 @@ struct AppIcon: View {
     }
 
     var body: some View {
-        AppIcons.resolve(name).image().renderingMode(.template)
+        AppIcons.image(named: name).renderingMode(.template)
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)

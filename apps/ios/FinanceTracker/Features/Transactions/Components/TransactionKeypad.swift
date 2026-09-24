@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TransactionKeypad: View {
+    let onClear: () -> Void
     let onKey: (String) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: AppSpacing.small), count: 4)
@@ -14,25 +15,45 @@ struct TransactionKeypad: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: AppSpacing.small) {
             ForEach(rows.flatMap { $0 }, id: \.self) { key in
-                Button {
-                    onKey(key)
-                } label: {
-                    Group {
-                        if key == "⌫" {
-                            AppIcon("erase")
-                        } else {
-                            Text(key == "*" ? "×" : key == "/" ? "÷" : key)
-                        }
-                    }
-                    .font(.title2.weight(isOperator(key) ? .semibold : .medium))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, minHeight: AppControlSize.primaryButtonHeight)
-                    .modifier(QuickKeyBackground(isUtility: isOperator(key) || key == "⌫"))
-                }
-                .buttonStyle(KeyButtonStyle())
-                .accessibilityLabel(accessibilityLabel(for: key))
+                keyButton(for: key)
             }
         }
+    }
+
+    @ViewBuilder
+    private func keyButton(for key: String) -> some View {
+        if key == "⌫" {
+            button(for: key)
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.5)
+                        .onEnded { _ in onClear() }
+                )
+                .accessibilityHint("Hold to clear the amount")
+                .accessibilityAction(named: "Clear amount", onClear)
+        } else {
+            button(for: key)
+        }
+    }
+
+    private func button(for key: String) -> some View {
+        Button {
+            onKey(key)
+        } label: {
+            Group {
+                if key == "⌫" {
+                    AppIcon("erase")
+                        .scaleEffect(x: -1, y: 1)
+                } else {
+                    Text(key == "*" ? "×" : key == "/" ? "÷" : key)
+                }
+            }
+            .font(.title2.weight(isOperator(key) ? .semibold : .medium))
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, minHeight: AppControlSize.primaryButtonHeight)
+            .modifier(QuickKeyBackground(isUtility: isOperator(key) || key == "⌫"))
+        }
+        .buttonStyle(KeyButtonStyle())
+        .accessibilityLabel(accessibilityLabel(for: key))
     }
 
     private func isOperator(_ key: String) -> Bool {

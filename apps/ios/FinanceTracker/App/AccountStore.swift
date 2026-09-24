@@ -25,13 +25,13 @@ final class AccountStore: ObservableObject {
     var selectionTitle: String { selectedAccount?.name ?? "All Accounts" }
     func loadAccounts(force: Bool = false) async { guard !isPreview else { return }; apply(repository.snapshot) }
     @discardableResult
-    func createAccount(name: String, type: AccountType, currency: String, icon: String, iconColor: AccountIconColor) async throws -> Account {
-        let account = try repository.edit { try $0.saveAccount(name: name, type: type, currency: currency, icon: icon, color: iconColor) }
+    func createAccount(name: String, currency: String, icon: String, iconColor: AccountIconColor, initialBalance: String? = nil) async throws -> Account {
+        let account = try repository.edit { try $0.saveAccount(name: name, currency: currency, icon: icon, color: iconColor, initialBalance: initialBalance) }
         selectedAccountID = account.id; return account
     }
     @discardableResult
-    func updateAccount(id: UUID, name: String, type: AccountType, currency: String, icon: String, iconColor: AccountIconColor) async throws -> Account {
-        try repository.edit { try $0.saveAccount(id: id, name: name, type: type, currency: currency, icon: icon, color: iconColor) }
+    func updateAccount(id: UUID, name: String, currency: String, icon: String, iconColor: AccountIconColor, initialBalance: String? = nil) async throws -> Account {
+        try repository.edit { try $0.saveAccount(id: id, name: name, currency: currency, icon: icon, color: iconColor, initialBalance: initialBalance) }
     }
     func reorderAccounts(_ accounts: [Account]) async throws { try repository.edit { try $0.reorderAccounts(accounts) } }
     func deleteAccount(_ account: Account) async throws { try repository.edit { $0.deleteAccount(account.id) } }

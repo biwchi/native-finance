@@ -11,6 +11,10 @@ struct CenteredSelectionCarouselItem<ID: Hashable>: Identifiable {
     let selectedAccessoryIcon: String?
     let selectedAction: (() -> Void)?
 
+    var isSelectionTarget: Bool {
+        action == nil && tapAction == nil
+    }
+
     init(
         id: ID,
         title: String,

@@ -3,6 +3,8 @@ import SwiftUI
 struct DashboardView: View {
     var isPresentingQuickEntry = false
     var onAddTransaction: () -> Void = {}
+    var onScanTransaction: () -> Void = {}
+    var scanDraftPill: (() -> AnyView)? = nil
 
     private enum SummaryCardID: Hashable {
         case summary
@@ -61,32 +63,51 @@ struct DashboardView: View {
     @State private var deletionError: String?
     @State private var summaryCardHeight: CGFloat?
     @State private var animatesSummaryHeight = false
+    @State private var bottomActionBarHeight: CGFloat = 78
 
     var body: some View {
         NavigationStack {
-            dashboardContent
+            QuickEntryBackground(isPresented: isPresentingQuickEntry) {
+                dashboardContent
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        addTransactionButton
+                    }
+            }
+                // The native host applies the page's safe areas. Keep its outer
+                // bounds fixed, including the area behind the home indicator.
+                .ignoresSafeArea()
+                .overlay(alignment: .bottom) {
+                    ZStack(alignment: .bottom) {
+                        if !isPresentingQuickEntry, let scanDraftPill {
+                            scanDraftPill()
+                                .padding(.bottom, bottomActionBarHeight + AppSpacing.small)
+                                .transition(BottomBarVisibilityMotion.transition(reduceMotion: reduceMotion))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                    .animation(
+                        BottomBarVisibilityMotion.animation(reduceMotion: reduceMotion),
+                        value: isPresentingQuickEntry
+                    )
+                }
                 .navigationDestination(isPresented: $isShowingRecurring) {
-                    RecurringTransactionsView()
+                    RecurringTransactionsView().legacyNavigationDestination()
                 }
                 .navigationDestination(isPresented: $isShowingBudget) {
-                    BudgetOverviewView(initialMonth: selectedPeriod.anchor)
+                    BudgetOverviewView(initialMonth: selectedPeriod.anchor).legacyNavigationDestination()
                 }
                 .task(id: budgetScope) {
                     if selectedPeriod.preset == .month {
                         await budgetStore.loadBudget(accountID: accountStore.selectedAccountID)
                     }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if !isPresentingQuickEntry {
-                        addTransactionButton
-                    }
-                }
                 .financeOverviewToolbar()
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Group {
                             HStack(spacing: 0) {
-                                NavigationLink {
+                                AppNavigationLink {
                                     FinancesView(initialMonth: selectedPeriod.preset == .month ? selectedPeriod.anchor : .now)
                                 } label: {
                                     AppIcon("view-grid")
@@ -96,7 +117,7 @@ struct DashboardView: View {
                                 .accessibilityLabel("Finances")
                                 .accessibilityIdentifier("financesNavigation")
 
-                                NavigationLink {
+                                AppNavigationLink {
                                     SettingsView()
                                 } label: {
                                     AppIcon("settings")
@@ -112,12 +133,12 @@ struct DashboardView: View {
                 }
         }
         .task(id: rateScope) { await loadRates() }
-        .sheet(item: $selectedSummaryMetric) { metric in
+        .appSheet(item: $selectedSummaryMetric) { metric in
             if let insights {
                 DashboardSummaryMetrics.Detail(metric: metric, amount: metric.amount(in: insights), currency: currency)
             }
         }
-        .sheet(item: $editingTransaction) { transaction in
+        .appSheet(item: $editingTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -133,17 +154,55 @@ struct DashboardView: View {
     }
 
     private var addTransactionButton: some View {
-        PrimaryIconButton(
-            "Add transaction",
-            iconName: "plus",
-            iconSize: 26,
-            appearance: .glass,
-            action: onAddTransaction
-        )
+        ZStack {
+            if !isPresentingQuickEntry {
+                HStack(spacing: AppSpacing.medium) {
+                    PrimaryIconButton(
+                        "Scan purchases",
+                        iconName: "camera",
+                        iconSize: 22,
+                        appearance: .glass,
+                        diameter: 48,
+                        action: onScanTransaction
+                    )
+                    .frame(width: 48, height: 48)
+                    .accessibilityIdentifier("scanPurchases")
+
+                    PrimaryIconButton(
+                        "Add transaction",
+                        iconName: "plus",
+                        iconSize: 26,
+                        appearance: .glass,
+                        action: onAddTransaction
+                    )
+                    .frame(width: 62, height: 62)
+
+                    // Balance the scan control so Add keeps its centered position.
+                    Color.clear.frame(width: 48, height: 48)
+                        .accessibilityHidden(true)
+                }
+                .transition(BottomBarVisibilityMotion.transition(reduceMotion: reduceMotion))
+            }
+        }
         .dynamicTypeSize(.large)
-        .frame(width: 62, height: 62)
         .frame(maxWidth: .infinity)
+        .frame(height: 62)
         .padding(.vertical, AppSpacing.small)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { bottomActionBarHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, height in
+                        bottomActionBarHeight = height
+                    }
+            }
+        }
+        // Preserve the inset while the controls transition so the list never reflows.
+        // isPresentingQuickEntry stays true until UIKit finishes dismissal.
+        .animation(
+            BottomBarVisibilityMotion.animation(reduceMotion: reduceMotion),
+            value: isPresentingQuickEntry
+        )
     }
 
     @ViewBuilder
@@ -407,7 +466,9 @@ struct DashboardView: View {
             TransactionRow(
                 transaction: transaction,
                 account: accountStore.accounts.first { $0.id == transaction.accountId },
-                timestampStyle: .time
+                timestampStyle: .time,
+                displayCurrency: accountStore.selectedAccount?.currency,
+                exchangeRates: summaryRates.snapshot
             )
                 .contentShape(Rectangle())
         }

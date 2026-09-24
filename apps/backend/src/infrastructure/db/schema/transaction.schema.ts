@@ -33,8 +33,7 @@ export const transactions = pgTable(
     recurringScheduleId: uuid().references(() => recurringSchedules.id, {
       onDelete: "set null",
     }),
-    merchant: text(),
-    payee: text(),
+    counterparty: text(),
     note: text(),
     occurredAt: timestamp({ withTimezone: true }).notNull(),
     scheduledFor: timestamp({ withTimezone: true }),

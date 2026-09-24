@@ -19,7 +19,7 @@ databaseDescribe("recurring template editing and deletion", () => {
 
   beforeEach(async () => {
     const [account] = await db.insert(accounts).values({
-      name: `Recurring mutation test ${crypto.randomUUID()}`, type: "checking", currency: "USD",
+      name: `Recurring mutation test ${crypto.randomUUID()}`, initialBalance: "0", currency: "USD",
     }).returning();
     accountId = account!.id;
     accountIds.push(accountId);
@@ -29,22 +29,37 @@ databaseDescribe("recurring template editing and deletion", () => {
     for (const id of accountIds) await db.delete(accounts).where(eq(accounts.id, id));
   });
 
+  for (const projected of [false, true]) {
+    it(`preserves the ${projected ? "projected" : "recorded"} currency after an account change until explicitly corrected`, async () => {
+      const created = await create();
+      if (projected) await db.delete(transactions).where(eq(transactions.id, created.id));
+      await db.update(accounts).set({ currency: "KZT" }).where(eq(accounts.id, accountId));
+      const [item] = await upcoming();
+      expect((await update(item!, { note: "Edited note" })).status).toBe(200);
+      expect((await upcoming())[0]).toMatchObject({ currency: "USD" });
+      expect((await update(item!, { currency: "rub", amount: "200" })).status).toBe(200);
+      expect((await upcoming())[0]).toMatchObject({ currency: "RUB", amount: "200.0000" });
+      const [schedule] = await db.select().from(recurringSchedules).where(eq(recurringSchedules.id, item!.id));
+      expect(schedule).toMatchObject({ currency: "RUB", amount: "200.0000" });
+    });
+  }
+
   it("edits a projected template without rewriting historical entries or inserting an early occurrence", async () => {
     const pastDate = new Date(Date.UTC(new Date().getUTCFullYear() - 1, 0, 31, 12)).toISOString();
     const created = await create({ occurredAt: pastDate, recurrence: { frequency: "yearly" } });
     const [item] = await upcoming();
     const before = await ledger();
-    const response = await update(item!, { amount: "29.99", merchant: "New subscription", note: "New template" });
+    const response = await update(item!, { amount: "29.99", counterparty: "New subscription", note: "New template" });
     expect(response.status).toBe(200);
     expect(await ledger()).toEqual(before);
-    expect((await upcoming())[0]).toMatchObject({ id: created.recurrence.id, amount: "29.9900", merchant: "New subscription" });
+    expect((await upcoming())[0]).toMatchObject({ id: created.recurrence.id, amount: "29.9900", counterparty: "New subscription" });
   });
 
   it("updates a saved future occurrence and its next date, frequency, and end date", async () => {
     const created = await create();
     const [item] = await upcoming();
     const response = await update(item!, {
-      occurredAt: "2100-02-03T12:00:00.000Z", amount: "40", merchant: "Internet",
+      occurredAt: "2100-02-03T12:00:00.000Z", amount: "40", counterparty: "Internet",
       recurrence: { frequency: "weekly", endAt: "2100-02-17T12:00:00.000Z" },
     });
     expect(response.status).toBe(200);
@@ -57,7 +72,7 @@ databaseDescribe("recurring template editing and deletion", () => {
   it("moves only future template entries to a different account and currency", async () => {
     const created = await create();
     const [item] = await upcoming();
-    const [destination] = await db.insert(accounts).values({ name: "Destination", type: "checking", currency: "EUR" }).returning();
+    const [destination] = await db.insert(accounts).values({ name: "Destination", initialBalance: "0", currency: "EUR" }).returning();
     accountIds.push(destination!.id);
     expect((await update(item!, { accountId: destination!.id })).status).toBe(200);
     expect(await upcoming()).toEqual([]);
@@ -160,7 +175,7 @@ databaseDescribe("recurring template editing and deletion", () => {
   });
 
   function draft() {
-    return { accountId, kind: "expense", amount: "14.99", merchant: "Netflix", occurredAt: firstDate, recurrence: { frequency: "monthly" } };
+    return { accountId, kind: "expense", amount: "14.99", counterparty: "Netflix", occurredAt: firstDate, recurrence: { frequency: "monthly" } };
   }
   async function create(overrides: Record<string, unknown> = {}): Promise<Created> {
     const response = await request("/api/v1/transactions", "POST", { ...draft(), ...overrides });

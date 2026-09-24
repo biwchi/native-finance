@@ -4,12 +4,37 @@ import type { Account } from "../accounts/account.ts";
 import { createTransaction } from "./transaction.ts";
 
 describe("createTransaction", () => {
+  it("normalizes the counterparty and leaves blank names null", () => {
+    for (const counterparty of [" Urbo Coffee ", "", null]) {
+      const result = createTransaction({ accountId: "account", kind: "expense", amount: "300", counterparty,
+        occurredAt: "2026-09-21T10:00:00Z" }, { account: account(), category: null });
+      expect(result).toMatchObject({ ok: true, value: { values: { counterparty: counterparty?.trim() || null } } });
+    }
+  });
+
+  it("accepts an explicit currency without converting the numeric amount", () => {
+    const result = createTransaction({ accountId: "account", kind: "expense", amount: "200", currency: "rub",
+      occurredAt: "2026-09-04T10:00:00.000Z" }, { account: account(), category: null });
+    expect(result).toMatchObject({ ok: true, value: { values: { amount: "200", currency: "RUB" } } });
+    const invalid = createTransaction({ accountId: "account", kind: "expense", amount: "200", currency: "invalid",
+      occurredAt: "2026-09-04T10:00:00.000Z" }, { account: account(), category: null });
+    expect(invalid).toMatchObject({ ok: false, error: { code: "invalid_currency" } });
+  });
+
+  it("uses the transaction kind for direction and stores a positive magnitude", () => {
+    for (const kind of ["expense", "income"] as const) {
+      const result = createTransaction({ accountId: "account", kind, amount: "-12.50",
+        occurredAt: "2026-09-04T10:00:00.000Z" }, { account: account(), category: null });
+      expect(result).toMatchObject({ ok: true, value: { values: { kind, amount: "12.50" } } });
+    }
+  });
+
   it("normalizes optional text and parses recurrence dates", () => {
     const result = createTransaction({
       accountId: "account",
       kind: "expense",
       amount: "12.50",
-      merchant: "  Corner shop  ",
+      counterparty: "  Corner shop  ",
       note: "   ",
       occurredAt: "2026-09-04T10:00:00.000Z",
       recurrence: {
@@ -23,7 +48,7 @@ describe("createTransaction", () => {
     expect(result.value.values).toMatchObject({
       accountId: "account",
       currency: "USD",
-      merchant: "Corner shop",
+      counterparty: "Corner shop",
       note: null,
     });
     expect(result.value.recurrence).toEqual({
@@ -54,7 +79,7 @@ function account(): Account {
   return {
     id: "account",
     name: "Checking",
-    type: "checking",
+    initialBalance: "0",
     currency: "USD",
     icon: "creditcard.fill",
     iconColor: "blue",

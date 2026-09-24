@@ -8,27 +8,47 @@ struct QuickEntryReviewView: View {
     @State private var drafts: [QuickEntryDraft]
     @State private var editingDraft: QuickEntryDraft?
     @State private var isSaving = false
+    @State private var didSubmit = false
     @State private var errorMessage: String?
     private let presentationID: UUID
     private let prompt: String
-    private let unparsedText: [String]
+    private let source: QuickEntryReviewPresentation.Source?
+    private let onSubmit: (() -> Void)?
+    private let onDraftsChange: (([QuickEntryDraft]) -> Void)?
+    private let onCommit: (([QuickEntryDraft]) async throws -> Int)?
+    private let onBottomActionBarHeightChange: (CGFloat) -> Void
 
-    init(presentation: QuickEntryReviewPresentation) {
+    init(
+        presentation: QuickEntryReviewPresentation,
+        onSubmit: (() -> Void)? = nil,
+        onDraftsChange: (([QuickEntryDraft]) -> Void)? = nil,
+        onCommit: (([QuickEntryDraft]) async throws -> Int)? = nil,
+        onBottomActionBarHeightChange: @escaping (CGFloat) -> Void = { _ in }
+    ) {
         _drafts = State(initialValue: presentation.drafts)
         presentationID = presentation.id
         prompt = presentation.prompt
-        unparsedText = presentation.unparsedText
+        source = presentation.source
+        self.onSubmit = onSubmit
+        self.onDraftsChange = onDraftsChange
+        self.onCommit = onCommit
+        self.onBottomActionBarHeightChange = onBottomActionBarHeightChange
     }
 
     var body: some View {
         NavigationStack {
             AppList {
                 AppSection {
-                    Text("“\(prompt)”")
+                    Text(source != nil ? prompt : "“\(prompt)”")
                         .italic()
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
+                    if source == .csv || source == .document {
+                        Text(reviewInstructions)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if hasConvertedDrafts {
@@ -48,23 +68,11 @@ struct QuickEntryReviewView: View {
                     .listRowBackground(AppColor.informative.opacity(0.12))
                 }
 
-                if !unparsedText.isEmpty {
-                    AppSection {
-                        Label {
-                            Text("Some text needs your review: \(unparsedText.joined(separator: " · "))")
-                        } icon: {
-                            AppIcon("warning", size: 16)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-
                 if drafts.isEmpty {
                     ContentUnavailableView(
                         "No transaction drafts",
                         iconName: "list",
-                        description: Text("Dismiss this review and try a different description.")
+                        description: Text(source == .csv ? "Discard this review and choose another CSV file." : source == .document ? "Dismiss this review and try another document." : source == .photo ? "Dismiss this review and try another photo." : "Dismiss this review and try a different description.")
                     )
                     .listRowBackground(Color.clear)
                 } else {
@@ -80,19 +88,32 @@ struct QuickEntryReviewView: View {
                 }
             }
             .onChange(of: drafts) { _, drafts in
-                do { try transactionStore.saveQuickEntryReview(QuickEntryReviewPresentation(id: presentationID, prompt: prompt, drafts: drafts, unparsedText: unparsedText)) }
-                catch { errorMessage = error.localizedDescription }
+                if let onDraftsChange {
+                    onDraftsChange(drafts)
+                    if drafts.isEmpty { dismiss() }
+                    return
+                }
+                do {
+                    if source != .csv {
+                        try transactionStore.saveQuickEntryReview(drafts.isEmpty ? nil : QuickEntryReviewPresentation(
+                            id: presentationID, prompt: prompt, drafts: drafts, source: source
+                        ))
+                    }
+                    if drafts.isEmpty { dismiss() }
+                } catch { errorMessage = error.localizedDescription }
             }
             .animateListChanges(value: drafts.map(\.id))
             .listStyle(.insetGrouped)
             .listSectionSpacing(.custom(4))
             .environment(\.defaultMinListRowHeight, 0)
-            .navigationTitle("Review quick entry")
+            .navigationTitle(source == .csv ? "Review CSV import" : source == .document ? "Review document" : source == .photo ? "Review scan" : "Review quick entry")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Group {
-                        Button("Discard") {
+                        Button(onCommit == nil ? "Discard" : "Close") {
+                            if onCommit != nil { dismiss(); return }
+                            if source == .csv { dismiss(); return }
                             do { try transactionStore.saveQuickEntryReview(nil); dismiss() } catch { errorMessage = error.localizedDescription }
                         }
                             .disabled(isSaving)
@@ -101,19 +122,21 @@ struct QuickEntryReviewView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                PrimaryActionButton(submitTitle) {
+                PrimaryActionButton(submitTitle, isLoading: isSaving) {
                     Task { await commitDrafts() }
                 }
                 .disabled(!canSubmit)
                 .padding(.horizontal, AppSpacing.medium)
                 .padding(.vertical, AppSpacing.small)
+                .reportScanDraftBottomBarHeight(onBottomActionBarHeightChange)
             }
-            .sheet(item: $editingDraft) { draft in
-                AddTransactionView(draft: draft) { updated in
+            .interactiveDismissDisabled(isSaving)
+            .appSheet(item: $editingDraft) { draft in
+                AddTransactionView(draft: draft, isCSVImport: source == .csv, onSaveDraft: { updated in
                     if let index = drafts.firstIndex(where: { $0.id == updated.id }) {
                         drafts[index] = updated
                     }
-                }
+                })
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
@@ -133,19 +156,12 @@ struct QuickEntryReviewView: View {
         Button {
             editingDraft = draft
         } label: {
-            VStack(alignment: .leading, spacing: AppSpacing.small) {
-                ForEach(draft.warnings, id: \.self) { warning in
-                    Label(warning, icon: "warning")
-                        .font(.caption)
-                        .foregroundStyle(AppColor.warningText)
-                }
-                TransactionRow(
-                    transaction: draft,
-                    account: account(draft.accountId),
-                    titleOverride: title(for: draft),
-                    secondaryAmountText: originalAmountText(for: draft)
-                )
-            }
+            TransactionRow(
+                transaction: draft,
+                account: account(draft.accountId),
+                titleOverride: title(for: draft),
+                secondaryAmountText: originalAmountText(for: draft)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -164,7 +180,8 @@ struct QuickEntryReviewView: View {
                 string: conversion.originalAmount,
                 locale: Locale(identifier: "en_US_POSIX")
               ) else { return nil }
-        let signedAmount = draft.kind == .expense ? -amount : amount
+        let magnitude = abs(amount)
+        let signedAmount = draft.kind == .expense ? -magnitude : magnitude
         return MoneyFormatter.format(
             signedAmount,
             currency: conversion.originalCurrency,
@@ -197,24 +214,37 @@ struct QuickEntryReviewView: View {
     }
 
     private var submitTitle: String {
-        "Add \(drafts.count) transaction\(drafts.count == 1 ? "" : "s")"
+        if source == .csv || source == .document { return "Submit \(drafts.count) transaction\(drafts.count == 1 ? "" : "s")" }
+        return "Add \(drafts.count) transaction\(drafts.count == 1 ? "" : "s")"
+    }
+
+    private var reviewInstructions: String {
+        let count = "\(drafts.count) transaction\(drafts.count == 1 ? "" : "s")"
+        let duplicate = source == .csv
+            ? "Importing the same file again adds another copy."
+            : "Processing the same file again creates another draft."
+        return "\(count) to add. Tap a row to edit or swipe to remove it. Nothing is added until you press Submit. \(duplicate)"
     }
 
     private var canSubmit: Bool {
-        !isSaving && !drafts.isEmpty && drafts.allSatisfy(isValid)
+        !isSaving && !didSubmit && !drafts.isEmpty && drafts.allSatisfy(isValid)
     }
 
     private func isValid(_ draft: QuickEntryDraft) -> Bool {
         guard let amount = Decimal(
             string: draft.amount.replacingOccurrences(of: ",", with: "."),
             locale: Locale(identifier: "en_US_POSIX")
-        ), amount > 0, account(draft.accountId) != nil else { return false }
+        ), amount != 0, account(draft.accountId) != nil else { return false }
+        if draft.mode == .debt {
+            return !draft.isRecurring && draft.category == nil && transactionStore.debts.contains { $0.id == draft.debtId }
+        }
         if draft.mode == .transfer {
+            guard amount > 0 else { return false }
             guard let destinationID = draft.destinationAccountId,
                   destinationID != draft.accountId,
                   let source = account(draft.accountId),
                   let destination = account(destinationID) else { return false }
-            return source.currency == destination.currency
+            return source.currency == destination.currency && source.currency == draft.currency
         }
         return !draft.isRecurring || draft.recurrenceEndAt == nil || draft.recurrenceEndAt! >= draft.occurredAt
     }
@@ -225,7 +255,11 @@ struct QuickEntryReviewView: View {
         isSaving = true
         defer { isSaving = false }
         do {
-            _ = try await transactionStore.commitQuickEntryDrafts(drafts)
+            if let onCommit { _ = try await onCommit(drafts) }
+            else if source == .csv { _ = try await transactionStore.commitCSVImport(drafts) }
+            else { _ = try await transactionStore.commitQuickEntryDrafts(drafts) }
+            didSubmit = true
+            onSubmit?()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

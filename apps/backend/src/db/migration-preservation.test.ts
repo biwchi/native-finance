@@ -185,6 +185,35 @@ migrationDescribe("finance migration preservation", () => {
       const [ledger] = await client`select count(*)::int as count from transactions where id=${transactionId}`;
       expect(ledger?.count).toBe(1);
 
+      const [beforeBalances] = await client`select revision from sync_workspace where id=1`;
+      await runMigration(client, "0015_account_initial_balance.sql");
+      const [balanceAccount] = await client`select id,name,currency,initial_balance from accounts where id=${accountId}`;
+      expect(balanceAccount).toMatchObject({ id: accountId, name: "Legacy cash", currency: "USD", initial_balance: "0.0000" });
+      const [accountSnapshot] = await client`select data from sync_records where entity='account' and key=${accountId}`;
+      expect(accountSnapshot?.data.initialBalance).toBe("0.0000");
+      expect(accountSnapshot?.data).not.toHaveProperty("type");
+      const balanceChanges = await client`select data from sync_changes where entity='account' and revision > ${beforeBalances!.revision}`;
+      expect(balanceChanges.some(r => r.data?.id === accountId && r.data.initialBalance === "0.0000")).toBeTrue();
+      const removedType = await client`select column_name from information_schema.columns where table_name='accounts' and column_name='type'`;
+      expect(removedType).toHaveLength(0);
+      const [preservedTransaction] = await client`select amount,note from transactions where id=${transactionId}`;
+      expect(preservedTransaction).toMatchObject({ amount: "12.5000", note: "legacy description" });
+      await client`update accounts set initial_balance=-999999999999999.9999 where id=${accountId}`;
+      const [exact] = await client`select data from sync_records where entity='account' and key=${accountId}`;
+      expect(exact?.data.initialBalance).toBe("-999999999999999.9999");
+      const alice = "60000000-0000-0000-0000-000000000001";
+      const zoe = "60000000-0000-0000-0000-000000000002";
+      await client`insert into debts(id,name,icon,color) values (${zoe},'Zoe','star','purple'),(${alice},'Alice','user','blue')`;
+      await runMigration(client, "0016_debt_recipient_order.sql");
+      const recipients = await client`select id,name,icon,color,sort_order from debts order by sort_order`;
+      expect([...recipients]).toEqual([
+        { id: alice, name: "Alice", icon: "user", color: "blue", sort_order: 0 },
+        { id: zoe, name: "Zoe", icon: "star", color: "purple", sort_order: 1 },
+      ]);
+      const recipientRecords = await client`select key,data from sync_records where entity='debt' and data is not null`;
+      expect(recipientRecords.find(r => r.key === zoe)?.data.sortOrder).toBe(1);
+      const [unchangedLoan] = await client`select amount,note from transactions where id=${transactionId}`;
+      expect(unchangedLoan).toEqual(preservedTransaction!);
     } finally {
       await client.end();
     }

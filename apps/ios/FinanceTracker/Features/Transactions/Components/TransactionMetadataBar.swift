@@ -3,7 +3,6 @@ import SwiftUI
 struct TransactionMetadataBar: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .body) private var iconBadgeSize = 36
     @State private var isEditingDate = false
 
     let accounts: [Account]
@@ -37,44 +36,12 @@ struct TransactionMetadataBar: View {
     }
 
     private var accountMenu: some View {
-        Menu {
-            Picker("Account", selection: Binding(
-                get: { selectedAccountID },
-                set: { if let accountID = $0 { onSelectAccount(accountID) } }
-            )) {
-                ForEach(accounts) { account in
-                    Label(account.name, icon: account.icon).tag(Optional(account.id))
-                }
-            }
-        } label: {
-            HStack(spacing: AppSpacing.small) {
-                AppIcon(selectedAccount?.icon ?? "credit-card", size: 22)
-                    .foregroundStyle(AppColor.iconForeground(for: accountColor))
-                    .frame(width: iconBadgeSize, height: iconBadgeSize)
-                    .background(accountColor.opacity(0.14), in: Circle())
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(selectedAccount?.name ?? "Account")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(accountBalance)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            }
-            .frame(minHeight: AppControlSize.minimumTapTarget, alignment: .leading)
-            .padding(.horizontal, AppSpacing.small)
-            .padding(.vertical, AppSpacing.extraSmall)
-            .contentShape(Capsule())
-            .modifier(TransactionGlassSurface(shape: Capsule(), isInteractive: true))
-        }
-        .buttonStyle(.plain)
-        .disabled(accounts.isEmpty)
-        .accessibilityLabel("Account, \(selectedAccount?.name ?? "Choose account")")
-        .accessibilityValue(accountBalance)
-        .accessibilityHint("Opens the account picker")
+        AccountPickerMenu(
+            accounts: accounts,
+            selectedAccountID: selectedAccountID,
+            subtitle: accountBalance,
+            onSelect: onSelectAccount
+        )
     }
 
     private var dateTimeButton: some View {
@@ -105,18 +72,9 @@ struct TransactionMetadataBar: View {
         .accessibilityLabel("Transaction date and time")
         .accessibilityValue(date.formatted(date: .complete, time: .shortened))
         .popover(isPresented: $isEditingDate) {
-            VStack(spacing: AppSpacing.medium) {
-                HStack {
-                    Text("Date & time").font(.headline)
-                    Spacer()
-                    Button("Done") { isEditingDate = false }
-                }
-                DatePicker("Transaction date and time", selection: $date, displayedComponents: [.date, .hourAndMinute])
-                    .datePickerStyle(.graphical)
+            DatePickerPopover(title: "Date & time", selection: $date, components: [.date, .hourAndMinute]) {
+                isEditingDate = false
             }
-            .padding(AppSpacing.large)
-            .frame(minWidth: 300, idealWidth: 340)
-            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -134,11 +92,4 @@ struct TransactionMetadataBar: View {
         .accessibilityValue(hasExtraDetails ? "Details added" : "No extra details")
     }
 
-    private var selectedAccount: Account? {
-        accounts.first { $0.id == selectedAccountID }
-    }
-
-    private var accountColor: Color {
-        selectedAccount?.iconColor.color ?? .secondary
-    }
 }

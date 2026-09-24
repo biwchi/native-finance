@@ -13,6 +13,7 @@ struct LocalEditor {
         changes["\(entity):\(key)"] = SyncChange(entity: entity, key: key, data: data)
         switch entity {
         case "account": let v = try LocalJSON.decode(Account.self, data); snapshot.accounts[v.id] = v
+        case "goal": let v = try LocalJSON.decode(SavingsGoal.self, data); snapshot.goals[v.id] = v
         case "category": let v = try LocalJSON.decode(TransactionCategory.self, data); snapshot.categories[v.id] = v
         case "debt": let v = try LocalJSON.decode(Debt.self, data); snapshot.debts[v.id] = v
         case "transaction": let v = try LocalJSON.decode(StoredTransaction.self, data); snapshot.transactions[v.id] = v
@@ -29,6 +30,7 @@ struct LocalEditor {
         guard let id = UUID(uuidString: key) else { return }
         switch entity {
         case "account": snapshot.accounts.removeValue(forKey: id)
+        case "goal": snapshot.goals.removeValue(forKey: id)
         case "category": snapshot.categories.removeValue(forKey: id)
         case "debt": snapshot.debts.removeValue(forKey: id)
         case "transaction": snapshot.transactions.removeValue(forKey: id)
@@ -50,6 +52,14 @@ struct LocalEditor {
         }
         return NSDecimalNumber(decimal: parsed).stringValue
     }
+    func transactionAmount(_ value: String) throws -> String {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: ",", with: ".")
+        guard value.range(of: "^-?(?:0|[1-9][0-9]{0,14})(?:\\.[0-9]{1,4})?$", options: .regularExpression) != nil,
+              let parsed = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX")), parsed != 0 else {
+            throw LocalDataError(message: "Enter a non-zero amount with at most four decimal places.")
+        }
+        return NSDecimalNumber(decimal: abs(parsed)).stringValue
+    }
     func optionalText(_ value: String?, limit: Int) throws -> String? {
         guard let value else { return nil }
         guard value.count <= limit else { throw LocalDataError(message: "Text is too long.") }
@@ -59,19 +69,20 @@ struct LocalEditor {
     func account(_ id: UUID) throws -> Account {
         guard let account = snapshot.accounts[id] else { throw LocalDataError(message: "Choose an existing account.") }; return account
     }
-    mutating func saveAccount(id: UUID? = nil, name: String, type: AccountType, currency: String, icon: String, color: AccountIconColor) throws -> Account {
+    mutating func saveAccount(id: UUID? = nil, name: String, currency: String, icon: String, color: AccountIconColor, initialBalance: String? = nil) throws -> Account {
         let existing = id.flatMap { snapshot.accounts[$0] }
         let currency = currency.uppercased()
         guard currency.range(of: "^[A-Z]{3}$", options: .regularExpression) != nil else { throw LocalDataError(message: "Choose a currency.") }
-        let account = Account(id: id ?? UUID(), name: try self.name(name, limit: 120), type: type, currency: currency,
-            icon: try self.name(icon, limit: 80), iconColor: color, createdAt: existing?.createdAt ?? LocalJSON.timestamp(now), updatedAt: LocalJSON.timestamp(now), sortOrder: existing?.sortOrder ?? ((snapshot.accounts.values.compactMap(\.sortOrder).max() ?? -1) + 1))
+        let account = Account(id: id ?? UUID(), name: try self.name(name, limit: 120), currency: currency,
+            icon: try self.name(icon, limit: 80), iconColor: color, createdAt: existing?.createdAt ?? LocalJSON.timestamp(now), updatedAt: LocalJSON.timestamp(now), sortOrder: existing?.sortOrder ?? ((snapshot.accounts.values.compactMap(\.sortOrder).max() ?? -1) + 1),
+            initialBalance: try Account.initialBalanceValue(initialBalance ?? existing?.initialBalance ?? "0"))
         try put("account", key: account.id.uuidString, account); return account
     }
     mutating func reorderAccounts(_ accounts: [Account]) throws {
         guard Set(accounts.map(\.id)) == Set(snapshot.accounts.keys), accounts.count == snapshot.accounts.count else { throw LocalDataError(message: "Account order must contain every account.") }
         for (index, value) in accounts.enumerated() {
-            let reordered = Account(id: value.id, name: value.name, type: value.type, currency: value.currency, icon: value.icon, iconColor: value.iconColor,
-                createdAt: value.createdAt, updatedAt: LocalJSON.timestamp(now), sortOrder: index)
+            let reordered = Account(id: value.id, name: value.name, currency: value.currency, icon: value.icon, iconColor: value.iconColor,
+                createdAt: value.createdAt, updatedAt: LocalJSON.timestamp(now), sortOrder: index, initialBalance: value.initialBalance)
             try put("account", key: value.id.uuidString, reordered)
         }
     }
@@ -81,11 +92,31 @@ struct LocalEditor {
         for s in schedules { erase("schedule", key: s.uuidString) }
         for e in snapshot.exclusions.values where schedules.contains(e.scheduleId) { erase("exclusion", key: e.id.uuidString) }
         for (key,budget) in snapshot.budgets where budget.accountId == id { erase("budget", key: key) }
+        for goal in snapshot.goals.values where goal.accountId == id { deleteGoal(goal.id) }
         erase("account", key: id.uuidString)
     }
     mutating func saveDebt(id: UUID? = nil, name: String, icon: String, color: CategoryColor) throws -> Debt {
-        let debt = Debt(id: id ?? UUID(), name: try self.name(name, limit: 200), icon: try self.name(icon, limit: 80), color: color)
+        let existing = id.flatMap { snapshot.debts[$0] }
+        let nextOrder = max(snapshot.debts.count - 1, snapshot.debts.values.compactMap(\.sortOrder).max() ?? -1) + 1
+        let debt = Debt(id: id ?? UUID(), name: try self.name(name, limit: 200), icon: try self.name(icon, limit: 80), color: color,
+            sortOrder: existing.map { $0.sortOrder ?? 0 } ?? nextOrder)
         try put("debt", key: debt.id.uuidString, debt); return debt
+    }
+    mutating func reorderDebts(_ debts: [Debt]) throws {
+        guard Set(debts.map(\.id)) == Set(snapshot.debts.keys), debts.count == snapshot.debts.count else {
+            throw LocalDataError(message: "Recipient order must contain every recipient exactly once.")
+        }
+        for (index, debt) in debts.enumerated() {
+            guard var current = snapshot.debts[debt.id] else { continue }
+            current.sortOrder = index
+            try put("debt", key: current.id.uuidString, current)
+        }
+    }
+    mutating func deleteDebt(_ id: UUID) throws {
+        guard !snapshot.transactions.values.contains(where: { $0.debtId == id }) else {
+            throw LocalDataError(message: "This recipient has outstanding loans. Mark them as returned or move them to another recipient before deleting.")
+        }
+        erase("debt", key: id.uuidString)
     }
     mutating func saveCategory(id: UUID? = nil, name: String, kind: TransactionKind, parentID: UUID?, icon: String, color: CategoryColor) throws -> TransactionCategory {
         let existing = id.flatMap { snapshot.categories[$0] }
@@ -112,17 +143,19 @@ struct LocalEditor {
             try put("budget", key: key, updated)
         }
     }
-    func preparedTransaction(id: UUID, request r: TransactionRequest, existing: StoredTransaction? = nil) throws -> StoredTransaction {
+    func preparedTransaction(id: UUID, request r: TransactionRequest, existing: StoredTransaction? = nil, inheritedCurrency: String? = nil) throws -> StoredTransaction {
         let account = try account(r.accountId)
+        let currency = (r.currency ?? (existing?.accountId == account.id ? existing?.currency : nil) ?? inheritedCurrency ?? account.currency).uppercased()
+        guard currency.range(of: "^[A-Z]{3}$", options: .regularExpression) != nil else { throw LocalDataError(message: "Choose a currency.") }
         if let categoryID = r.categoryId { guard snapshot.categories[categoryID]?.kind == r.kind else { throw LocalDataError(message: "Choose a category matching the transaction type.") } }
         if r.kind == .debt {
             guard r.categoryId == nil, r.recurrence == nil, let debtID = r.debtId, snapshot.debts[debtID] != nil else { throw LocalDataError(message: "Choose a debt recipient. Debt transactions cannot repeat or have categories.") }
         } else if r.debtId != nil { throw LocalDataError(message: "Only debt transactions can have a recipient.") }
         if let end = r.recurrence?.endAt, end < r.occurredAt { throw LocalDataError(message: "The recurrence end must be on or after the first transaction.") }
-        return StoredTransaction(id: id, accountId: account.id, kind: r.kind, amount: try amount(r.amount), currency: existing?.accountId == account.id ? existing!.currency : account.currency,
-            categoryId: r.categoryId, debtId: r.debtId, recurringScheduleId: existing?.recurringScheduleId, scheduledFor: existing?.scheduledFor,
-            merchant: try optionalText(r.merchant, limit: 500), payee: try optionalText(r.payee, limit: 500), note: try optionalText(r.note, limit: 2000),
-            occurredAt: r.occurredAt, createdAt: existing?.createdAt ?? now, updatedAt: now)
+        return StoredTransaction(id: id, accountId: account.id, kind: r.kind, amount: try transactionAmount(r.amount), currency: currency,
+            categoryId: r.categoryId, debtId: r.debtId, recurringScheduleId: existing?.recurringScheduleId, scheduledFor: existing?.scheduledFor, note: try optionalText(r.note, limit: 2000),
+            occurredAt: r.occurredAt, createdAt: existing?.createdAt ?? now, updatedAt: now,
+            counterparty: try optionalText(r.counterparty, limit: 2000))
     }
     mutating func saveTransaction(id: UUID? = nil, request: TransactionRequest) throws -> FinanceTransaction {
         let existing = id.flatMap { snapshot.transactions[$0] }
@@ -131,10 +164,9 @@ struct LocalEditor {
         if let recurrence = request.recurrence {
             let existingSchedule = t.recurringScheduleId.flatMap { snapshot.schedules[$0] }
             let scheduleID = existingSchedule?.id ?? UUID()
-            var schedule = StoredSchedule(id: scheduleID, accountId: t.accountId, kind: t.kind, amount: t.amount, currency: t.currency, categoryId: t.categoryId,
-                merchant: t.merchant, payee: t.payee, note: t.note, frequency: recurrence.frequency, startAt: existingSchedule?.startAt ?? t.occurredAt,
+            var schedule = StoredSchedule(id: scheduleID, accountId: t.accountId, kind: t.kind, amount: t.amount, currency: t.currency, categoryId: t.categoryId, note: t.note, frequency: recurrence.frequency, startAt: existingSchedule?.startAt ?? t.occurredAt,
                 lastOccurrenceAt: existingSchedule?.lastOccurrenceAt ?? t.occurredAt, nextOccurrenceAt: existingSchedule?.nextOccurrenceAt,
-                endAt: recurrence.endAt, createdAt: existingSchedule?.createdAt ?? now, updatedAt: now, nextScheduledFor: existingSchedule?.nextScheduledFor)
+                endAt: recurrence.endAt, createdAt: existingSchedule?.createdAt ?? now, updatedAt: now, nextScheduledFor: existingSchedule?.nextScheduledFor, counterparty: t.counterparty)
             if existingSchedule == nil || existingSchedule?.frequency != recurrence.frequency || schedule.nextOccurrenceAt == nil { schedule.nextOccurrenceAt = schedule.next(after: schedule.lastOccurrenceAt); if existingSchedule?.frequency != recurrence.frequency { schedule.nextScheduledFor = nil } }
             if let end = schedule.endAt, let next = schedule.nextOccurrenceAt, next > end { schedule.nextOccurrenceAt = nil }
             t.recurringScheduleId = scheduleID; t.scheduledFor = t.scheduledFor ?? t.occurredAt
@@ -147,11 +179,13 @@ struct LocalEditor {
         try materialize(limit: 200)
         return t.presentation(in: snapshot)
     }
+
     mutating func transfer(_ request: TransferRequest) throws -> TransferResponse {
         let source = try account(request.fromAccountId); let destination = try account(request.toAccountId)
         guard source.id != destination.id, source.currency == destination.currency else { throw LocalDataError(message: "Transfers require different accounts using the same currency.") }
+        _ = try amount(request.amount)
         func input(_ accountID: UUID, _ kind: TransactionKind) -> TransactionRequest {
-            TransactionRequest(accountId: accountID, kind: kind, amount: request.amount, categoryId: nil, merchant: request.merchant, payee: request.payee, note: request.note, occurredAt: request.occurredAt)
+            TransactionRequest(accountId: accountID, kind: kind, amount: request.amount, categoryId: nil, note: request.note, occurredAt: request.occurredAt, counterparty: request.counterparty)
         }
         let from = try saveTransaction(request: input(source.id, .expense)); let to = try saveTransaction(request: input(destination.id, .income))
         return TransferResponse(source: from, destination: to)
@@ -166,7 +200,7 @@ struct LocalEditor {
                 let id = occurrenceID(scheduleID: schedule.id, scheduledFor: slot)
                 if snapshot.exclusions[id] == nil, !snapshot.transactions.values.contains(where: { $0.recurringScheduleId == schedule.id && ($0.scheduledFor ?? $0.occurredAt) == slot }) {
                     let t = StoredTransaction(id: id, accountId: schedule.accountId, kind: schedule.kind, amount: schedule.amount, currency: schedule.currency, categoryId: schedule.categoryId,
-                        debtId: nil, recurringScheduleId: schedule.id, scheduledFor: slot, merchant: schedule.merchant, payee: schedule.payee, note: schedule.note, occurredAt: next, createdAt: now, updatedAt: now)
+                        debtId: nil, recurringScheduleId: schedule.id, scheduledFor: slot, note: schedule.note, occurredAt: next, createdAt: now, updatedAt: now, counterparty: schedule.counterparty)
                     try put("transaction", key: id.uuidString, t)
                     changes["transaction:\(id.uuidString.lowercased())"]?.origin = "generated"
                 }
@@ -206,7 +240,7 @@ struct LocalEditor {
         if action == .occurrenceAndFuture, let recorded { erase("transaction", key: recorded.id.uuidString); try exclude(scheduleID: scheduleID, date: recorded.scheduledFor ?? date) }
         if action == .stopRepeating && recorded == nil {
             let t = StoredTransaction(id: retainedID!, accountId: schedule.accountId, kind: schedule.kind, amount: schedule.amount, currency: schedule.currency, categoryId: schedule.categoryId, debtId: nil,
-                recurringScheduleId: nil, scheduledFor: nil, merchant: schedule.merchant, payee: schedule.payee, note: schedule.note, occurredAt: date, createdAt: now, updatedAt: now)
+                recurringScheduleId: nil, scheduledFor: nil, note: schedule.note, occurredAt: date, createdAt: now, updatedAt: now, counterparty: schedule.counterparty)
             try put("transaction", key: t.id.uuidString, t)
         }
         try removeSchedule(scheduleID)
@@ -216,13 +250,14 @@ struct LocalEditor {
         guard request.occurredAt > now else { throw LocalDataError(message: "Choose a future date for the next occurrence.") }
         let recorded = snapshot.transactions.values.first { $0.recurringScheduleId == schedule.id && $0.occurredAt == upcoming.occurredAt }
         let slot = recorded?.scheduledFor ?? schedule.nextScheduledFor ?? upcoming.occurredAt
-        let values = try preparedTransaction(id: recorded?.id ?? occurrenceID(scheduleID: schedule.id, scheduledFor: slot), request: request, existing: recorded)
+        let values = try preparedTransaction(id: recorded?.id ?? occurrenceID(scheduleID: schedule.id, scheduledFor: slot), request: request, existing: recorded,
+            inheritedCurrency: schedule.accountId == request.accountId ? schedule.currency : nil)
         recurrenceActions.append(SyncRecurrenceAction(scheduleId: schedule.id, action: "editUpcoming", targetScheduledFor: slot, retainedTransactionId: recorded?.id, effectiveAt: now))
         for t in snapshot.transactions.values where t.recurringScheduleId == schedule.id && t.occurredAt > now && t.id != recorded?.id { erase("transaction", key: t.id.uuidString) }
         if let recurrence = request.recurrence {
             let anchorChanged = request.occurredAt != upcoming.occurredAt || recurrence.frequency != schedule.frequency
             schedule.accountId = values.accountId; schedule.kind = values.kind; schedule.amount = values.amount; schedule.currency = values.currency
-            schedule.categoryId = values.categoryId; schedule.merchant = values.merchant; schedule.payee = values.payee; schedule.note = values.note
+            schedule.counterparty = values.counterparty; schedule.categoryId = values.categoryId; schedule.note = values.note
             schedule.frequency = recurrence.frequency; schedule.endAt = recurrence.endAt; schedule.updatedAt = now
             if anchorChanged { schedule.startAt = request.occurredAt }
             if recorded != nil {

@@ -14,10 +14,6 @@ struct LegacyListAppearance: UIViewRepresentable {
         private var cornerObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
         private var updateScheduled = false
         private weak var styledNavigationController: UINavigationController?
-        private var navigationObservations: [NSKeyValueObservation] = []
-        private var navigationItemObservations: [NSKeyValueObservation] = []
-        private var navigationItems: [ObjectIdentifier] = []
-        private var navigationStyle: UIUserInterfaceStyle?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -44,11 +40,7 @@ struct LegacyListAppearance: UIViewRepresentable {
             observations.removeAll()
             cornerObservations.removeAll()
             collectionView = nil
-            navigationObservations.removeAll()
-            navigationItemObservations.removeAll()
-            navigationItems.removeAll()
             styledNavigationController = nil
-            navigationStyle = nil
         }
 
         func scheduleUpdate() {
@@ -69,28 +61,6 @@ struct LegacyListAppearance: UIViewRepresentable {
                    let navigation = controller.navigationController {
                     if navigation !== styledNavigationController {
                         styledNavigationController = navigation
-                        // SwiftUI can replace these appearances when toolbar visibility changes.
-                        navigationObservations = [
-                            navigation.navigationBar.observe(\.standardAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                            navigation.navigationBar.observe(\.compactAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                            navigation.navigationBar.observe(\.scrollEdgeAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                            navigation.navigationBar.observe(\.compactScrollEdgeAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                            navigation.navigationBar.observe(\.items) { [weak self] _, _ in self?.scheduleUpdate() }
-                        ]
-                    }
-                    let items = navigation.viewControllers.map(\.navigationItem)
-                    let identifiers = items.map(ObjectIdentifier.init)
-                    if identifiers != navigationItems {
-                        navigationItems = identifiers
-                        navigationItemObservations = items.flatMap { item in
-                            [item.observe(\.standardAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                             item.observe(\.compactAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                             item.observe(\.scrollEdgeAppearance) { [weak self] _, _ in self?.scheduleUpdate() },
-                             item.observe(\.compactScrollEdgeAppearance) { [weak self] _, _ in self?.scheduleUpdate() }]
-                        }
-                    }
-                    if navigationStyle != traitCollection.userInterfaceStyle || LegacyNavigationAppearance.needsUpdate(navigation) {
-                        navigationStyle = traitCollection.userInterfaceStyle
                         LegacyNavigationAppearance.apply(to: navigation)
                     }
                     break
@@ -156,21 +126,9 @@ extension View {
             self
         } else {
             self
-                .legacySheetAppearance()
-                .contentMargins(.horizontal, AppSpacing.large, for: .scrollContent)
                 .contentMargins(.top, usesCompactTopSpacing ? AppSpacing.small : nil, for: .scrollContent)
                 .textCase(nil)
                 .background(LegacyListAppearance().allowsHitTesting(false).accessibilityHidden(true))
-        }
-    }
-
-    @ViewBuilder
-    func legacyListRows(verticalPadding: CGFloat = 15) -> some View {
-        if #available(iOS 26.0, *) {
-            self
-        } else {
-            self.listRowInsets(EdgeInsets(top: verticalPadding, leading: AppSpacing.large,
-                                         bottom: verticalPadding, trailing: AppSpacing.large))
         }
     }
 

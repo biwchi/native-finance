@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Keeps the native large title and back button, aligning only the collapsed title on older iOS.
+/// Keeps native large-title behavior while aligning the collapsed title on older iOS.
 struct LegacyLeadingNavigationTitle: UIViewRepresentable {
     let title: String
 
@@ -120,7 +120,7 @@ struct LegacyLeadingNavigationTitle: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            label.frame = bounds
+            label.frame = bounds.insetBy(dx: AppSpacing.small, dy: 0)
             label.textAlignment = effectiveUserInterfaceLayoutDirection == .rightToLeft ? .right : .left
             updateVisibility()
         }

@@ -64,7 +64,6 @@ private enum TransactionListPreviewData {
     static let account = Account(
         id: accountID,
         name: "Everyday card",
-        type: .checking,
         currency: "USD",
         icon: "credit-card",
         iconColor: .blue,

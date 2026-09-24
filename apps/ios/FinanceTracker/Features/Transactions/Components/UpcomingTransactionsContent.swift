@@ -8,6 +8,8 @@ struct UpcomingTransactionsContent: View {
     var allAccounts = false
     var kindFilter: TransactionKind? = nil
     var isDeleting = false
+    var displayCurrency: String? = nil
+    var exchangeRates: ExchangeRateSnapshot? = nil
     let onEdit: (UpcomingTransaction) -> Void
     var onDelete: ((UpcomingTransaction) -> Void)? = nil
 
@@ -32,7 +34,9 @@ struct UpcomingTransactionsContent: View {
                 account: account,
                 titleOverride: transaction.title,
                 recurrenceDetails: "\(transaction.frequency.title) · \(transaction.occurredAt.formatted(date: .abbreviated, time: .omitted))",
-                style: .upcoming
+                style: .upcoming,
+                displayCurrency: displayCurrency,
+                exchangeRates: exchangeRates
             )
             .contentShape(Rectangle())
         }

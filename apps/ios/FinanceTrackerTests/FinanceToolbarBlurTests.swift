@@ -5,6 +5,78 @@ import SwiftUI
 
 final class FinanceToolbarBlurTests: XCTestCase {
     @MainActor
+    func testBottomFadeStaysBelowKeyboardWhileFormAvoidsIt() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        let textField = UITextField()
+        textField.placeholder = "Name"
+        // A fixed input view also exercises keyboard avoidance when the simulator
+        // has a hardware keyboard connected.
+        textField.inputView = UIInputView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 300), inputViewStyle: .keyboard
+        )
+        let controller = UIHostingController(rootView: NavigationStack {
+            AppForm {
+                Section("Account details") {
+                    KeyboardTextField(textField: textField)
+                }
+                Section("Icon") {
+                    ForEach(0..<12) { index in
+                        Text("Icon \(index)")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text("Add account")
+                    .frame(height: 56)
+                    .padding(.vertical, 12)
+            }
+        })
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        let keyboardGuide = controller.view.keyboardLayoutGuide
+        defer {
+            textField.resignFirstResponder()
+            window.isHidden = true
+            originalKeyWindow?.makeKey()
+        }
+
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            window.overrideUserInterfaceStyle = appearance
+            try await Task.sleep(for: .milliseconds(300))
+            let fade = try XCTUnwrap(bottomFade(in: controller.view))
+            let restingFrame = fade.convert(fade.bounds, to: window)
+            XCTAssertGreaterThan(restingFrame.height, 0)
+            XCTAssertEqual(restingFrame.maxY, window.bounds.maxY, accuracy: 1)
+
+            XCTAssertTrue(textField.becomeFirstResponder())
+            try await Task.sleep(for: .milliseconds(600))
+            window.layoutIfNeeded()
+            let keyboardTop = controller.view.convert(keyboardGuide.layoutFrame, to: window).minY
+            XCTAssertLessThan(keyboardTop, window.bounds.maxY - 100, "The software keyboard must be open")
+            let editingFrame = fade.convert(fade.bounds, to: window)
+            XCTAssertGreaterThanOrEqual(editingFrame.minY, keyboardTop,
+                "The decorative fade must stay behind the keyboard, away from visible form content")
+            let fieldFrame = textField.convert(textField.bounds, to: window)
+            XCTAssertLessThanOrEqual(fieldFrame.maxY, keyboardTop, "The form must still avoid the keyboard")
+
+            textField.resignFirstResponder()
+            try await Task.sleep(for: .milliseconds(600))
+            window.layoutIfNeeded()
+            let restoredFrame = fade.convert(fade.bounds, to: window)
+            XCTAssertEqual(restoredFrame.minY, restingFrame.minY, accuracy: 1)
+            XCTAssertEqual(restoredFrame.maxY, restingFrame.maxY, accuracy: 1)
+        }
+    }
+
+    @MainActor
+    private func bottomFade(in view: UIView) -> ScrollEdgeBlurView.BlurView? {
+        if let fade = view as? ScrollEdgeBlurView.BlurView, fade.edge == .bottom { return fade }
+        return view.subviews.lazy.compactMap { self.bottomFade(in: $0) }.first
+    }
+
+    @MainActor
     func testToolbarBlurRetainsDetailAfterLayoutAndAppearanceChanges() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
@@ -94,6 +166,12 @@ final class FinanceToolbarBlurTests: XCTestCase {
         let mean = values.reduce(0, +) / Double(values.count)
         return sqrt(values.reduce(0) { $0 + pow($1 - mean, 2) } / Double(values.count))
     }
+}
+
+private struct KeyboardTextField: UIViewRepresentable {
+    let textField: UITextField
+    func makeUIView(context: Context) -> UITextField { textField }
+    func updateUIView(_ view: UITextField, context: Context) {}
 }
 
 private struct StripeBackdrop: UIViewRepresentable {

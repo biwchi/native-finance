@@ -8,16 +8,30 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
     var amount: String
     var currency: String
     var category: TransactionCategory?
-    var merchant: String?
-    var payee: String?
     var note: String?
     var occurredAt: Date
     var isRecurring: Bool
     var recurrenceFrequency: RecurrenceFrequency
     var recurrenceEndAt: Date?
-    let sourceText: String
     var conversion: QuickEntryConversion?
-    var warnings: [String]
+    var debt: Debt? = nil
+    var counterparty: String? = nil
+
+    /// CSV rows represent recorded transactions and never recreate recurring schedules.
+    init(record: TransactionRequest, category: TransactionCategory?, debt: Debt?) {
+        id = UUID()
+        mode = record.kind == .debt ? .debt : record.kind == .income ? .income : .expense
+        accountId = record.accountId
+        amount = record.amount.hasPrefix("-") ? String(record.amount.dropFirst()) : record.amount
+        currency = record.currency ?? ""
+        self.category = category
+        self.debt = debt
+        counterparty = record.counterparty
+        note = record.note
+        occurredAt = record.occurredAt
+        isRecurring = false
+        recurrenceFrequency = .monthly
+    }
 
     init(payload: QuickEntryDraftPayload, category: TransactionCategory?) {
         id = payload.id
@@ -28,23 +42,20 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
         }
         accountId = payload.accountId
         destinationAccountId = payload.destinationAccountId
-        amount = payload.amount
+        amount = payload.amount.hasPrefix("-") ? String(payload.amount.dropFirst()) : payload.amount
         currency = payload.currency
         self.category = category
-        merchant = payload.merchant
-        payee = payload.payee
+        counterparty = payload.counterparty
         note = payload.note
         occurredAt = payload.occurredAt
         isRecurring = payload.recurrence != nil
         recurrenceFrequency = payload.recurrence?.frequency ?? .monthly
         recurrenceEndAt = payload.recurrence?.endAt
-        sourceText = payload.sourceText
         conversion = payload.conversion
-        warnings = payload.warnings
     }
 
     var kind: TransactionKind {
-        mode == .income ? .income : .expense
+        mode == .debt ? .debt : mode == .income ? .income : .expense
     }
 
     var recurrence: TransactionRecurrence? {

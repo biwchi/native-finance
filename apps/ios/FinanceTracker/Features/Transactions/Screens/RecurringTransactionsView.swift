@@ -38,6 +38,7 @@ struct RecurringTransactionsView: View {
                             PrimaryActionButton("Add recurring transaction", appearance: .prominent) {
                                 isAdding = true
                             }
+                            .controlSize(.large)
                         }
                         .listRowBackground(Color.clear)
                     }
@@ -47,16 +48,18 @@ struct RecurringTransactionsView: View {
                             allAccounts: allAccounts,
                             kindFilter: kindFilter.transactionKind,
                             isDeleting: deletingTransactionID != nil,
+                            displayCurrency: transactionDisplayCurrency,
+                            exchangeRates: rates.snapshot,
                             onEdit: { editingTransaction = $0 },
                             onDelete: { deletingTransaction = $0 }
                         )
                     } header: {
                         Text("Active schedules")
-                    } footer: {
-                        Text("Tap a schedule to edit or stop repeating.")
                     }
                 }
-                recordedTransactionsSection(now: context.date)
+                if !filteredUpcomingTransactions.isEmpty {
+                    recordedTransactionsSection(now: context.date)
+                }
                 FinanceListBottomSpacer()
             }
             .animateListChanges(value: transactionStore.allUpcomingTransactions.map(\.id))
@@ -65,7 +68,7 @@ struct RecurringTransactionsView: View {
             .financePage()
         }
         .navigationTitle("Recurring")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .modifier(RecurringAccountsToolbar(allAccounts: allAccounts))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -74,7 +77,7 @@ struct RecurringTransactionsView: View {
                         Label("Add recurring transaction", icon: "plus")
                     }
                 }
-                .legacyToolbarControl()
+                .legacyToolbarIcon()
             }
         }
         .task {
@@ -87,17 +90,17 @@ struct RecurringTransactionsView: View {
         .task(id: rateScope) {
             await rates.load(currencies: currencies, reportingCurrency: currency)
         }
-        .sheet(isPresented: $isAdding) {
+        .appSheet(isPresented: $isAdding) {
             AddTransactionView(initialKind: kindFilter.transactionKind ?? .expense, initialRecurring: true)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $editingRecordedTransaction) { transaction in
+        .appSheet(item: $editingRecordedTransaction) { transaction in
             AddTransactionView(transaction: transaction)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $editingTransaction) { transaction in
+        .appSheet(item: $editingTransaction) { transaction in
             AddTransactionView(upcomingTransaction: transaction)
                 .environmentObject(accountStore)
                 .environmentObject(transactionStore)
@@ -125,6 +128,10 @@ struct RecurringTransactionsView: View {
         allAccounts ? reportingCurrency.uppercased() : accountStore.selectedAccount?.currency ?? reportingCurrency.uppercased()
     }
 
+    private var transactionDisplayCurrency: String? {
+        allAccounts ? nil : accountStore.selectedAccount?.currency
+    }
+
     private var filteredUpcomingTransactions: [UpcomingTransaction] {
         upcomingTransactions.filter { kindFilter.includes($0.kind) }
     }
@@ -142,12 +149,15 @@ struct RecurringTransactionsView: View {
 
     private func summary(at now: Date) -> some View {
         VStack(spacing: AppSpacing.doubleExtraLarge) {
-            Picker("Transaction type", selection: $kindFilter) {
-                ForEach(RecurringForecast.KindFilter.allCases) { filter in
-                    Text(filter.rawValue).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
+            IconToggleSelector(
+                options: RecurringForecast.KindFilter.allCases,
+                selection: $kindFilter,
+                accessibilityLabel: "Transaction type",
+                title: \RecurringForecast.KindFilter.rawValue,
+                iconName: \RecurringForecast.KindFilter.iconName,
+                color: \RecurringForecast.KindFilter.color,
+                accessibilityIdentifier: { "recurringKindFilter-\($0.id.rawValue)" }
+            )
             .accessibilityIdentifier("recurringKindFilter")
 
             if transactionStore.upcomingState == .loaded,
@@ -210,22 +220,23 @@ struct RecurringTransactionsView: View {
         let transactions = (allAccounts ? transactionStore.allTransactions : transactionStore.transactions(for: accountStore.selectedAccountID))
             .filter { $0.recurrence != nil && $0.occurredAt <= now && kindFilter.includes($0.kind) }
             .sorted { $0.occurredAt > $1.occurredAt }
-        AppSection("Recorded transactions") {
-            if transactions.isEmpty {
-                Text("Completed recurring transactions will appear here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-            ForEach(transactions) { transaction in
-                Button { editingRecordedTransaction = transaction } label: {
-                    TransactionRow(
-                        transaction: transaction,
-                        account: accountStore.accounts.first { $0.id == transaction.accountId },
-                        timestampStyle: .dateAndTime
-                    )
-                    .contentShape(Rectangle())
+        if !transactions.isEmpty {
+            AppSection("Recorded transactions") {
+                ForEach(transactions) { transaction in
+                    Button { editingRecordedTransaction = transaction } label: {
+                        TransactionRow(
+                            transaction: transaction,
+                            account: accountStore.accounts.first { $0.id == transaction.accountId },
+                            timestampStyle: .dateAndTime,
+                            showsRecurrenceBadge: false,
+                            displayCurrency: transactionDisplayCurrency,
+                            exchangeRates: rates.snapshot
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Edit recorded transaction")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Edit recorded transaction")
             }
         }
     }
@@ -254,6 +265,24 @@ struct RecurringTransactionsView: View {
             try await transactionStore.deleteUpcomingTransaction(transaction, action: action)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private extension RecurringForecast.KindFilter {
+    var iconName: String {
+        switch self {
+        case .expenses: QuickTransactionMode.expense.iconName
+        case .income: QuickTransactionMode.income.iconName
+        case .all: "coins"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .expenses: QuickTransactionMode.expense.color
+        case .income: QuickTransactionMode.income.color
+        case .all: AppColor.informative
         }
     }
 }

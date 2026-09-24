@@ -129,7 +129,7 @@ final class FinancesOverviewTests: XCTestCase {
     @MainActor
     func testFinancesScreensRenderInBothAppearancesAndAtAccessibilitySize() async throws {
         let now = Date.now
-        let account = Account(id: UUID(), name: "Everyday", type: .checking, currency: "USD",
+        let account = Account(id: UUID(), name: "Everyday", currency: "USD",
             icon: "credit-card", iconColor: .blue, createdAt: "", updatedAt: "")
         let groceries = category("Groceries")
         let recipient = Debt(id: UUID(), name: "Alexey", icon: "user", color: .blue)
@@ -141,14 +141,14 @@ final class FinancesOverviewTests: XCTestCase {
         let loan = FinanceTransaction(id: UUID(), accountId: account.id, kind: .debt, amount: "125.50", currency: "USD",
             category: nil, note: "Dinner", occurredAt: now, createdAt: now, updatedAt: now, debtId: recipient.id, debt: recipient)
         let schedule = UpcomingTransaction(id: UUID(), accountId: account.id, kind: .expense, amount: "45", currency: "USD",
-            category: groceries, merchant: "Groceries", payee: nil, note: nil, frequency: .weekly, occurredAt: now.addingTimeInterval(3600))
+            category: groceries, note: nil, frequency: .weekly, occurredAt: now.addingTimeInterval(3600), counterparty: "Groceries")
         let salary = UpcomingTransaction(id: UUID(), accountId: account.id, kind: .income, amount: "1800", currency: "USD",
-            category: nil, merchant: nil, payee: "Salary", note: nil, frequency: .monthly, occurredAt: now.addingTimeInterval(7200))
+            category: nil, note: nil, frequency: .monthly, occurredAt: now.addingTimeInterval(7200), counterparty: "Salary")
         var expense = FinanceTransaction(id: UUID(), accountId: account.id, kind: .expense, amount: "275.30", currency: "USD",
-            category: groceries, merchant: "Groceries", note: nil, occurredAt: now.addingTimeInterval(-60), createdAt: now, updatedAt: now)
+            category: groceries, note: nil, occurredAt: now.addingTimeInterval(-60), createdAt: now, updatedAt: now, counterparty: "Groceries")
         expense.recurrence = schedule.recurrence
         var income = FinanceTransaction(id: UUID(), accountId: account.id, kind: .income, amount: "1800", currency: "USD",
-            category: nil, payee: "Salary", note: nil, occurredAt: now.addingTimeInterval(-120), createdAt: now, updatedAt: now)
+            category: nil, note: nil, occurredAt: now.addingTimeInterval(-120), createdAt: now, updatedAt: now, counterparty: "Salary")
         income.recurrence = salary.recurrence
         let store = TransactionStore.preview(transactions: [expense, income, loan], upcomingTransactions: [schedule, salary])
         let budgets = BudgetStore.preview(budget)
@@ -163,10 +163,17 @@ final class FinancesOverviewTests: XCTestCase {
                     ("Hub", AnyView(FinancesView())),
                     ("Recurring", AnyView(RecurringTransactionsView(allAccounts: true))),
                     ("Debts", AnyView(DebtsView())),
+                    ("Debts empty", AnyView(DebtsView().environmentObject(TransactionStore.preview(transactions: [])))),
+                    ("Debt recipients", AnyView(DebtRecipientsView())),
+                    ("Recipients empty", AnyView(DebtRecipientsView().environmentObject(TransactionStore.preview(transactions: [])))),
+                    ("Choose recipient", AnyView(DebtRecipientsView(selection: .constant(recipient.id)))),
+                    ("Edit recipient", AnyView(DebtEditorView(debt: recipient) { _ in })),
+                    ("New recipient", AnyView(DebtEditorView { _ in })),
+                    ("Debt entry", AnyView(AddTransactionView(transaction: loan))),
                     ("Budget", AnyView(BudgetOverviewView()))
                 ] {
                     let displayed: AnyView
-                    if name == "Home" {
+                    if ["Home", "Debt recipients", "Recipients empty", "Choose recipient", "Edit recipient", "New recipient", "Debt entry"].contains(name) {
                         displayed = page
                     } else {
                         displayed = AnyView(NavigationStack(path: .constant([1])) {
@@ -187,7 +194,7 @@ final class FinancesOverviewTests: XCTestCase {
                     window.rootViewController = controller
                     window.makeKeyAndVisible()
                     controller.view.frame = window.bounds
-                    try await Task.sleep(for: .milliseconds(300))
+                    try await Task.sleep(for: .milliseconds(name == "New recipient" ? 700 : 300))
                     controller.view.layoutIfNeeded()
                     let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
                         XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
@@ -237,7 +244,7 @@ final class FinancesOverviewTests: XCTestCase {
     private func bill(_ amount: String, frequency: RecurrenceFrequency, at: String, end: String? = nil,
                       kind: TransactionKind = .expense, currency: String = "USD") -> UpcomingTransaction {
         UpcomingTransaction(id: UUID(), accountId: UUID(), kind: kind, amount: amount, currency: currency,
-            category: nil, merchant: nil, payee: nil, note: nil, frequency: frequency, occurredAt: date(at), endAt: end.map(date))
+            category: nil, note: nil, frequency: frequency, occurredAt: date(at), endAt: end.map(date), counterparty: nil)
     }
     private func category(_ name: String, parentID: UUID? = nil) -> TransactionCategory {
         TransactionCategory(id: UUID(), systemKey: nil, name: name, kind: .expense, parentId: parentID,

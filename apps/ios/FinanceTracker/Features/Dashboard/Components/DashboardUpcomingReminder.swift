@@ -9,8 +9,7 @@ struct DashboardUpcomingReminder: View {
 
     private var layers: Int { min(max(count - 1, 0), 2) }
     private var title: String {
-        let counterparty = transaction.kind == .income ? transaction.payee : transaction.merchant
-        return [counterparty, transaction.category?.name]
+        return [transaction.counterparty, transaction.category?.name]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty } ?? "Uncategorized"
     }

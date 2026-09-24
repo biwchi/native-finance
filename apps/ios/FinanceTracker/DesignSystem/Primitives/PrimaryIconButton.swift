@@ -12,19 +12,22 @@ struct PrimaryIconButton: View {
     let iconName: String
     let iconSize: CGFloat
     let appearance: Appearance
+    let diameter: CGFloat
     let action: () -> Void
 
     init(
         _ title: String,
         iconName: String,
-        iconSize: CGFloat = 26,
+        iconSize: CGFloat = AppControlSize.floatingButtonGlyph,
         appearance: Appearance = .filled,
+        diameter: CGFloat = AppControlSize.floatingButtonDiameter,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.iconName = iconName
         self.iconSize = iconSize
         self.appearance = appearance
+        self.diameter = max(AppControlSize.minimumTapTarget, diameter)
         self.action = action
     }
 
@@ -40,7 +43,7 @@ struct PrimaryIconButton: View {
         if #available(iOS 26.0, *), appearance == .glass {
             button.buttonStyle(.glass(.regular.tint(AppColor.accent.opacity(0.22))))
         } else if appearance == .glass {
-            button.buttonStyle(LegacyGlassStyle())
+            button.buttonStyle(LegacyGlassStyle(diameter: diameter))
         } else {
             button.buttonStyle(.borderedProminent)
         }
@@ -48,11 +51,11 @@ struct PrimaryIconButton: View {
 
     private struct LegacyGlassStyle: ButtonStyle {
         @Environment(\.isEnabled) private var isEnabled
+        let diameter: CGFloat
 
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
-                .frame(width: AppControlSize.floatingButtonDiameter,
-                       height: AppControlSize.floatingButtonDiameter)
+                .frame(width: diameter, height: diameter)
                 .modifier(LegacyGlassSurface(shape: Circle(), tint: AppColor.accent.opacity(0.22)))
                 .contentShape(Circle())
                 .compositingGroup()
@@ -65,8 +68,12 @@ struct PrimaryIconButton: View {
         Button(action: action) {
             AppIcon(iconName, size: iconSize)
                 .foregroundStyle(foreground)
-                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                .frame(width: labelSize, height: labelSize)
         }
+    }
+
+    private var labelSize: CGFloat {
+        appearance == .glass ? diameter - 18 : AppControlSize.minimumTapTarget
     }
 
     private var foreground: Color {

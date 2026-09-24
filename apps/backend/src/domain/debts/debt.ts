@@ -1,5 +1,5 @@
 export type DebtDetails = { name: string; icon?: string; color?: string };
-export type Debt = DebtDetails & { id: string };
+export type Debt = DebtDetails & { id: string; sortOrder?: number };
 
 export interface DebtRepository {
   list(): Promise<Debt[]>;

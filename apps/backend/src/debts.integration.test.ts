@@ -12,7 +12,7 @@ databaseDescribe("debt recipients and lending", () => {
 
   beforeAll(async () => {
     const [account] = await db.insert(accounts).values({
-      name: "Debt integration test", type: "checking", currency: "USD",
+      name: "Debt integration test", initialBalance: "0", currency: "USD",
     }).returning();
     accountId = account!.id;
   });
@@ -25,7 +25,7 @@ databaseDescribe("debt recipients and lending", () => {
   async function recipient() {
     const response = await request("/debts", "POST", { name: "  Alexey  " });
     expect(response.status).toBe(201);
-    const debt = await response.json() as { id: string; name: string; icon: string; color: string };
+    const debt = await response.json() as { id: string; name: string; icon: string; color: string; sortOrder: number };
     debtIds.push(debt.id);
     expect(debt.name).toBe("Alexey");
     return debt;

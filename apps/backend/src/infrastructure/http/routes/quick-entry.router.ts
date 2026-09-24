@@ -19,7 +19,7 @@ export function createQuickEntryRouter(controller: QuickEntryController) {
       const result = await controller.interpret(body);
       if (!result.ok) {
         set.status = quickEntryErrorStatus(result.error.code);
-        return { message: result.error.message };
+        return { message: result.error.message, code: result.error.code };
       }
       return result.value;
     }, { body: quickEntryBodySchema });
@@ -28,6 +28,6 @@ export function createQuickEntryRouter(controller: QuickEntryController) {
 function quickEntryErrorStatus(code: QuickEntryError): 400 | 404 | 422 | 503 {
   if (code === "account_not_found") return 404;
   if (code === "quick_entry_unavailable" || code === "exchange_rates_unavailable") return 503;
-  if (code === "invalid_ai_response") return 422;
+  if (code === "invalid_ai_response" || code === "empty_extraction") return 422;
   return 400;
 }

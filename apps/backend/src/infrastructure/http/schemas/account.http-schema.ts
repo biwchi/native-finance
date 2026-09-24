@@ -2,13 +2,7 @@ import { t } from "elysia";
 
 export const accountBodySchema = t.Object({
   name: t.String({ minLength: 1, maxLength: 120 }),
-  type: t.Union([
-    t.Literal("cash"),
-    t.Literal("checking"),
-    t.Literal("savings"),
-    t.Literal("credit"),
-    t.Literal("investment"),
-  ]),
+  initialBalance: t.Optional(t.String({ pattern: "^-?(?:0|[1-9][0-9]{0,14})(?:\\.[0-9]{1,4})?$" })),
   currency: t.String({ pattern: "^[A-Za-z]{3}$" }),
   icon: t.String({ minLength: 1, maxLength: 80 }),
   iconColor: t.Union([

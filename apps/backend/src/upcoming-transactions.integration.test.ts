@@ -6,7 +6,7 @@ import { db } from "./infrastructure/db/client.ts";
 import { accounts, recurringSchedules, transactions } from "./infrastructure/db/schema/index.ts";
 
 const databaseDescribe = Bun.env.RUN_DATABASE_TESTS === "1" ? describe : describe.skip;
-type Upcoming = { id: string; accountId: string; merchant: string; amount: string; occurredAt: string };
+type Upcoming = { id: string; accountId: string; counterparty: string; amount: string; occurredAt: string };
 
 databaseDescribe("upcoming recurring transactions", () => {
   const accountIds: string[] = [];
@@ -17,7 +17,7 @@ databaseDescribe("upcoming recurring transactions", () => {
   beforeAll(async () => {
     for (let index = 0; index < 2; index++) {
       const [account] = await db.insert(accounts).values({
-        name: `Upcoming test ${crypto.randomUUID()}`, type: "checking", currency: "USD",
+        name: `Upcoming test ${crypto.randomUUID()}`, initialBalance: "0", currency: "USD",
       }).returning();
       accountIds.push(account!.id);
     }
@@ -34,7 +34,7 @@ databaseDescribe("upcoming recurring transactions", () => {
       schedules.push(await create({ occurredAt: `2100-09-${String(day).padStart(2, "0")}T12:00:00.000Z` }));
     }
     const other = await create({ accountId: otherAccountId });
-    await create({ recurrence: null, merchant: "One-time purchase" });
+    await create({ recurrence: null, counterparty: "One-time purchase" });
 
     const scoped = await upcoming(accountId);
     expect(scoped.map((row) => row.occurredAt)).toEqual([
@@ -51,7 +51,7 @@ databaseDescribe("upcoming recurring transactions", () => {
     const created = await create();
     await db.delete(transactions).where(eq(transactions.id, created.id));
     const row = (await upcoming(accountId)).find((item) => item.id === created.recurrence.id);
-    expect(row).toMatchObject({ occurredAt: "2100-02-28T12:00:00.000Z", merchant: "Netflix", amount: "14.9900" });
+    expect(row).toMatchObject({ occurredAt: "2100-02-28T12:00:00.000Z", counterparty: "Netflix", amount: "14.9900" });
   });
 
   it("includes a final future occurrence and excludes a schedule once it has ended", async () => {
@@ -68,10 +68,10 @@ databaseDescribe("upcoming recurring transactions", () => {
 
   it("uses the current schedule details and removes schedules when recurrence is disabled", async () => {
     const created = await create();
-    await db.update(recurringSchedules).set({ merchant: "Updated subscription", amount: "19.99" })
+    await db.update(recurringSchedules).set({ counterparty: "Updated subscription", amount: "19.99" })
       .where(eq(recurringSchedules.id, created.recurrence.id));
     expect((await upcoming(accountId)).find((row) => row.id === created.recurrence.id))
-      .toMatchObject({ merchant: "Updated subscription", amount: "19.9900" });
+      .toMatchObject({ counterparty: "Updated subscription", amount: "19.9900" });
     await db.delete(recurringSchedules).where(eq(recurringSchedules.id, created.recurrence.id));
     expect((await upcoming(accountId)).some((row) => row.id === created.recurrence.id)).toBeFalse();
   });
@@ -82,7 +82,7 @@ databaseDescribe("upcoming recurring transactions", () => {
 
   async function create(overrides: Record<string, unknown> = {}) {
     const response = await request("/api/v1/transactions", "POST", {
-      accountId, kind: "expense", amount: "14.99", merchant: "Netflix",
+      accountId, kind: "expense", amount: "14.99", counterparty: "Netflix",
       occurredAt: startAt.toISOString(), recurrence: { frequency: "monthly" }, ...overrides,
     });
     expect(response.status).toBe(201);

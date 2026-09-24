@@ -6,6 +6,7 @@ struct FinanceHighlightCard<Content: View>: View {
     let currency: String
     var detail: String? = nil
     var amountColor: Color = .primary
+    var surface: FinanceCardSurface = .standard
     @ViewBuilder let content: Content
 
     @AppStorage(AppPreferences.roundTotalsKey) private var roundTotals = false
@@ -39,7 +40,7 @@ struct FinanceHighlightCard<Content: View>: View {
         }
         .padding(AppSpacing.large)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .financeCardSurface(.standard, fallbackColor: AppColor.elevatedSurface, cornerRadius: AppRadius.extraLarge)
+        .financeCardSurface(surface, fallbackColor: AppColor.elevatedSurface, cornerRadius: AppRadius.extraLarge)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

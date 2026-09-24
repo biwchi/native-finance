@@ -12,10 +12,10 @@ enum LocalTestData {
         return repository
     }
     static func account(_ repository: LocalFinanceRepository, name: String = "Main", currency: String = "USD") throws -> Account {
-        try repository.edit(now: now) { try $0.saveAccount(name: name, type: .checking, currency: currency, icon: "wallet", color: .blue) }
+        try repository.edit(now: now) { try $0.saveAccount(name: name, currency: currency, icon: "wallet", color: .blue) }
     }
     static func transaction(_ accountID: UUID, amount: String = "12.3456", kind: TransactionKind = .expense, categoryID: UUID? = nil, occurredAt: Date = now, recurrence: RecurrenceRequest? = nil) -> TransactionRequest {
-        TransactionRequest(accountId: accountID, kind: kind, amount: amount, categoryId: categoryID, merchant: "Coffee", note: "Morning", occurredAt: occurredAt, recurrence: recurrence)
+        TransactionRequest(accountId: accountID, kind: kind, amount: amount, categoryId: categoryID, note: "Morning", occurredAt: occurredAt, recurrence: recurrence, counterparty: "Coffee")
     }
     static func ack(_ pending: PendingMutation, version: String = "1") -> SyncResult {
         SyncResult(mutationId: pending.id, status: "accepted", generation: pending.mutation.generation, records: pending.mutation.changes.map { SyncRecord(entity: $0.entity, key: $0.key, version: version, data: $0.data) }, message: nil)
@@ -25,6 +25,76 @@ enum LocalTestData {
 
 @MainActor
 final class LocalPersistenceTests: XCTestCase {
+    func testCounterpartyEditAndClearSurviveReopening() throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        var request = LocalTestData.transaction(account.id)
+        request.counterparty = "Coffee shop"
+        let original = try repository.edit { try $0.saveTransaction(request: request) }
+        let model = AddTransactionViewModel(transaction: original)
+        XCTAssertEqual(model.counterparty, "Coffee shop")
+        XCTAssertFalse(model.hasChanges(from: original))
+        model.setCounterparty("Urbo Coffee")
+        XCTAssertTrue(model.hasChanges(from: original))
+        request.counterparty = model.counterparty
+        let updated = try repository.edit { try $0.saveTransaction(id: original.id, request: request) }
+        XCTAssertTrue(FinanceOverviewData.matches(updated, query: "Urbo", accounts: [account]))
+        XCTAssertEqual(updated.replacingAmount("1", currency: "KZT").counterparty, "Urbo Coffee")
+        XCTAssertEqual(repository.snapshot.pending.last?.mutation.changes.first?.data?["counterparty"]?.string, "Urbo Coffee")
+        request.counterparty = "   "
+        _ = try repository.edit { try $0.saveTransaction(id: original.id, request: request) }
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        XCTAssertNil(reopened.snapshot.transactions[original.id]?.counterparty)
+    }
+
+    func testCounterpartySurvivesRecurrenceAndEditingAnUnrecordedUpcomingPayment() throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        var request = LocalTestData.transaction(account.id, recurrence: RecurrenceRequest(frequency: .monthly, endAt: nil))
+        request.counterparty = "Subscription business"
+        let original = try repository.edit(now: LocalTestData.now) { try $0.saveTransaction(request: request) }
+        let scheduleID = try XCTUnwrap(original.recurrence?.id)
+        let schedule = try XCTUnwrap(repository.snapshot.schedules[scheduleID])
+        let next = try XCTUnwrap(schedule.nextOccurrenceAt)
+        let upcoming = schedule.upcoming(at: next, in: repository.snapshot)
+        XCTAssertEqual(upcoming.title, "Subscription business")
+        request = TransactionRequest(accountId: account.id, kind: .expense, amount: "20", categoryId: nil,
+                                     note: "Edited", occurredAt: next, recurrence: request.recurrence, counterparty: "New business")
+        try repository.edit(now: LocalTestData.now) { try $0.updateUpcoming(upcoming, request: request) }
+        XCTAssertEqual(repository.snapshot.schedules[scheduleID]?.counterparty, "New business")
+        try repository.edit(now: next) { try $0.materialize() }
+        let occurrence = try XCTUnwrap(repository.snapshot.transactions.values.first { $0.occurredAt == next })
+        XCTAssertEqual(occurrence.counterparty, "New business")
+    }
+
+    func testAccountCurrencyChangePreservesHistoryAndExplicitCorrectionKeepsTheAmount() throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository, currency: "RUB")
+        let original = try repository.edit(now: LocalTestData.now) {
+            try $0.saveTransaction(request: LocalTestData.transaction(account.id, amount: "200"))
+        }
+        _ = try repository.edit(now: LocalTestData.now) {
+            try $0.saveAccount(id: account.id, name: account.name, currency: "KZT", icon: account.icon, color: account.iconColor)
+        }
+        XCTAssertEqual(repository.snapshot.pending.last?.mutation.changes.map(\.entity), ["account"])
+        var edit = LocalTestData.transaction(account.id, amount: "300")
+        let saved = try repository.edit(now: LocalTestData.now) { try $0.saveTransaction(id: original.id, request: edit) }
+        XCTAssertEqual(saved.currency, "RUB")
+        XCTAssertEqual(saved.amount, "300")
+        let new = try repository.edit(now: LocalTestData.now) { try $0.saveTransaction(request: edit) }
+        XCTAssertEqual(new.currency, "KZT")
+        edit.currency = "kzt"
+        let corrected = try repository.edit(now: LocalTestData.now) { try $0.saveTransaction(id: original.id, request: edit) }
+        XCTAssertEqual(corrected.currency, "KZT")
+        XCTAssertEqual(corrected.amount, "300")
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        XCTAssertEqual(reopened.snapshot.transactions[original.id]?.currency, "KZT")
+        XCTAssertEqual(reopened.snapshot.transactions[original.id]?.amount, "300")
+        edit.currency = "invalid"
+        XCTAssertThrowsError(try repository.edit { try $0.saveTransaction(id: original.id, request: edit) })
+        XCTAssertEqual(repository.snapshot.transactions[original.id]?.currency, "KZT")
+    }
+
     func testOfflineSavePublishesBeforeUploadAndSurvivesReopening() async throws {
         let repository = try LocalTestData.repository(); let account = try LocalTestData.account(repository)
         let store = TransactionStore(repository: repository)
@@ -36,11 +106,22 @@ final class LocalPersistenceTests: XCTestCase {
         XCTAssertEqual(reopened.snapshot.pending.count, 2)
         XCTAssertTrue(reopened.snapshot.imported)
     }
+    func testNegativeTransactionInputPersistsAsItsKindsPositiveMagnitude() throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let expense = try repository.edit { try $0.saveTransaction(request: LocalTestData.transaction(account.id, amount: "-25")) }
+        let income = try repository.edit { try $0.saveTransaction(request: LocalTestData.transaction(account.id, amount: "-10", kind: .income)) }
+        XCTAssertEqual(expense.amount, "25")
+        XCTAssertEqual(income.amount, "10")
+        XCTAssertEqual(repository.snapshot.transactions[expense.id]?.amount, "25")
+        XCTAssertEqual(repository.snapshot.transactions[income.id]?.amount, "10")
+        XCTAssertEqual(TransactionStore(repository: repository).balance(accountID: account.id, currency: "USD", rates: nil), -15)
+    }
     func testDependentOfflineCreationAndTransferAreAtomic() async throws {
         let repository = try LocalTestData.repository(); let first = try LocalTestData.account(repository); let second = try LocalTestData.account(repository, name: "Cash")
         let store = TransactionStore(repository: repository)
         _ = try await store.createTransaction(LocalTestData.transaction(first.id, amount: "100", kind: .income))
-        let transfer = try await store.createTransfer(TransferRequest(fromAccountId: first.id, toAccountId: second.id, amount: "30", merchant: nil, payee: nil, note: nil, occurredAt: LocalTestData.now))
+        let transfer = try await store.createTransfer(TransferRequest(fromAccountId: first.id, toAccountId: second.id, amount: "30", note: nil, occurredAt: LocalTestData.now, counterparty: nil))
         let pending = repository.snapshot.pending.last!
         XCTAssertEqual(pending.mutation.changes.count, 2); XCTAssertEqual(Set(pending.dependencies), Set(repository.snapshot.pending.prefix(2).map(\.id)))
         XCTAssertEqual(store.balance(accountID: first.id, currency: "USD", rates: nil), 70)
@@ -51,12 +132,13 @@ final class LocalPersistenceTests: XCTestCase {
     }
     func testFailedLocalCommitPreservesDraftAndAllPreviousRows() throws {
         let repository = try LocalTestData.repository(); let account = try LocalTestData.account(repository)
-        try repository.saveValue("Coffee 12", key: "quickEntryText")
+        let review = QuickEntryReviewPresentation(prompt: "Coffee 12", drafts: [])
+        try repository.saveValue(review, key: "quickEntryReview")
         let pendingCount = repository.snapshot.pending.count
         try repository.requireDatabase().write { db in try db.execute(sql: "CREATE TRIGGER fail_save BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'disk full'); END") }
         XCTAssertThrowsError(try repository.edit { try $0.saveTransaction(request: LocalTestData.transaction(account.id)) })
         XCTAssertTrue(repository.snapshot.transactions.isEmpty); XCTAssertEqual(repository.snapshot.pending.count, pendingCount)
-        XCTAssertEqual(try repository.value(String.self, key: "quickEntryText"), "Coffee 12")
+        XCTAssertEqual(try repository.value(QuickEntryReviewPresentation.self, key: "quickEntryReview")?.id, review.id)
     }
     func testInterruptedImportNeverMarksPartialDataReady() throws {
         let repository = try LocalTestData.repository(imported: false)
@@ -99,6 +181,21 @@ final class LocalPersistenceTests: XCTestCase {
         XCTAssertEqual(budgets.budget(accountID: second.id)?.monthlyLimit, "300")
         XCTAssertEqual(budgets.budget(accountID: nil)?.monthlyLimit, "500")
     }
+    func testSessionTextMigrationRemovesLegacyTextAndKeepsReviewedDrafts() throws {
+        let repository = try LocalTestData.repository()
+        let review = QuickEntryReviewPresentation(prompt: "Submitted coffee", drafts: [])
+        try repository.saveValue(review, key: "quickEntryReview")
+        try repository.saveValue("Unsubmitted coffee", key: "quickEntryText")
+        try repository.requireDatabase().write { db in
+            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier='quick-entry-session-text-v3'")
+        }
+
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        XCTAssertNil(try reopened.value(String.self, key: "quickEntryText"))
+        XCTAssertEqual(try reopened.value(QuickEntryReviewPresentation.self, key: "quickEntryReview")?.id, review.id)
+        XCTAssertEqual(reopened.snapshot.pending.map(\.id), repository.snapshot.pending.map(\.id))
+    }
+
     func testLegacyBudgetMigrationKeepsLatestSetupAndAccountScopes() throws {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("budget-migration-\(UUID()).sqlite").path
         let legacy = try LocalDatabase(path: path)
@@ -192,7 +289,7 @@ final class LocalPersistenceTests: XCTestCase {
     func testOlderAcknowledgmentCannotOverwriteANewerLocalEdit() throws {
         let repository = try LocalTestData.repository(); let account = try LocalTestData.account(repository)
         let create = repository.snapshot.pending[0]; try repository.markSent(create)
-        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "New name", type: account.type, currency: account.currency, icon: account.icon, color: account.iconColor) }
+        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "New name", currency: account.currency, icon: account.icon, color: account.iconColor) }
         let latestID = repository.snapshot.pending.last!.id
         try repository.acknowledge(LocalTestData.ack(create, version: "10"), for: create)
         XCTAssertEqual(repository.snapshot.accounts[account.id]?.name, "New name")
@@ -250,18 +347,18 @@ final class LocalPersistenceTests: XCTestCase {
     func testReviewedBatchCommitsOfflineAndClearsDraftInTheSameCommit() async throws {
         let repository = try LocalTestData.repository(); let account = try LocalTestData.account(repository)
         func draft(_ amount: String) -> QuickEntryDraft {
-            QuickEntryDraft(payload: QuickEntryDraftPayload(id: UUID(), kind: .expense, accountId: account.id, destinationAccountId: nil, amount: amount, currency: "USD", categoryId: nil, merchant: "Coffee", payee: nil, note: nil, occurredAt: LocalTestData.now, recurrence: nil, sourceText: "Coffee", conversion: nil, warnings: []), category: nil)
+            QuickEntryDraft(payload: QuickEntryDraftPayload(id: UUID(), kind: .expense, accountId: account.id, destinationAccountId: nil, amount: amount, currency: "USD", categoryId: nil, note: nil, occurredAt: LocalTestData.now, recurrence: nil, conversion: nil, counterparty: "Coffee"), category: nil)
         }
-        let review = QuickEntryReviewPresentation(prompt: "Coffee and lunch", drafts: [draft("4.25"), draft("12.1250")], unparsedText: [])
-        try repository.saveValue(review, key: "quickEntryReview"); try repository.saveValue(review.prompt, key: "quickEntryText")
+        let review = QuickEntryReviewPresentation(prompt: "Coffee and lunch", drafts: [draft("4.25"), draft("12.1250")])
+        try repository.saveValue(review, key: "quickEntryReview")
         let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
         let store = TransactionStore(repository: reopened)
         XCTAssertEqual(store.savedQuickEntryReview()?.drafts.count, 2)
         let saved = try await store.commitQuickEntryDrafts(review.drafts)
         XCTAssertEqual(saved, 2); XCTAssertEqual(store.allTransactions.count, 2)
         XCTAssertEqual(reopened.snapshot.pending.last?.mutation.changes.count, 2)
-        XCTAssertNil(store.savedQuickEntryReview()); XCTAssertEqual(store.savedQuickEntryText(), "")
-        let broken = QuickEntryReviewPresentation(prompt: "Invalid draft", drafts: [draft("4"), draft("0")], unparsedText: [])
+        XCTAssertNil(store.savedQuickEntryReview())
+        let broken = QuickEntryReviewPresentation(prompt: "Invalid draft", drafts: [draft("4"), draft("0")])
         try store.saveQuickEntryReview(broken)
         let count = reopened.snapshot.pending.count
         do { _ = try await store.commitQuickEntryDrafts(broken.drafts); XCTFail("The whole batch must fail validation") } catch {}
@@ -271,7 +368,7 @@ final class LocalPersistenceTests: XCTestCase {
     func testReviewUsesLaterLocalFixesAndCoalescesTheirDependentOperations() throws {
         let repository = try LocalTestData.repository(); let account = try LocalTestData.account(repository); let first = repository.snapshot.pending[0]
         try repository.acknowledge(SyncResult(mutationId: first.id, status: "rejected", generation: 1, records: [], message: "Please review"), for: first)
-        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "Corrected", type: account.type, currency: account.currency, icon: account.icon, color: account.iconColor) }
+        _ = try repository.edit { try $0.saveAccount(id: account.id, name: "Corrected", currency: account.currency, icon: account.icon, color: account.iconColor) }
         _ = try repository.edit { try $0.saveTransaction(request: LocalTestData.transaction(account.id)) }
         try repository.resolve(first.id, keepLocal: true)
         XCTAssertEqual(repository.snapshot.pending.count, 1)

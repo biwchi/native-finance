@@ -6,6 +6,39 @@ import Vision
 
 @MainActor
 final class LegacyAppearanceTests: XCTestCase {
+    func testRowActionsShowTwoTapTargetsBeforeCollapsingToMenu() async throws {
+        let actions: [AppRowActions.Action] = [
+            .init(title: "Review", icon: "view") {},
+            .init(title: "Dismiss", icon: "xmark", role: .destructive) {},
+            .init(title: "Retry", icon: "refresh") {},
+        ]
+        for scheme in [ColorScheme.light, .dark] {
+            for count in 1...3 {
+                let content = AppRowActions(actions: Array(actions.prefix(count)))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.dynamicTypeSize, .accessibility1)
+                let controller = UIHostingController(rootView: content)
+                let size = controller.sizeThatFits(in: CGSize(width: 300, height: 100))
+                XCTAssertEqual(size.width, count == 2 ? 96 : 44, accuracy: 0.5)
+                XCTAssertGreaterThanOrEqual(size.height, AppControlSize.minimumTapTarget)
+            }
+            let window = try makeWindow(AppList {
+                AppSection("Actions") {
+                    ForEach(1...3, id: \.self) { count in
+                        HStack {
+                            Text("\(count) actions")
+                            Spacer()
+                            AppRowActions(actions: Array(actions.prefix(count)))
+                        }
+                    }
+                }
+            }.preferredColorScheme(scheme))
+            defer { window.isHidden = true }
+            try await settle(window)
+            attach(window, name: "Row-actions-\(scheme)")
+        }
+    }
+
     func testFinancesUsesReferenceInsetsAndRowHeightsInBothAppearances() async throws {
         for scheme in [ColorScheme.light, .dark] {
             let window = try makeWindow(NavigationStack { FinancesView() }.preferredColorScheme(scheme))
@@ -278,33 +311,234 @@ final class LegacyAppearanceTests: XCTestCase {
             defer { window.isHidden = true }
             try await Task.sleep(for: .seconds(1))
             let list = try XCTUnwrap(findCollection(in: window))
-            // Locate the three-row preferences section even if a sync warning is present above it.
+            // Locate Categories and Default currency even if a sync warning is present above them.
             let preferences = try XCTUnwrap((0..<list.numberOfSections).first {
-                list.numberOfItems(inSection: $0) == 3
+                list.numberOfItems(inSection: $0) == 2
             })
             func row(_ section: Int, _ item: Int = 0) throws -> CGRect {
                 try XCTUnwrap(list.layoutAttributesForItem(at: IndexPath(item: item, section: section))).frame
             }
-            let exchangeRates = try row(preferences - 1)
             let categories = try row(preferences)
             let currency = try row(preferences, 1)
-            let theme = try row(preferences, 2)
-            let weekday = try row(preferences + 1)
-            let roundTotals = try row(preferences + 1, 1)
+            XCTAssertEqual(list.numberOfItems(inSection: preferences + 1), 4)
+            let theme = try row(preferences + 1)
+            let weekday = try row(preferences + 1, 1)
+            let roundTotals = try row(preferences + 1, 2)
+            let budgetSummary = try row(preferences + 1, 3)
             let quickEntry = try row(preferences + 2)
             let reminders = try row(preferences + 3)
-            for frame in [exchangeRates, categories, theme, weekday, roundTotals, quickEntry, reminders] {
+            for frame in [categories, currency, theme, weekday, roundTotals, budgetSummary, quickEntry, reminders] {
                 XCTAssertEqual(frame.height, 52, accuracy: 0.5)
                 XCTAssertEqual(frame.minX, 16, accuracy: 0.5)
                 XCTAssertEqual(frame.width, window.bounds.width - 32, accuracy: 0.5)
             }
-            // Native iOS 26 measurements at standard text size, including multiline content.
-            XCTAssertEqual(currency.height, 74.667, accuracy: 0.5)
-            XCTAssertEqual(categories.minY - exchangeRates.maxY, 35, accuracy: 0.5)
-            XCTAssertEqual(weekday.minY - theme.maxY, 58, accuracy: 0.5)
-            XCTAssertEqual(quickEntry.minY - roundTotals.maxY, 86, accuracy: 0.5)
-            XCTAssertEqual(reminders.minY - quickEntry.maxY, 86, accuracy: 0.5)
+            XCTAssertEqual(theme.minY - currency.maxY, 58, accuracy: 0.5)
+            XCTAssertGreaterThan(quickEntry.minY - budgetSummary.maxY, 58)
+            XCTAssertGreaterThan(reminders.minY - quickEntry.maxY, 58)
             attach(window, name: "Settings-spacing-\(scheme)")
+        }
+    }
+
+    func testBackControlIsInstalledBeforeTransitionsAndSurvivesToolbarUpdates() async throws {
+        guard #unavailable(iOS 26.0) else { throw XCTSkip("iOS 26 owns its navigation controls") }
+        for scheme in [ColorScheme.light, .dark] {
+            let route = NavigationRoute()
+            let window = try makeWindow(NavigationFixture(route: route).preferredColorScheme(scheme))
+            defer { window.isHidden = true }
+            try await settle(window)
+            let navigation = try XCTUnwrap(navigationController(in: window.rootViewController))
+            let delegate = navigation.delegate
+            withAnimation { route.path = [1] }
+            try await assertBackControlsDuringTransition(navigation)
+            window.layoutIfNeeded()
+            let item = try XCTUnwrap(navigation.topViewController?.navigationItem)
+            let back = try XCTUnwrap(findBackButton(in: navigation.navigationBar))
+            XCTAssertTrue(item.hidesBackButton)
+            XCTAssertEqual(back.bounds.width, 44, accuracy: 0.5)
+            XCTAssertEqual(back.bounds.height, 44, accuracy: 0.5)
+            let frame = back.convert(back.bounds, to: navigation.navigationBar)
+            XCTAssertGreaterThanOrEqual(frame.minY, -0.5, "The circle must fit below the top of the bar")
+            XCTAssertLessThanOrEqual(frame.maxY, navigation.navigationBar.bounds.maxY + 0.5)
+            let title = try XCTUnwrap(item.titleView as? LegacyLeadingNavigationTitle.TitleView)
+            let titleFrame = title.label.convert(title.label.bounds, to: navigation.navigationBar)
+            XCTAssertGreaterThanOrEqual(titleFrame.minX - frame.maxX, 8, "The title needs a gap after the back control")
+
+            XCTAssertTrue(navigation.delegate === delegate)
+            let gesture = try XCTUnwrap(navigation.interactivePopGestureRecognizer)
+            XCTAssertTrue(gesture.isEnabled)
+            XCTAssertEqual(gesture.delegate?.gestureRecognizer?(gesture, shouldReceive: UIEvent()), true)
+            XCTAssertEqual(gesture.delegate?.gestureRecognizerShouldBegin?(gesture), true)
+            gesture.isEnabled = false
+            XCTAssertTrue(gesture.isEnabled, "SwiftUI disabling the native back item must not disable edge pans")
+            attach(window, name: "Navigation-back-\(scheme)")
+
+            back.isHighlighted = true
+            XCTAssertEqual(back.alpha, 0.55, accuracy: 0.001)
+            back.isHighlighted = false
+            back.isEnabled = false
+            XCTAssertEqual(back.alpha, 0.35, accuracy: 0.001)
+            back.isEnabled = true
+            XCTAssertEqual(back.alpha, 1)
+
+            route.isSaving = true
+            try await settle(window)
+            XCTAssertFalse(back.isEnabled, "A save must block the custom Back button")
+            XCTAssertEqual(gesture.delegate?.gestureRecognizer?(gesture, shouldReceive: UIEvent()), false)
+            XCTAssertEqual(gesture.delegate?.gestureRecognizerShouldBegin?(gesture), false)
+            back.sendActions(for: .touchUpInside)
+            XCTAssertEqual(route.path, [1])
+            route.isSaving = false
+            try await settle(window)
+            XCTAssertTrue(back.isEnabled)
+
+            withAnimation { route.path = [1, 2] }
+            try await assertBackControlsDuringTransition(navigation)
+            let nested = try XCTUnwrap(findBackButton(in: navigation.navigationBar))
+            XCTAssertEqual(nested.ancestorActions().map(\.title), ["Budget", "Home"])
+            nested.sendActions(for: .touchUpInside)
+            try await assertBackControlsDuringTransition(navigation)
+            XCTAssertEqual(route.path, [1], "Back must keep the SwiftUI path in sync")
+            let restored = try XCTUnwrap(findBackButton(in: navigation.navigationBar))
+            restored.sendActions(for: .touchUpInside)
+            try await assertBackControlsDuringTransition(navigation)
+            XCTAssertEqual(route.path, [])
+            XCTAssertNil(findBackButton(in: navigation.navigationBar))
+            XCTAssertEqual(gesture.delegate?.gestureRecognizerShouldBegin?(gesture), false)
+        }
+    }
+
+    func testStandaloneToolbarIconsHaveEqualCircularBounds() async throws {
+        guard #unavailable(iOS 26.0) else { throw XCTSkip("Native glass owns iOS 26 geometry") }
+        for scheme in [ColorScheme.light, .dark] {
+            for icon in ["plus", "settings", "xmark", "information-circle", "help-circle"] {
+                let control = Button {} label: { Label("Action", icon: icon) }
+                    .legacyToolbarIcon()
+                    .environment(\.dynamicTypeSize, .accessibility1)
+                let host = UIHostingController(rootView: control)
+                let size = host.sizeThatFits(in: CGSize(width: 200, height: 100))
+                XCTAssertEqual(size.width, 44, accuracy: 0.5, icon)
+                XCTAssertEqual(size.height, 44, accuracy: 0.5, icon)
+            }
+            let window = try makeWindow(NavigationStack {
+                AppList { Text("Toolbar geometry") }
+                    .navigationTitle("Icons")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {} label: { Label("Add", icon: "plus") }.legacyToolbarIcon()
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {} label: { Label("Settings", icon: "settings") }.legacyToolbarIcon()
+                        }
+                    }
+            }.preferredColorScheme(scheme))
+            defer { window.isHidden = true }
+            try await settle(window)
+            attach(window, name: "Circular-toolbar-icons-\(scheme)")
+        }
+    }
+
+    func testLargeNavigationTitleCollapsesWithSpaceForBackAndMonthControls() async throws {
+        guard #unavailable(iOS 26.0) else { throw XCTSkip("iOS 26 owns large-title layout") }
+        for scheme in [ColorScheme.light, .dark] {
+            let route = NavigationRoute()
+            let window = try makeWindow(NavigationFixture(route: route, usesLargeTitle: true).preferredColorScheme(scheme))
+            defer { window.isHidden = true }
+            try await settle(window)
+            withAnimation { route.path = [1] }
+            let navigation = try XCTUnwrap(navigationController(in: window.rootViewController))
+            try await assertBackControlsDuringTransition(navigation)
+            let title = try XCTUnwrap(navigation.topViewController?.navigationItem.titleView as? LegacyLeadingNavigationTitle.TitleView)
+            XCTAssertTrue(title.label.isHidden, "The expanded page must show only its large title")
+            attach(window, name: "Navigation-large-\(scheme)")
+            let list = try XCTUnwrap(findCollection(in: window))
+            list.setContentOffset(CGPoint(x: 0, y: 250), animated: false)
+            try await settle(window)
+            let back = try XCTUnwrap(findBackButton(in: navigation.navigationBar))
+            let backFrame = back.convert(back.bounds, to: navigation.navigationBar)
+            let titleFrame = title.label.convert(title.label.bounds, to: navigation.navigationBar)
+            XCTAssertFalse(title.label.isHidden)
+            XCTAssertGreaterThanOrEqual(backFrame.minY, -0.5)
+            XCTAssertGreaterThanOrEqual(titleFrame.minX - backFrame.maxX, 8)
+            XCTAssertGreaterThan(titleFrame.width, 0)
+            attach(window, name: "Navigation-collapsed-\(scheme)")
+        }
+    }
+
+    private func findBackButton(in view: UIView) -> LegacyNavigationAppearance.BackButton? {
+        if let button = view as? LegacyNavigationAppearance.BackButton { return button }
+        return view.subviews.lazy.compactMap { self.findBackButton(in: $0) }.first
+    }
+
+    private func assertBackControlsDuringTransition(_ navigation: UINavigationController) async throws {
+        var sawAnimatedTransition = false
+        for frameIndex in 0..<40 {
+            try await Task.sleep(for: .milliseconds(16))
+            sawAnimatedTransition = sawAnimatedTransition || navigation.transitionCoordinator?.isAnimated == true
+            if [4, 12].contains(frameIndex), let window = navigation.view.window {
+                attach(window, name: "Navigation-transition-\(frameIndex)")
+            }
+            for item in (navigation.navigationBar.items ?? []).dropFirst() {
+                XCTAssertTrue(item.hidesBackButton, "Every transition frame must hide the native back item")
+            }
+        }
+        XCTAssertTrue(sawAnimatedTransition, "Custom back controls must retain animated navigation")
+    }
+
+    func testLegacyNavigationDoesNotModifyIOS26() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Checks the native iOS 26 path") }
+        let root = UIViewController()
+        let destination = UIViewController()
+        let navigation = UINavigationController(rootViewController: root)
+        navigation.pushViewController(destination, animated: false)
+        let original = navigation.navigationBar.standardAppearance.backIndicatorImage
+        LegacyNavigationAppearance.apply(to: navigation)
+        XCTAssertEqual(navigation.navigationBar.standardAppearance.backIndicatorImage, original)
+        XCTAssertNil(destination.navigationItem.leftBarButtonItem)
+        XCTAssertFalse(destination.navigationItem.hidesBackButton)
+
+        let route = NavigationRoute()
+        let window = try makeWindow(NavigationFixture(route: route))
+        defer { window.isHidden = true }
+        try await settle(window)
+        withAnimation { route.path = [1] }
+        try await Task.sleep(for: .milliseconds(600))
+        let stack = try XCTUnwrap(navigationController(in: window.rootViewController))
+        XCTAssertNil(findBackButton(in: stack.navigationBar))
+        XCTAssertFalse(try XCTUnwrap(stack.topViewController).navigationItem.hidesBackButton)
+    }
+
+    private final class NavigationRoute: ObservableObject {
+        @Published var path: [Int] = []
+        @Published var isSaving = false
+    }
+
+    private struct NavigationFixture: View {
+        @ObservedObject var route: NavigationRoute
+        var usesLargeTitle = false
+        var body: some View {
+            NavigationStack(path: $route.path) {
+                AppList { Text("Home") }
+                    .navigationTitle("Home")
+                    .navigationDestination(for: Int.self) { value in
+                        AppList { ForEach(0..<30) { Text("Row \($0)") } }
+                            .navigationTitle(value == 1 ? "Budget" : "Settings")
+                            .navigationBarTitleDisplayMode(usesLargeTitle ? .large : .inline)
+                            .legacyLeadingNavigationTitle(value == 1 ? "Budget" : "Settings")
+                            .appBackNavigationDisabled(route.isSaving)
+                            .legacyNavigationDestination()
+                            .toolbar {
+                                if usesLargeTitle {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        Button("September") {}.legacyToolbarControl()
+                                    }
+                                }
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button {} label: { Image(systemName: "gearshape") }
+                                        .legacyToolbarControl(horizontalPadding: 0)
+                                }
+                            }
+                    }
+            }
         }
     }
 
@@ -331,7 +565,7 @@ final class LegacyAppearanceTests: XCTestCase {
                 navigation.topViewController?.navigationItem.scrollEdgeAppearance = appearance
                 try await settle(window)
                 XCTAssertFalse(LegacyNavigationAppearance.needsUpdate(navigation),
-                               "Hiding the native background must retain the circular back indicator")
+                               "Hiding the native background must retain the navigation coordinator")
             }
             for offset in [CGFloat(180), 500, 0] {
                 list.setContentOffset(CGPoint(x: 0, y: offset), animated: false)

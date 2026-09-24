@@ -10,8 +10,7 @@ export function scheduleTemplate(
   | "amount"
   | "currency"
   | "categoryId"
-  | "merchant"
-  | "payee"
+  | "counterparty"
   | "note"
 > {
   return {
@@ -20,8 +19,9 @@ export function scheduleTemplate(
     amount: values.amount,
     currency: values.currency,
     categoryId: values.categoryId,
-    merchant: values.merchant,
-    payee: values.payee,
+    counterparty: values.counterparty,
+
+
     note: values.note,
   };
 }

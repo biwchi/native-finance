@@ -1,11 +1,9 @@
 import { error, ok, type Result } from "../shared/result.ts";
 
-export type AccountType = "cash" | "checking" | "savings" | "credit" | "investment";
-
 export type Account = {
   id: string;
   name: string;
-  type: AccountType;
+  initialBalance: string;
   currency: string;
   icon: string;
   iconColor: string;
@@ -16,8 +14,8 @@ export type Account = {
 
 export type AccountDetails = Pick<
   Account,
-  "name" | "type" | "currency" | "icon" | "iconColor"
->;
+  "name" | "currency" | "icon" | "iconColor"
+> & { initialBalance?: string };
 
 export function createAccount(input: AccountDetails): AccountDetails {
   return { ...input, currency: input.currency.toUpperCase() };

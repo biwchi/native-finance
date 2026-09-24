@@ -130,7 +130,7 @@ final class CircleSwipeActionsTests: XCTestCase {
     }
 
     func testSingleCircleActionRendersOutsideTransactionAndGrows() async throws {
-        let account = Account(id: UUID(), name: "Kaspi", type: .checking, currency: "KZT",
+        let account = Account(id: UUID(), name: "Kaspi", currency: "KZT",
                               icon: "credit-card", iconColor: .red, createdAt: "", updatedAt: "")
         let now = Date.now
         let transaction = FinanceTransaction(id: UUID(), accountId: account.id, kind: .expense,
@@ -254,13 +254,14 @@ final class CircleSwipeActionsTests: XCTestCase {
         @Published var isBusy = false
         var succeeds = true
         var calls = 0
+        var writeDelay: Duration = .milliseconds(200)
 
         func delete(_ id: Int) async -> Bool {
             calls += 1
             isBusy = true
             defer { isBusy = false }
             // Match the asynchronous screen action and its disabled-state updates.
-            try? await Task.sleep(for: .milliseconds(200))
+            if writeDelay > .zero { try? await Task.sleep(for: writeDelay) }
             guard succeeds else { return false }
             rows.removeAll { $0 == id }
             return true
@@ -298,11 +299,16 @@ final class CircleSwipeActionsTests: XCTestCase {
         }
     }
 
-    func testSuccessfulDeleteKeepsRowOffscreenAndAnimatesGapAndSectionRemoval() async throws {
-        for separateSections in [false, true] {
+    func testSuccessfulDeleteClosesGapWhileRowExitsAndAnimatesSectionRemoval() async throws {
+        let scenarios: [(ColorScheme, Bool, Duration)] = [
+            (.light, false, .zero), (.dark, false, .milliseconds(200)),
+            (.light, true, .milliseconds(200)), (.dark, true, .zero)
+        ]
+        for (scheme, separateSections, writeDelay) in scenarios {
             let model = DeletionFixture()
+            model.writeDelay = writeDelay
             let window = try makeWindow(DeletionList(model: model, separateSections: separateSections)
-                .preferredColorScheme(.dark))
+                .preferredColorScheme(scheme))
             defer { window.isHidden = true }
             try await settle(window)
             let probes = swipeObservers(in: window).sorted {
@@ -317,23 +323,33 @@ final class CircleSwipeActionsTests: XCTestCase {
             deleting.configuration.onEnd(0, width, false)
             var positions: [CGFloat] = []
             var observedPendingWrite = false
+            var observedOverlappingMotion = false
+            var previousReveal = width * 0.8
             for _ in 0..<60 {
                 try await Task.sleep(for: .milliseconds(25))
-                positions.append(followingCell.layer.presentation()?.frame.minY ?? followingCell.frame.minY)
+                let position = followingCell.layer.presentation()?.frame.minY ?? followingCell.frame.minY
+                positions.append(position)
+                let reveal = deleting.configuration.revealedWidth
                 if model.isBusy && model.rows.contains(0) {
                     observedPendingWrite = true
-                    XCTAssertEqual(deleting.configuration.revealedWidth, width, accuracy: 0.5,
-                                   "A pending deletion must not slide back into the list")
+                    XCTAssertGreaterThanOrEqual(reveal, previousReveal - 0.5,
+                                                "A pending deletion must keep sliding out, never close first")
                 }
+                if position < initialY - 2 && reveal > previousReveal && reveal < width - 0.25 {
+                    observedOverlappingMotion = true
+                }
+                previousReveal = reveal
             }
             let finalY = followingCell.frame.minY
-            XCTAssertTrue(observedPendingWrite)
+            if writeDelay > .zero { XCTAssertTrue(observedPendingWrite) }
+            XCTAssertTrue(observedOverlappingMotion,
+                          "The following row must start moving before the deleting row finishes sliding out")
             XCTAssertEqual(model.calls, 1)
             XCTAssertEqual(model.rows, [1, 2])
             XCTAssertLessThan(finalY, initialY - 30)
             XCTAssertTrue(positions.contains { $0 > finalY + 2 && $0 < initialY - 2 },
                           "The following row must move through intermediate positions, including when a date header disappears: \(positions)")
-            attach(window, name: "Deleted-row-gap-closed-sections-\(separateSections)")
+            attach(window, name: "Deleted-row-gap-closed-\(scheme)-sections-\(separateSections)")
         }
     }
 
@@ -438,7 +454,7 @@ final class CircleSwipeActionsTests: XCTestCase {
         deleting.configuration.onChange(-width * 0.8, width)
         deleting.configuration.onEnd(0, width, false)
         try await Task.sleep(for: .milliseconds(40))
-        XCTAssertEqual(model.calls, 0)
+        XCTAssertEqual(model.calls, 1, "Deletion must start immediately, without waiting for the exit animation")
         window.rootViewController = UIHostingController(rootView: Text("Another screen"))
         try await Task.sleep(for: .milliseconds(650))
         XCTAssertEqual(model.calls, 1)

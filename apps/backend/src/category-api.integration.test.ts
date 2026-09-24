@@ -36,7 +36,7 @@ databaseDescribe("category and transaction API integration", () => {
       method: "POST",
       body: {
         name: `Integration ${suffix}`,
-        type: "checking",
+        initialBalance: "0",
         currency: "kzt",
         icon: "creditcard.fill",
         iconColor: "blue",

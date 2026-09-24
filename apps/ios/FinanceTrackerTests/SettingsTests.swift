@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class SettingsTests: XCTestCase {
+    func testAutomaticScanDraftOpeningDefaultsOffAndPersists() throws {
+        let suite = "ScanDraftPreference-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(defaults.bool(forKey: AppPreferences.openScanDraftsAutomaticallyKey))
+        defaults.set(true, forKey: AppPreferences.openScanDraftsAutomaticallyKey)
+        XCTAssertTrue(try XCTUnwrap(UserDefaults(suiteName: suite)).bool(
+            forKey: AppPreferences.openScanDraftsAutomaticallyKey
+        ))
+    }
+
     func testDeleteRequestIncludesExactConfirmationAndWaitsForSuccess() async throws {
         let session = makeSession { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
@@ -38,15 +49,19 @@ final class SettingsTests: XCTestCase {
             let suite = "SettingsRendering-\(UUID())"
             let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set("KZT", forKey: AppPreferences.defaultCurrencyKey)
             defaults.set((scheme == .dark ? AppTheme.dark : .light).rawValue, forKey: AppPreferences.themeKey)
             for selected in [false, true] {
                 defaults.set(selected, forKey: AppPreferences.roundTotalsKey)
                 if selected { defaults.set(false, forKey: AppPreferences.useAllocatedBudgetForSummaryKey) }
                 defaults.set(selected ? 2 : 0, forKey: AppPreferences.firstWeekdayKey)
-                if selected { defaults.set(7, forKey: AppPreferences.recurringReminderDaysKey) }
+                defaults.set(selected ? 30 : 0, forKey: AppPreferences.recurringReminderDaysKey)
                 try await capture(NavigationStack { SettingsView() }.environmentObject(TransactionStore()).defaultAppStorage(defaults),
                                   name: "Settings-\(scheme)-\(selected ? "selected" : "default")",
                                   scheme: scheme, scene: scene, height: 1600)
+                XCTAssertEqual(defaults.integer(forKey: AppPreferences.firstWeekdayKey),
+                               AppPreferences.normalizedFirstWeekday(selected ? 2 : 0))
+                XCTAssertEqual(defaults.integer(forKey: AppPreferences.recurringReminderDaysKey), selected ? 7 : 1)
             }
             try await capture(DeleteDataConfirmationView(
                 title: "Delete all data",

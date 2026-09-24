@@ -16,8 +16,7 @@ export type TransactionRecord = {
   categoryId: string | null;
   debtId?: string | null;
   recurringScheduleId: string | null;
-  merchant: string | null;
-  payee: string | null;
+  counterparty?: string | null;
   note: string | null;
   occurredAt: Date;
   createdAt: Date;
@@ -50,10 +49,10 @@ export type TransactionInput = {
   accountId: string;
   kind: TransactionKind;
   amount: string;
+  currency?: string;
   categoryId?: string | null;
   debtId?: string | null;
-  merchant?: string | null;
-  payee?: string | null;
+  counterparty?: string | null;
   note?: string | null;
   recurrence?: {
     frequency: RecurrenceFrequency;
@@ -71,6 +70,7 @@ export type TransactionDraft = {
 };
 
 export type TransactionValidationError =
+  | "invalid_currency"
   | "account_not_found"
   | "debt_required"
   | "debt_not_found"
@@ -85,6 +85,8 @@ export function createTransaction(
   context: { account: Account | null; category: Category | null; debt?: Debt | null },
 ): Result<TransactionDraft, TransactionValidationError> {
   if (!context.account) return error("account_not_found", "Account not found");
+  const currency = (input.currency ?? context.account.currency).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) return error("invalid_currency", "Choose a currency");
   if (input.kind === "debt") {
     if (!input.debtId) return error("debt_required", "Choose a debt recipient");
     if (!context.debt || context.debt.id !== input.debtId) return error("debt_not_found", "Debt recipient not found");
@@ -119,12 +121,12 @@ export function createTransaction(
     values: {
       accountId: context.account.id,
       kind: input.kind,
-      amount: input.amount,
-      currency: context.account.currency,
+      amount: amountMagnitude(input.amount),
+      currency,
       categoryId: context.category?.id ?? null,
       debtId: input.debtId ?? null,
-      merchant: cleanOptionalText(input.merchant),
-      payee: cleanOptionalText(input.payee),
+      counterparty: cleanOptionalText(input.counterparty),
+
       note: cleanOptionalText(input.note),
       occurredAt,
     },
@@ -136,8 +138,7 @@ export type TransferInput = {
   fromAccountId: string;
   toAccountId: string;
   amount: string;
-  merchant?: string | null;
-  payee?: string | null;
+  counterparty?: string | null;
   note?: string | null;
   occurredAt: string;
 };
@@ -182,8 +183,8 @@ export function createTransfer(
     amount: input.amount,
     currency: context.sourceAccount.currency,
     categoryId: null,
-    merchant: cleanOptionalText(input.merchant),
-    payee: cleanOptionalText(input.payee),
+    counterparty: cleanOptionalText(input.counterparty),
+
     note: cleanOptionalText(input.note),
     occurredAt,
   };
@@ -220,6 +221,10 @@ function cleanOptionalText(value: string | null | undefined): string | null {
   return value?.trim() || null;
 }
 
+function amountMagnitude(value: string): string {
+  return value.startsWith("-") ? value.slice(1) : value;
+}
+
 export type UpcomingTransaction = {
   id: string;
   accountId: string;
@@ -227,8 +232,7 @@ export type UpcomingTransaction = {
   amount: string;
   currency: string;
   category: CategorySummary | null;
-  merchant: string | null;
-  payee: string | null;
+  counterparty?: string | null;
   note: string | null;
   frequency: RecurrenceFrequency;
   startAt: Date;

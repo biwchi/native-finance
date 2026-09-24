@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct AccountManagementView: View {
+    private let selection: Binding<UUID?>?
+    private let allowsAllAccounts: Bool
+    let onBottomActionBarHeightChange: (CGFloat) -> Void
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var accountStore: AccountStore
     @EnvironmentObject private var transactionStore: TransactionStore
@@ -14,12 +17,21 @@ struct AccountManagementView: View {
     @State private var isUpdatingOrder = false
     @State private var deletingAccountID: UUID?
     @State private var editMode: EditMode = .inactive
-    @State private var selectedDetent: PresentationDetent = .medium
+
+    init(
+        selection: Binding<UUID?>? = nil,
+        allowsAllAccounts: Bool = true,
+        onBottomActionBarHeightChange: @escaping (CGFloat) -> Void = { _ in }
+    ) {
+        self.selection = selection
+        self.allowsAllAccounts = allowsAllAccounts
+        self.onBottomActionBarHeightChange = onBottomActionBarHeightChange
+    }
 
     var body: some View {
         NavigationStack {
             AppList {
-                if !editMode.isEditing {
+                if allowsAllAccounts, !editMode.isEditing {
                     AppSection {
                         allAccountsButton
                     }
@@ -52,13 +64,10 @@ struct AccountManagementView: View {
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(isBusy)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Group {
                         Button(editMode.isEditing ? "Done" : "Edit") {
                             withAnimation {
-                                if !editMode.isEditing {
-                                    selectedDetent = .large
-                                }
                                 editMode = editMode.isEditing ? .inactive : .active
                             }
                         }
@@ -67,17 +76,17 @@ struct AccountManagementView: View {
                     .legacyToolbarControl()
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .cancellationAction) {
                     Group {
                         Button {
                             dismiss()
                         } label: {
-                            AppIcon("xmark", size: 18)
+                            AppIcon("xmark", size: AppControlSize.iconButtonGlyph)
                         }
                         .accessibilityLabel("Close")
                         .disabled(isBusy)
                     }
-                    .legacyToolbarControl()
+                    .legacyToolbarIcon()
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -87,9 +96,10 @@ struct AccountManagementView: View {
                 .disabled(isBusy)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
+                .reportScanDraftBottomBarHeight(onBottomActionBarHeightChange)
             }
         }
-        .presentationDetents([.medium, .large], selection: $selectedDetent)
+        .presentationDetents([.large])
         .onChange(of: accountStore.accounts.isEmpty) { _, isEmpty in
             if isEmpty {
                 editMode = .inactive
@@ -101,11 +111,15 @@ struct AccountManagementView: View {
                 reportingCurrency: reportingCurrency.uppercased()
             )
         }
-        .sheet(item: $editor) { destination in
-            AccountEditorView(account: destination.account)
-                .environmentObject(accountStore)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .appSheet(item: $editor) { destination in
+            AccountEditorView(account: destination.account) { account in
+                if destination.account == nil {
+                    selection?.wrappedValue = account.id
+                }
+            }
+            .environmentObject(accountStore)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .alert(item: $presentedAlert) { alert in
             switch alert {
@@ -113,7 +127,7 @@ struct AccountManagementView: View {
                 Alert(
                     title: Text("Delete \(account.name)?"),
                     message: Text(
-                        "This also deletes its transactions and account budget data. This can't be undone."
+                        "This also deletes its transactions, goals, and account budget data. This can't be undone."
                     ),
                     primaryButton: .destructive(Text("Delete")) {
                         Task {
@@ -144,7 +158,7 @@ struct AccountManagementView: View {
                 account: account,
                 balanceSubtitle: balanceSubtitle(for: account),
                 isWorking: deletingAccountID == account.id,
-                isSelected: accountStore.selectedAccountID == account.id,
+                isSelected: selectedAccountID == account.id,
                 isEditing: editMode.isEditing
             )
             .contentShape(Rectangle())
@@ -152,7 +166,7 @@ struct AccountManagementView: View {
         .buttonStyle(.plain)
         .disabled(isBusy)
         .accessibilityAddTraits(
-            !editMode.isEditing && accountStore.selectedAccountID == account.id
+            !editMode.isEditing && selectedAccountID == account.id
                 ? .isSelected : []
         )
         .accessibilityHint(
@@ -173,9 +187,7 @@ struct AccountManagementView: View {
             selectAccount(nil)
         } label: {
             HStack(spacing: 12) {
-                AppIcon("credit-cards", size: 17)
-                    .frame(width: 36, height: 36)
-                    .accessibilityHidden(true)
+                AccountIconBadge(iconName: "credit-cards", color: AppColor.accent)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("All Accounts")
@@ -188,7 +200,7 @@ struct AccountManagementView: View {
 
                 Spacer()
 
-                if accountStore.selectedAccountID == nil {
+                if selectedAccountID == nil {
                     AppIcon("check", size: 17)
                         .foregroundStyle(AppColor.accent)
                         .accessibilityHidden(true)
@@ -199,12 +211,17 @@ struct AccountManagementView: View {
         }
         .buttonStyle(.plain)
         .disabled(isBusy)
-        .accessibilityAddTraits(accountStore.selectedAccountID == nil ? .isSelected : [])
+        .accessibilityAddTraits(selectedAccountID == nil ? .isSelected : [])
         .accessibilityHint("Show all accounts and close")
     }
 
     private var isBusy: Bool {
         isUpdatingOrder || deletingAccountID != nil
+    }
+
+    private var selectedAccountID: UUID? {
+        if let selection { return selection.wrappedValue }
+        return accountStore.selectedAccountID
     }
 
     private func balanceSubtitle(for account: Account?) -> String {
@@ -232,7 +249,11 @@ struct AccountManagementView: View {
     }
 
     private func selectAccount(_ accountID: UUID?) {
-        accountStore.selectedAccountID = accountID
+        if let selection {
+            selection.wrappedValue = accountID
+        } else {
+            accountStore.selectedAccountID = accountID
+        }
         dismiss()
     }
 
@@ -266,6 +287,9 @@ struct AccountManagementView: View {
 
         do {
             try await accountStore.deleteAccount(account)
+            if selection?.wrappedValue == account.id {
+                selection?.wrappedValue = nil
+            }
             await transactionStore.loadTransactions(accountID: accountStore.selectedAccountID)
         } catch {
             presentedAlert = .error(error.localizedDescription)

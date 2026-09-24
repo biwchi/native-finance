@@ -9,8 +9,8 @@ import type { Account } from "../../domain/accounts/account.ts";
 import type { Category } from "../../domain/categories/category.ts";
 import { normalizeChange } from "./sync-validation.ts";
 
-const tables: Record<Exclude<SyncEntity, "budget">, string> = { account: "accounts", category: "categories", debt: "debts", transaction: "transactions", schedule: "recurring_schedules", exclusion: "recurrence_exclusions" };
-const order: Record<SyncEntity, number> = { account: 0, category: 1, debt: 2, schedule: 3, transaction: 4, exclusion: 5, budget: 6 };
+const tables: Record<Exclude<SyncEntity, "budget">, string> = { account: "accounts", category: "categories", debt: "debts", transaction: "transactions", schedule: "recurring_schedules", exclusion: "recurrence_exclusions", goal: "goals" };
+const order: Record<SyncEntity, number> = { account: 0, category: 1, debt: 2, schedule: 3, transaction: 4, exclusion: 5, budget: 6, goal: 7 };
 const wire = (row: typeof syncRecords.$inferSelect): SyncRecord => ({ entity: row.entity as SyncEntity, key: row.key, version: row.version.toString(), data: row.data });
 const snake = (value: string) => value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
@@ -72,6 +72,8 @@ export function createDrizzleSyncRepository(database: Database): SyncRepository 
           const conflicts = changes.filter((change, index) => {
             const existing = current[index];
             if (ignored.has(change.key)) return false;
+            // Deleting an already absent record has no competing edit to resolve.
+            if (change.data === null && !existing?.data) return false;
             if ((existing?.version.toString() ?? null) === change.baseVersion) return false;
             if (change.baseVersion === null && existing?.data && existing.data.createdAt === existing.data.updatedAt && actions.some((a) => a.retainedTransactionId?.toLowerCase() === change.key && existing.data?.recurringScheduleId === a.scheduleId.toLowerCase())) return false;
             // Independent generators can create the same occurrence. A tombstone never matches a create.
@@ -139,10 +141,18 @@ async function applyChange(client: Database, change: SyncChange) {
   const d = change.data;
   if (!d) {
     if (change.entity === "category" && existing?.isSystem) throw new Error("Built-in categories cannot be deleted");
+    if (change.entity === "debt") {
+      const loans = await client.execute(sql`select id from transactions where debt_id = ${change.key}::uuid limit 1`);
+      if (loans.length) throw new Error("This recipient has outstanding loans. Mark them as returned or move them to another recipient before deleting.");
+    }
     if (change.entity === "budget") {
       if (existing) await client.execute(sql`delete from budget_plans where id = ${existing.id}::uuid`);
     } else await client.execute(sql`delete from ${sql.identifier(tables[change.entity])} where id = ${change.key}::uuid`);
     return;
+  }
+  if (change.entity === "debt" && d.sortOrder === undefined) {
+    const [position] = await client.execute(sql`select coalesce(max(sort_order), -1) + 1 as next_order from debts`);
+    d.sortOrder = existing?.sortOrder ?? Number(position?.next_order ?? 0);
   }
   if (change.entity === "category") {
     if (d.parentId === d.id) throw new Error("A category cannot be its own parent");
@@ -155,9 +165,11 @@ async function applyChange(client: Database, change: SyncChange) {
     }
     Object.assign(d, { isSystem: existing?.isSystem ?? false, systemKey: existing?.systemKey ?? null, examples: existing?.examples ?? [] });
   }
-  if (["transaction", "schedule", "budget"].includes(change.entity)) {
+  if (["transaction", "schedule", "budget", "goal"].includes(change.entity)) {
     const account = await reference(client, "account", d.accountId);
-    if (account && (!existing || existing.accountId !== d.accountId || change.entity === "budget") && d.currency !== account.currency) throw new Error("Currency must match the account");
+    // Transactions and schedules own their currency, including offline entries
+    // created before an account change and explicit currency corrections.
+    if (account && change.entity === "budget" && d.currency !== account.currency) throw new Error("Currency must match the account");
   }
   if (change.entity === "transaction" || change.entity === "schedule") {
     const category = await reference(client, "category", d.categoryId);
@@ -218,7 +230,7 @@ export function stableJSON(value: unknown): string {
   return JSON.stringify(value);
 }
 function comparable(value: Record<string, unknown> | null) {
-  return stableJSON(Object.fromEntries(Object.entries(value ?? {}).filter(([key]) => !["createdAt", "updatedAt"].includes(key)).map(([key, v]) => [key, key === "amount" && typeof v === "string" ? v.replace(/\.?(0+)$/, (s) => v.includes(".") ? "" : s) : v])));
+  return stableJSON(Object.fromEntries(Object.entries(value ?? {}).filter(([key, v]) => !["createdAt", "updatedAt"].includes(key)).map(([key, v]) => [key, key === "amount" && typeof v === "string" ? v.replace(/\.?(0+)$/, (s) => v.includes(".") ? "" : s) : v])));
 }
 function scheduleSettings(value: Record<string, unknown>) { return comparable(Object.fromEntries(Object.entries(value).filter(([key]) => !["lastOccurrenceAt", "nextOccurrenceAt", "nextScheduledFor"].includes(key)))); }
 function failureMessage(cause: unknown): string {

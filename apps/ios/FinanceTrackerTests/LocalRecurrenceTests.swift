@@ -3,6 +3,34 @@ import XCTest
 
 @MainActor
 final class LocalRecurrenceTests: XCTestCase {
+    func testAccountCurrencyChangePreservesRecordedAndProjectedRecurringEdits() throws {
+        for hasRecordedOccurrence in [false, true] {
+            let repository = try LocalTestData.repository()
+            let account = try LocalTestData.account(repository, currency: "RUB")
+            let now = LocalTestData.date("2100-02-01T12:00:00Z")
+            let start = LocalTestData.date(hasRecordedOccurrence ? "2100-02-28T12:00:00Z" : "2100-01-31T12:00:00Z")
+            let original = try repository.edit(now: now) {
+                try $0.saveTransaction(request: LocalTestData.transaction(account.id, amount: "200", occurredAt: start, recurrence: RecurrenceRequest(frequency: .monthly, endAt: nil)))
+            }
+            _ = try repository.edit(now: now) {
+                try $0.saveAccount(id: account.id, name: account.name, currency: "KZT", icon: account.icon, color: account.iconColor)
+            }
+            let upcoming = try XCTUnwrap(repository.snapshot.upcoming(now: now).first)
+            var edit = LocalTestData.transaction(account.id, amount: "300", occurredAt: upcoming.occurredAt, recurrence: RecurrenceRequest(frequency: .monthly, endAt: nil))
+            try repository.edit(now: now) { try $0.updateUpcoming(upcoming, request: edit) }
+            XCTAssertEqual(repository.snapshot.schedules[upcoming.id]?.currency, "RUB")
+            XCTAssertTrue(repository.snapshot.transactions.values.allSatisfy { $0.currency == "RUB" })
+            edit.currency = "KZT"
+            try repository.edit(now: now) { try $0.updateUpcoming(upcoming, request: edit) }
+            XCTAssertEqual(repository.snapshot.schedules[upcoming.id]?.currency, "KZT")
+            XCTAssertEqual(repository.snapshot.transactions[original.id]?.currency, hasRecordedOccurrence ? "KZT" : "RUB")
+            try repository.edit(now: upcoming.occurredAt) { try $0.materialize() }
+            let occurrence = try XCTUnwrap(repository.snapshot.transactions.values.first { $0.occurredAt == upcoming.occurredAt })
+            XCTAssertEqual(occurrence.currency, "KZT")
+            XCTAssertEqual(occurrence.amount, "300")
+        }
+    }
+
     private struct SharedFixtures: Decodable {
         struct Occurrence: Decodable { let scheduleId: UUID; let scheduledFor: Date; let id: UUID }
         struct Schedule: Decodable { let frequency: RecurrenceFrequency; let dates: [Date] }

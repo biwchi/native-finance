@@ -105,6 +105,6 @@ export const app = createHttpApp({
     }),
     deleteRecurring: (input) => deleteRecurringTransaction(input, { transactions }),
   },
-}, config.corsOrigin);
+}, config.corsOrigin, config.apiToken);
 
 export type App = typeof app;

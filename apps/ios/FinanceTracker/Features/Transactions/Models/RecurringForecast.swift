@@ -84,8 +84,8 @@ enum RecurringForecast {
                 date = next
             }
             guard count > 0 else { continue }
-            guard let amount = Decimal(string: bill.amount), !amount.isNaN, amount >= 0,
-                  let converted = convert(amount, bill.currency), !converted.isNaN else { return nil }
+            guard let amount = Decimal(string: bill.amount), !amount.isNaN, amount != 0,
+                  let converted = convert(abs(amount), bill.currency), !converted.isNaN else { return nil }
             if bill.kind == .expense {
                 totals.expenses += converted * Decimal(count)
             } else {

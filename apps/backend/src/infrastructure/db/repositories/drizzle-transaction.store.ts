@@ -138,8 +138,9 @@ export function createDrizzleTransactionStore(
         currency: schedule.currency,
         categoryId: schedule.categoryId,
         recurringScheduleId: schedule.id,
-        merchant: schedule.merchant,
-        payee: schedule.payee,
+        counterparty: schedule.counterparty,
+
+
         note: schedule.note,
         occurredAt,
       }))).onConflictDoNothing();

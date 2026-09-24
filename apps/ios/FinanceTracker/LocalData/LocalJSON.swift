@@ -29,6 +29,9 @@ enum LocalJSON {
     static func object<T: Encodable>(_ value: T) throws -> [String: JSONValue] {
         normalizeIDs(try decoder.decode([String: JSONValue].self, from: encoder.encode(value)))
     }
+    static func value<T: Encodable>(_ value: T) throws -> JSONValue {
+        try decoder.decode(JSONValue.self, from: encoder.encode(value))
+    }
     private static func normalizeIDs(_ object: [String: JSONValue]) -> [String: JSONValue] {
         Dictionary(uniqueKeysWithValues: object.map { key, value in
             let normalized: JSONValue

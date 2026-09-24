@@ -2,65 +2,143 @@ import SwiftUI
 
 struct CurrencyPickerView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppPreferences.favoriteCurrenciesKey) private var savedFavorites = "USD,EUR"
+    @StateObject private var rates: ExchangeRateStore
 
     @Binding var selection: String
     let currencyCodes: [String]
+    let title: String
 
     @State private var query = ""
+    @State private var showsRateHelp = false
+    @State private var isRefreshing = false
     @FocusState private var isSearchFocused: Bool
 
+    init(selection: Binding<String>, currencyCodes: [String], title: String = "Currency",
+         rateStore: ExchangeRateStore? = nil) {
+        _selection = selection
+        self.currencyCodes = currencyCodes
+        self.title = title
+        _rates = StateObject(wrappedValue: rateStore ?? ExchangeRateStore())
+    }
+
     var body: some View {
-        List(filteredCurrencyCodes, id: \.self) { code in
-            Button {
-                selection = code
-                dismiss()
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(code)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+        let catalog = CurrencyPickerCatalog(
+            currencyCodes: currencyCodes, selection: selection,
+            favorites: favorites, query: query
+        )
 
-                        if let name = currencyName(code) {
-                            Text(name)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: AppSpacing.doubleExtraLarge) {
+                rateStatus
 
-                    Spacer()
-
-                    if selection == code {
-                        AppIcon("check", size: 17)
-                            .foregroundStyle(.tint)
-                    }
+                if catalog.isEmpty {
+                    ContentUnavailableView(
+                        "No currencies found", iconName: "search",
+                        description: Text("No results for \"\(query)\".")
+                    )
+                } else {
+                    currencySection("Selected", codes: catalog.selected)
+                    currencySection("Favorites", codes: catalog.favorites)
+                    currencySection(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "All currencies" : "Search results", codes: catalog.others)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, AppSpacing.large)
+            .padding(.top, AppSpacing.medium)
+            .padding(.bottom, AppSpacing.large)
         }
-        .legacyListAppearance()
+        .background(AppColor.groupedBackground)
         .scrollEdgeFades()
-        .overlay {
-            if filteredCurrencyCodes.isEmpty {
-                ContentUnavailableView(
-                    "No currencies found",
-                    iconName: "search",
-                    description: Text("No results for “\(query)”.")
-                )
-            }
-        }
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isSearchFocused = false
+                    showsRateHelp = true
+                } label: {
+                    AppIcon("help-circle", size: 22)
+                }
+                .accessibilityLabel("About exchange rates")
+                .accessibilityIdentifier("currencyRateHelp")
+                .legacyToolbarIcon()
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             searchField
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, AppSpacing.extraLarge)
+                .padding(.vertical, AppSpacing.medium)
+        }
+        .appSheet(isPresented: $showsRateHelp) {
+            CurrencyRateHelpView()
+        }
+        .task {
+            isRefreshing = true
+            await rates.load(currencies: [], reportingCurrency: selection)
+            isRefreshing = false
+        }
+    }
+
+    private var rateStatus: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.compact) {
+            Text("Exchange rates for 1 \(selection)")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+            HStack(spacing: AppSpacing.compact) {
+                if isRefreshing {
+                    ProgressView().controlSize(.mini)
+                        .accessibilityLabel("Updating exchange rates")
+                } else {
+                    AppIcon("clock", size: 14, relativeTo: .caption)
+                        .accessibilityHidden(true)
+                }
+                if let snapshot = rates.snapshot {
+                    Text("Updated: \(snapshot.fetchedAt.formatted(Self.updateFormat))")
+                } else {
+                    Text(isRefreshing ? "Updating rates…" : "Updated: Not yet available")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, AppSpacing.extraSmall)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func currencySection(_ title: String, codes: [String]) -> some View {
+        if !codes.isEmpty {
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, AppSpacing.extraSmall)
+                    .accessibilityAddTraits(.isHeader)
+                LazyVStack(spacing: AppSpacing.small) {
+                    ForEach(codes, id: \.self) { code in
+                        CurrencyPickerRow(
+                            code: code,
+                            name: Locale.current.localizedString(forCurrencyCode: code) ?? code,
+                            rate: rates.convert(1, from: selection, to: code),
+                            baseCurrency: selection,
+                            isSelected: selection == code,
+                            isFavorite: favorites.contains(code),
+                            select: {
+                                selection = code
+                                dismiss()
+                            },
+                            toggleFavorite: { toggleFavorite(code) }
+                        )
+                    }
+                }
+            }
         }
     }
 
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AppSpacing.medium) {
             AppIcon("search", size: 20)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -73,6 +151,7 @@ struct CurrencyPickerView: View {
                 .focused($isSearchFocused)
                 .onSubmit { isSearchFocused = false }
                 .accessibilityLabel("Search currencies")
+                .accessibilityIdentifier("currencySearch")
 
             if !query.isEmpty {
                 Button {
@@ -81,35 +160,31 @@ struct CurrencyPickerView: View {
                 } label: {
                     AppIcon("xmark", size: 16)
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.leading, 18)
-        .padding(.trailing, query.isEmpty ? 18 : 4)
+        .padding(.leading, AppSpacing.extraLarge)
+        .padding(.trailing, query.isEmpty ? AppSpacing.extraLarge : AppSpacing.extraSmall)
         .frame(minHeight: 54)
-        .accountSelectorGlass()
+        .background(AppColor.elevatedSurface.opacity(0.9), in: Capsule())
+        .modifier(CapsuleControlBackground(appearance: .glass))
         .contentShape(Capsule())
         .onTapGesture { isSearchFocused = true }
     }
 
-    private var filteredCurrencyCodes: [String] {
-        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !search.isEmpty else {
-            return currencyCodes
-        }
-
-        return currencyCodes.filter { code in
-            code.localizedCaseInsensitiveContains(search) ||
-                currencyName(code)?.localizedCaseInsensitiveContains(search) == true
-        }
+    private var favorites: Set<String> {
+        Set(savedFavorites.split(separator: ",").map(String.init))
     }
 
-    private func currencyName(_ code: String) -> String? {
-        Locale.current.localizedString(forCurrencyCode: code)
+    private func toggleFavorite(_ code: String) {
+        var updated = favorites
+        if updated.contains(code) { updated.remove(code) } else { updated.insert(code) }
+        savedFavorites = updated.sorted().joined(separator: ",")
     }
+
+    private static let updateFormat = Date.FormatStyle(date: .abbreviated, time: .shortened)
 }

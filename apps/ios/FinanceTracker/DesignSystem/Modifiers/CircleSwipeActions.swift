@@ -3,9 +3,9 @@ import UIKit
 
 /// Actions are declared from right to left, matching the native trailing-swipe order.
 extension View {
-    func circleSwipeActions(isEnabled: Bool = true,
+    func circleSwipeActions(isEnabled: Bool = true, usesCardLayout: Bool = false,
                             @CircleSwipeActionBuilder actions: () -> [CircleSwipeAction]) -> some View {
-        modifier(CircleSwipeActions(isEnabled: isEnabled, actions: actions()))
+        modifier(CircleSwipeActions(isEnabled: isEnabled, usesCardLayout: usesCardLayout, actions: actions()))
     }
 }
 
@@ -18,11 +18,11 @@ private struct CircleSwipeActions: ViewModifier {
     @State private var isRemoving = false
     @State private var rowWidth: CGFloat = 0
     @State private var removalStart: CGFloat = 0
-    @State private var pendingDeletion: (() async -> Bool)?
     @State private var dragStart: CGFloat = 0
     @State private var isArmed = false
     @State private var id = UUID()
     let isEnabled: Bool
+    let usesCardLayout: Bool
     let actions: [CircleSwipeAction]
 
     private var enabled: Bool { isEnabled && environmentEnabled && editMode?.wrappedValue.isEditing != true }
@@ -43,8 +43,8 @@ private struct CircleSwipeActions: ViewModifier {
         } else {
             content
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.horizontal, AppSpacing.large)
-                .padding(.vertical, 15)
+                .padding(.horizontal, usesCardLayout ? 0 : AppSpacing.large)
+                .padding(.vertical, usesCardLayout ? 0 : 15)
                 .offset(x: -reveal)
                 .allowsHitTesting(reveal == 0)
                 .overlay(alignment: .trailing) {
@@ -82,19 +82,26 @@ private struct CircleSwipeActions: ViewModifier {
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { rowWidth = $0 }
                 .listRowInsets(EdgeInsets())
                 .alignmentGuide(.listRowSeparatorLeading) { _ in AppSpacing.large }
-                .listRowSeparator(reveal > 0 ? .hidden : .automatic)
+                .listRowSeparator(usesCardLayout || reveal > 0 ? .hidden : .automatic)
                 .listRowBackground(
-                    // Move the surface by exactly the same distance as its content.
-                    // Native cell masks retain the section corners while closed;
-                    // the exposed trailing edge uses the app radius during a swipe.
-                    UnevenRoundedRectangle(
-                        bottomTrailingRadius: min(1, reveal / 32) * AppRadius.groupedSection,
-                        topTrailingRadius: min(1, reveal / 32) * AppRadius.groupedSection,
-                        style: .continuous
-                    )
-                    .fill(AppColor.elevatedSurface)
-                    .offset(x: -reveal)
-                    .clipped()
+                    Group {
+                        if usesCardLayout {
+                            // Cards supply their own surface, which moves with the content.
+                            Color.clear
+                        } else {
+                            // Move the surface by exactly the same distance as its content.
+                            // Native cell masks retain the section corners while closed;
+                            // the exposed trailing edge uses the app radius during a swipe.
+                            UnevenRoundedRectangle(
+                                bottomTrailingRadius: min(1, reveal / 32) * AppRadius.groupedSection,
+                                topTrailingRadius: min(1, reveal / 32) * AppRadius.groupedSection,
+                                style: .continuous
+                            )
+                            .fill(AppColor.elevatedSurface)
+                            .offset(x: -reveal)
+                            .clipped()
+                        }
+                    }
                 )
                 .background {
                     CircleSwipeGesture(isEnabled: enabled && !isPerforming, revealedWidth: reveal,
@@ -147,12 +154,9 @@ private struct CircleSwipeActions: ViewModifier {
                     }
                 }
                 .onDisappear {
-                    if isRemoving {
-                        // List may keep a disappearing cell alive during its collapse.
-                        // Preserve the offscreen pose instead of flashing its contents back.
-                        motion.beginDrag()
-                        startPendingDeletion()
-                    } else {
+                    // List keeps the disappearing cell alive during its collapse.
+                    // Let its horizontal exit continue while the following rows move up.
+                    if !isRemoving {
                         motion.reset()
                         isArmed = false
                         isPerforming = false
@@ -190,17 +194,9 @@ private struct CircleSwipeActions: ViewModifier {
         isRemoving = true
         isArmed = false
         removalStart = reveal
-        // Taps and full swipes follow the same exit path. Keep the row offscreen
-        // while the asynchronous write runs; successful removal closes the gap.
-        pendingDeletion = deletion
-        motion.settle(to: width, velocity: velocity, reduceMotion: reduceMotion) {
-            startPendingDeletion()
-        }
-    }
-
-    private func startPendingDeletion() {
-        guard let deletion = pendingDeletion else { return }
-        pendingDeletion = nil
+        // Start the write alongside the exit so List can close the gap immediately.
+        // This task also survives navigation away from the disappearing row.
+        motion.settle(to: width, velocity: velocity, reduceMotion: reduceMotion)
         Task { @MainActor in
             let removed = await deletion()
             guard isRemoving else { return }

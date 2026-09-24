@@ -64,7 +64,7 @@ function account(id: string): Account {
   return {
     id,
     name: id,
-    type: "checking",
+    initialBalance: "0",
     currency: "USD",
     icon: "creditcard.fill",
     iconColor: "blue",

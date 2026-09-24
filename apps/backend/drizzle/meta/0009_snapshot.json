@@ -804,18 +804,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "merchant": {
-          "name": "merchant",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payee": {
-          "name": "payee",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "note": {
           "name": "note",
           "type": "text",
@@ -866,6 +854,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "counterparty": {
+          "name": "counterparty",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -972,18 +966,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "merchant": {
-          "name": "merchant",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payee": {
-          "name": "payee",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "note": {
           "name": "note",
           "type": "text",
@@ -1009,6 +991,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "counterparty": {
+          "name": "counterparty",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {

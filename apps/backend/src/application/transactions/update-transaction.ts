@@ -38,9 +38,9 @@ export async function updateTransaction(
 
   const values = {
     ...prepared.value.values,
-    currency: existing.accountId === input.transaction.accountId
+    currency: input.transaction.currency?.toUpperCase() ?? (existing.accountId === input.transaction.accountId
       ? existing.currency
-      : prepared.value.values.currency,
+      : prepared.value.values.currency),
     updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime())),
   };
 

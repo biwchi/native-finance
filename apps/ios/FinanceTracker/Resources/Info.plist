@@ -3,19 +3,23 @@
 <plist version="1.0">
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array><string>com.financetracker.sync</string></array>
+	<array>
+		<string>com.financetracker.sync</string>
+	</array>
 	<key>UIBackgroundModes</key>
-	<array><string>fetch</string></array>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>API_BASE_URL</key>
-	<string>http://localhost:3000</string>
+	<string>http://localhost:3010</string>
+	<key>API_TOKEN</key>
+	<string></string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
@@ -28,6 +32,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of a receipt to prepare transaction drafts for your review.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

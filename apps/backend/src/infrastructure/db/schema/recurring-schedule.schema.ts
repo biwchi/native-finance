@@ -27,8 +27,7 @@ export const recurringSchedules = pgTable(
     categoryId: uuid().references(() => categories.id, {
       onDelete: "set null",
     }),
-    merchant: text(),
-    payee: text(),
+    counterparty: text(),
     note: text(),
     frequency: recurrenceFrequency().notNull(),
     startAt: timestamp({ withTimezone: true }).notNull(),

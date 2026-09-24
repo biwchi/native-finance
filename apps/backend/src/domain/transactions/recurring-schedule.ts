@@ -8,8 +8,7 @@ export type RecurringSchedule = {
   amount: string;
   currency: string;
   categoryId: string | null;
-  merchant: string | null;
-  payee: string | null;
+  counterparty?: string | null;
   note: string | null;
   frequency: RecurrenceFrequency;
   startAt: Date;

@@ -19,8 +19,12 @@ struct AmountExpression: Equatable {
     }
 
     var canonicalResult: String? {
-        guard let result, result > 0 else { return nil }
-        return NSDecimalNumber(decimal: result).stringValue
+        guard let result, result != 0 else { return nil }
+        return NSDecimalNumber(decimal: abs(result)).stringValue
+    }
+
+    mutating func clear() {
+        rawValue = ""
     }
 
     mutating func enter(_ key: String) {
@@ -41,7 +45,10 @@ struct AmountExpression: Equatable {
     }
 
     private mutating func enterOperator(_ value: Character) {
-        guard !rawValue.isEmpty else { return }
+        if rawValue.isEmpty {
+            if value == "-" { rawValue.append(value) }
+            return
+        }
         if let last = rawValue.last, Self.operators.contains(last) {
             rawValue.removeLast()
         }
@@ -79,9 +86,9 @@ struct AmountExpression: Equatable {
 
         var numbers: [Decimal] = []
         var operations: [Character] = []
-        var current = ""
+        var current = completed.first == "-" ? "-" : ""
 
-        for character in completed {
+        for character in completed.dropFirst(current.isEmpty ? 0 : 1) {
             if operators.contains(character) {
                 guard let number = Decimal(string: current, locale: Locale(identifier: "en_US_POSIX")) else {
                     return nil

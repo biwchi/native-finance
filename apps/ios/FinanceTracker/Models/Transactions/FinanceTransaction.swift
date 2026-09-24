@@ -7,8 +7,6 @@ struct FinanceTransaction: Codable, Identifiable, Hashable, EditableTransaction 
     let amount: String
     let currency: String
     let category: TransactionCategory?
-    var merchant: String? = nil
-    var payee: String? = nil
     let note: String?
     let occurredAt: Date
     let createdAt: Date
@@ -16,4 +14,5 @@ struct FinanceTransaction: Codable, Identifiable, Hashable, EditableTransaction 
     var debtId: UUID? = nil
     var debt: Debt? = nil
     var recurrence: TransactionRecurrence? = nil
+    var counterparty: String? = nil
 }

@@ -400,14 +400,14 @@ func parseTransactionDecimal(_ value: String, locale: Locale) -> Decimal? {
 }
 
 func canonicalTransactionAmount(_ value: String, locale: Locale) -> String? {
-    guard let amount = parseTransactionDecimal(value, locale: locale), amount > 0 else {
+    guard let amount = parseTransactionDecimal(value, locale: locale), amount != 0 else {
         return nil
     }
 
-    var source = amount
+    var source = abs(amount)
     var rounded = Decimal()
     NSDecimalRound(&rounded, &source, 4, .plain)
-    guard rounded == amount else { return nil }
+    guard rounded == source else { return nil }
 
     let result = NSDecimalNumber(decimal: rounded).stringValue
     let integerPart = result.split(separator: ".", omittingEmptySubsequences: false).first ?? ""

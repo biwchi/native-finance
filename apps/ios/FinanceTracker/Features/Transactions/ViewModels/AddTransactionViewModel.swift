@@ -6,11 +6,11 @@ final class AddTransactionViewModel: ObservableObject {
     @Published private(set) var command = ""
     @Published private(set) var accountID: UUID?
     @Published private(set) var amountText = ""
+    @Published private(set) var currencyOverride: String?
     @Published private(set) var kind: TransactionKind = .expense
     @Published private(set) var debtID: UUID?
     @Published private(set) var categoryID: UUID?
-    @Published private(set) var merchant = ""
-    @Published private(set) var payee = ""
+    @Published private(set) var counterparty = ""
     @Published private(set) var note = ""
     @Published private(set) var occurredAt: Date
     @Published private(set) var isRecurring = false
@@ -33,9 +33,12 @@ final class AddTransactionViewModel: ObservableObject {
     private var commandRevision = 0
     private var hasConfiguredAccount = false
     private var categoryQuery = ""
+    private let originalAccountID: UUID?
+    private let originalCurrency: String?
 
     init(
         transaction: (any EditableTransaction)? = nil,
+        preservesOriginalCurrency: Bool = true,
         parser: TransactionCommandParser = TransactionCommandParser(),
         resolver: any CategoryResolving = AdaptiveCategoryResolver(),
         now: @escaping () -> Date = Date.init
@@ -43,17 +46,18 @@ final class AddTransactionViewModel: ObservableObject {
         self.parser = parser
         self.resolver = resolver
         self.now = now
+        originalAccountID = preservesOriginalCurrency ? transaction?.accountId : nil
+        originalCurrency = preservesOriginalCurrency ? transaction?.currency : nil
         occurredAt = transaction?.occurredAt ?? now()
 
         if let transaction {
             accountID = transaction.accountId
             amountText = Decimal(string: transaction.amount, locale: Locale(identifier: "en_US_POSIX"))
-                .map { NSDecimalNumber(decimal: $0).stringValue } ?? transaction.amount
+                .map { NSDecimalNumber(decimal: abs($0)).stringValue } ?? transaction.amount
             kind = transaction.kind
             debtID = transaction.debtId
             categoryID = transaction.category?.id
-            merchant = transaction.merchant ?? ""
-            payee = transaction.payee ?? ""
+            counterparty = transaction.counterparty ?? ""
             note = transaction.note ?? ""
             isRecurring = transaction.recurrence != nil
             recurrenceFrequency = transaction.recurrence?.frequency ?? .monthly
@@ -84,6 +88,8 @@ final class AddTransactionViewModel: ObservableObject {
         } else if let lastUsedAccountID,
                   accounts.contains(where: { $0.id == lastUsedAccountID }) {
             accountID = lastUsedAccountID
+        } else {
+            accountID = accounts.first?.id
         }
     }
 
@@ -142,7 +148,16 @@ final class AddTransactionViewModel: ObservableObject {
     }
 
     func setAccountID(_ value: UUID?) {
+        if value != accountID { currencyOverride = nil }
         accountID = value
+    }
+
+    func currency(for account: Account?) -> String? {
+        currencyOverride ?? (accountID == originalAccountID ? originalCurrency : nil) ?? account?.currency
+    }
+
+    func setCurrency(_ value: String) {
+        currencyOverride = value.uppercased()
     }
 
     func setAmountText(_ value: String) {
@@ -180,12 +195,8 @@ final class AddTransactionViewModel: ObservableObject {
         categoryResolutionSource = nil
     }
 
-    func setMerchant(_ value: String) {
-        merchant = value
-    }
-
-    func setPayee(_ value: String) {
-        payee = value
+    func setCounterparty(_ value: String) {
+        counterparty = value
     }
 
     func setNote(_ value: String) {
@@ -233,12 +244,12 @@ final class AddTransactionViewModel: ObservableObject {
 
     func hasChanges(from transaction: any EditableTransaction) -> Bool {
         accountID != transaction.accountId ||
-            canonicalAmount().flatMap { Decimal(string: $0) } != Decimal(string: transaction.amount) ||
+            currencyOverride.map { $0.caseInsensitiveCompare(transaction.currency) != .orderedSame } == true ||
+            canonicalAmount().flatMap { Decimal(string: $0) } != Decimal(string: transaction.amount).map(abs) ||
             kind != transaction.kind ||
             debtID != transaction.debtId ||
             categoryID != transaction.category?.id ||
-            merchant.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.merchant ?? "") ||
-            payee.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.payee ?? "") ||
+            counterparty.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.counterparty ?? "") ||
             note.trimmingCharacters(in: .whitespacesAndNewlines) != (transaction.note ?? "") ||
             occurredAt != transaction.occurredAt ||
             isRecurring != (transaction.recurrence != nil) ||

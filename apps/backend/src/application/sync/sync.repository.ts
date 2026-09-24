@@ -1,4 +1,4 @@
-export const syncEntities = ["account", "category", "debt", "transaction", "schedule", "budget", "exclusion"] as const;
+export const syncEntities = ["account", "category", "debt", "transaction", "schedule", "budget", "exclusion", "goal"] as const;
 export type SyncEntity = typeof syncEntities[number];
 export type SyncRecord = { entity: SyncEntity; key: string; version: string; data: Record<string, unknown> | null };
 export type SyncChange = Omit<SyncRecord, "version"> & { baseVersion: string | null; origin?: "generated" };
