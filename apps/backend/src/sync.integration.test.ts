@@ -29,6 +29,24 @@ suite("persistent two-way synchronization", () => {
     await repository.push(mutation([], { reset: true }));
     snapshot = await repository.bootstrap();
   });
+  it("stores the draft timezone and materializes the same local monthly dates", async () => {
+    const a = account();
+    const plan = { ...schedule(a.id), timeZone: "Asia/Almaty", startAt: "2026-02-28T19:30:00.000Z",
+      lastOccurrenceAt: "2026-02-28T19:30:00.000Z", nextOccurrenceAt: "2026-03-31T19:30:00.000Z", endAt: "2026-04-30T19:30:00.000Z" };
+    const saved = await repository.push(mutation([change("account", a), change("schedule", plan)]));
+    expect(saved.status).toBe("accepted");
+    expect(saved.records.find(r => r.key === plan.id)?.data?.timeZone).toBe("Asia/Almaty");
+    await generate(plan.id, plan.endAt);
+    const records = (await repository.bootstrap()).records;
+    expect(records.filter(r => r.entity === "transaction" && r.data?.recurringScheduleId === plan.id)
+      .map(r => r.data!.occurredAt).sort()).toEqual(["2026-03-31T19:30:00.000Z", "2026-04-30T19:30:00.000Z"]);
+    const final = records.find(r => r.key === plan.id)!;
+    expect(final.data).toMatchObject({ timeZone: "Asia/Almaty", nextOccurrenceAt: null });
+    const { timeZone: _, ...legacy } = final.data!;
+    const updated = await repository.push(mutation([change("schedule", { ...legacy, note: "Legacy edit" }, final.version)]));
+    expect(updated.status).toBe("accepted");
+    expect(updated.records.find(r => r.key === plan.id)?.data?.timeZone).toBe("Asia/Almaty");
+  });
   it("syncs the counterparty, clears it, and carries it into recurring payments", async () => {
     const a = account();
     const t = { ...txn(a.id), counterparty: "Urbo Coffee" };

@@ -10,6 +10,7 @@ const recurrenceFrequencySchema = t.Union([
 ]);
 
 const recurrenceBodySchema = t.Object({
+  timeZone: t.Optional(t.Nullable(t.String({ minLength: 1, maxLength: 100 }))),
   frequency: recurrenceFrequencySchema,
   endAt: t.Optional(t.Nullable(t.String({ format: "date-time" }))),
 });
@@ -34,6 +35,7 @@ export const transactionBodySchema = t.Object({
 });
 
 export const transferBodySchema = t.Object({
+  destinationAmount: t.Optional(amountSchema),
   fromAccountId: t.String({ format: "uuid" }),
   toAccountId: t.String({ format: "uuid" }),
   amount: amountSchema,

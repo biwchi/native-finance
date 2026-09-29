@@ -131,7 +131,7 @@ describe("transaction evidence resolution without AI", () => {
     const draft = resolve(event({ documentType: "text", amounts: [{ value: "2400", currency: "USD", role: "plan_total" }], selectedAmountIndex: 0,
       schedule: { source: "over two years", frequency: "monthly", duration: { value: 2, unit: "year" }, occurrenceCount: null, endDate: null, totalAmountIndex: 0 } }), { ...input, photo: undefined, text: "Bought a computer for 2400 over two years" });
     expect(draft.amount).toBe("100");
-    expect(draft.recurrence).toEqual({ frequency: "monthly", endAt: "2028-08-11T19:15:23.000Z" });
+    expect(draft.recurrence).toEqual({ frequency: "monthly", endAt: "2028-08-11T19:15:23.000Z", timeZone: "Asia/Almaty" });
   });
 
   it("rejects unsupported schedule evidence and keeps the selected account", () => {

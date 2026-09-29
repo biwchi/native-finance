@@ -82,6 +82,7 @@ export const app = createHttpApp({
   },
   quickEntry: {
     interpret: (input) => interpretQuickEntry(input, {
+      debts,
       accounts,
       categories,
       exchangeRateRepository: exchangeRates,

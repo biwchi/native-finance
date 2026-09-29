@@ -2,7 +2,7 @@ When adding transaction features, edit prompts as small changes to explicit deci
 
 1. Define the decision before writing instructions. State when the feature applies, what evidence supports it, what takes priority, and what happens when evidence is missing. Use this pattern: "When [condition], use [evidence] to [action]. If [conflict or missing evidence], return [unresolved field]."
 
-2. Give each rule one home. Put common behavior in `shared-policy.ts`, typed-entry interpretation in `text-prompt.ts`, and photo/document interpretation in `scan-prompt.ts`. Document requests use the scan rules plus a required overflow flag; keep that flag aligned with the document extraction schema and rejection behavior. Replace outdated instructions instead of appending exceptions. Read both assembled prompts after every change to catch contradictions.
+2. Give each rule one home. Put common behavior in `shared-policy.ts`, typed-entry interpretation in `text-prompt.ts`, and photo/document interpretation in `scan-prompt.ts`. Every mode requires overflow and unsupported-request fields; keep them aligned with the extraction schema and whole-request rejection behavior. Documents also flag truncated source data. Replace outdated instructions instead of appending exceptions. Read both assembled prompts after every change to catch contradictions.
 
 3. Define precedence explicitly. "Choose the best category" leaves competing signals unresolved. Explain which evidence wins, such as an explicit user category before a merchant match, with the bank's category label as secondary evidence. State when an explicit choice overrides a default.
 

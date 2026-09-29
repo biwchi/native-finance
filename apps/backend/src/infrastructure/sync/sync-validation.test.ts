@@ -22,6 +22,15 @@ describe("recipient sync validation", () => {
 });
 
 describe("transaction sync validation", () => {
+  it("preserves schedule timezones, rejects invalid zones and accepts legacy UTC schedules", () => {
+    const data = { id, accountId: "60000000-0000-0000-0000-000000000002", kind: "expense", amount: "120", currency: "USD",
+      frequency: "monthly", startAt: "2026-02-28T19:30:00Z", lastOccurrenceAt: "2026-02-28T19:30:00Z",
+      nextOccurrenceAt: "2026-03-31T19:30:00Z", endAt: null, createdAt: "2026-02-28T19:30:00Z", updatedAt: "2026-02-28T19:30:00Z" };
+    const normalize = (extra: Record<string, unknown>) => normalizeChange({ entity: "schedule", key: id, baseVersion: null, data: { ...data, ...extra } }).data;
+    expect(normalize({ timeZone: "Asia/Almaty" })?.timeZone).toBe("Asia/Almaty");
+    expect(normalize({})).not.toHaveProperty("timeZone");
+    expect(() => normalize({ timeZone: "invalid-zone" })).toThrow("Invalid schedule timezone");
+  });
   it("normalizes the counterparty and supports clearing it", () => {
     const record = { id, accountId: "60000000-0000-0000-0000-000000000002", kind: "expense", amount: "300",
       currency: "KZT", note: "Lunch", occurredAt: "2026-09-21T10:00:00.000Z",

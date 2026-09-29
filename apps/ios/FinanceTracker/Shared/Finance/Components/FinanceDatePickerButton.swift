@@ -5,6 +5,7 @@ struct FinanceDatePickerButton: View {
 
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -64,7 +65,8 @@ struct FinanceDatePickerButton: View {
         .contentShape(Capsule())
         .highPriorityGesture(periodDrag)
         .frame(maxWidth: isToolbarItem ? nil : .infinity, alignment: .center)
-        .appSheet(isPresented: $isShowingFilter, layout: .content, background: AppColor.elevatedSurface) {
+        .appSheet(isPresented: $isShowingFilter, layout: .content,
+                  background: FinanceDateFilterSheet.background(for: colorScheme)) {
             FinanceDateFilterSheet(selection: selection, savedCustom: savedCustom, calendar: calendar) { result, custom in
                 selection = result
                 savedCustom = custom

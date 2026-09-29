@@ -3,11 +3,13 @@ import { createQuickEntryCalendar } from "./quick-entry-calendar.ts";
 import type { AmountCandidate, CalendarUnit, ExtractedTransaction, QuickEntryExtraction } from "./quick-entry-extraction.ts";
 import type { InterpretedQuickEntryTransaction, QuickEntryInterpretation, QuickEntryInterpreterInput } from "./quick-entry-interpreter.ts";
 import { dividePayment, formatMoneyUnits, moneyUnits } from "./quick-entry-money.ts";
+import { QuickEntryInterpretationError } from "./quick-entry-extraction.ts";
 
 const frequencyUnit = { daily: "day", weekly: "week", monthly: "month", yearly: "year" } as const;
 
 export function resolveQuickEntryExtraction(extraction: QuickEntryExtraction, input: QuickEntryInterpreterInput): QuickEntryInterpretation {
   const calendar = createQuickEntryCalendar(input.referenceNow, input.timeZone);
+  const scheduleCalendar = createQuickEntryCalendar(input.referenceNow, input.timeZone, true);
   const accounts = new Map(input.accounts.map((account) => [account.id.toLowerCase(), account]));
   const selectedAccount = accounts.get(input.defaultAccountId.toLowerCase());
   if (!selectedAccount) throw new Error("Selected account not found");
@@ -33,14 +35,18 @@ export function resolveQuickEntryExtraction(extraction: QuickEntryExtraction, in
       && !(destination?.id === selectedAccount.id && account.id !== selectedAccount.id && item.account.basis === "user")) {
       destination = undefined;
     }
-    if (destination && (destination.id === account.id || destination.currency !== account.currency)) destination = undefined;
+    if (destination?.id === account.id) destination = undefined;
+    const debtId = kind === "debt" ? input.debts?.find((debt) => debt.id.toLowerCase() === item.debtId?.toLowerCase())?.id ?? null : null;
+    if ((kind === "transfer" || kind === "debt") && item.schedule && userEvidence(item.schedule.source, input.text)) {
+      throw new QuickEntryInterpretationError("unsupported_quick_entry", `Quick entry does not support recurring ${kind === "debt" ? "loans" : "transfers"}. Nothing was added.`);
+    }
 
     const categoryId = resolveCategory(item, input.categories, input.text);
     let occurredAt = calendar.reference;
     try { occurredAt = calendar.resolve(item.date); }
     catch { occurredAt = calendar.reference; }
 
-    const schedule = item.schedule && kind !== "transfer" && userEvidence(item.schedule.source, input.text) ? item.schedule : null;
+    const schedule = item.schedule && kind !== "transfer" && kind !== "debt" && userEvidence(item.schedule.source, input.text) ? item.schedule : null;
     const candidate = selectAmount(item, input, schedule !== null);
     let amount = candidate?.value ?? "";
     let currency = candidate?.currency ?? null;
@@ -60,19 +66,20 @@ export function resolveQuickEntryExtraction(extraction: QuickEntryExtraction, in
         const unit: CalendarUnit = frequencyUnit[schedule.frequency];
         const counts = [schedule.occurrenceCount];
         if (schedule.duration) {
-          const boundary = calendar.add(occurredAt, schedule.duration.unit, schedule.duration.value);
-          counts.push(calendar.countOccurrences(occurredAt, boundary, unit, false));
+          const boundary = scheduleCalendar.add(occurredAt, schedule.duration.unit, schedule.duration.value);
+          counts.push(scheduleCalendar.countOccurrences(occurredAt, boundary, unit, false));
         }
         const explicitEnd = schedule.endDate ? calendar.resolve(schedule.endDate, occurredAt) : null;
-        if (explicitEnd) counts.push(calendar.countOccurrences(occurredAt, explicitEnd, unit, true));
+        if (explicitEnd) counts.push(scheduleCalendar.countOccurrences(occurredAt, explicitEnd, unit, true));
         const resolvedCounts = counts.filter((count): count is number => count !== null);
         if (new Set(resolvedCounts).size > 1) throw new Error("The payment count and schedule duration disagree.");
         const count = resolvedCounts[0] ?? null;
-        const endAt = count ? calendar.add(occurredAt, unit, count - 1) : null;
-        recurrence = { frequency: schedule.frequency, endAt: endAt?.toISOString() ?? null };
+        const endAt = count ? scheduleCalendar.add(occurredAt, unit, count - 1) : null;
+        recurrence = { frequency: schedule.frequency, endAt: endAt?.toISOString() ?? null, timeZone: input.timeZone };
         const total = schedule.totalAmountIndex === null ? null : item.amounts[schedule.totalAmountIndex];
         if (schedule.totalAmountIndex !== null && !total) throw new Error("The plan total could not be identified.");
-        if (candidate && amount && (candidate.role === "plan_total" || candidate.role === "price" || candidate === total)) {
+        if (total && total.role !== "plan_total") throw new Error("The amount is not identified as a whole-plan total.");
+        if (candidate && amount && candidate.role === "plan_total") {
           if (!count) throw new Error("Enter the number of payments or the amount of one payment.");
           amount = dividePayment(amount, count, currency ?? account.currency);
         } else if (candidate && total && count && amount) {
@@ -87,8 +94,16 @@ export function resolveQuickEntryExtraction(extraction: QuickEntryExtraction, in
     if (currency && !/^[A-Z]{3}$/.test(currency)) {
       currency = null; amount = "";
     }
+    const destinationIndex = item.destinationAmountIndex;
+    if (destinationIndex != null && (!Number.isInteger(destinationIndex) || destinationIndex < 0 || destinationIndex >= item.amounts.length)) {
+      throw new Error("The received transfer amount selection was invalid. Please try again.");
+    }
+    const received = kind === "transfer" && destinationIndex != null ? item.amounts[destinationIndex] : null;
+    // A received-only amount belongs to the destination currency when omitted.
+    if (received && received === candidate && !currency) currency = destination?.currency ?? null;
     transactions.push({
       kind, accountId: account.id, destinationAccountId: destination?.id ?? null,
+      debtId, destinationAmount: received?.value ?? null, destinationCurrency: received?.currency ?? destination?.currency ?? null,
       amount, currency, categoryId,
       counterparty: item.counterparty, note: item.note,
       occurredAt: occurredAt.toISOString(), recurrence,
@@ -122,7 +137,7 @@ function selectAmount(item: ExtractedTransaction, input: QuickEntryInterpreterIn
 }
 
 function resolveCategory(item: ExtractedTransaction, categories: Category[], request: string): string | null {
-  if (item.kind === "transfer") return null;
+  if (item.kind === "transfer" || item.kind === "debt") return null;
   const available = categories.filter((category) => category.kind === item.kind);
   const proposed = available.find((category) => category.id.toLowerCase() === item.category.id?.toLowerCase());
   if (item.category.basis === "user") {

@@ -89,6 +89,7 @@ export async function updateRecurringTransaction(
 
     const dateChanged =
       values.occurredAt.getTime() !== expectedOccurredAt.getTime();
+    const timeZone = recurrence.timeZone ?? schedule.timeZone;
     const startAt = dateChanged || recurrence.frequency !== schedule.frequency
       ? values.occurredAt
       : schedule.startAt;
@@ -97,11 +98,13 @@ export async function updateRecurringTransaction(
           values.occurredAt,
           startAt,
           recurrence.frequency,
+          timeZone,
         )
       : values.occurredAt;
     await store.updateSchedule(schedule.id, {
       ...scheduleTemplate(values),
       ...recurrence,
+      timeZone,
       startAt,
       lastOccurrenceAt: recorded
         ? values.occurredAt

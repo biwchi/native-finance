@@ -16,6 +16,10 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
     var conversion: QuickEntryConversion?
     var debt: Debt? = nil
     var counterparty: String? = nil
+    var destinationAmount: String? = nil
+    var destinationCurrency: String? = nil
+    var recurrenceTimeZone: String? = nil
+    var destinationAmountEstimated: Bool? = nil
 
     /// CSV rows represent recorded transactions and never recreate recurring schedules.
     init(record: TransactionRequest, category: TransactionCategory?, debt: Debt?) {
@@ -33,15 +37,20 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
         recurrenceFrequency = .monthly
     }
 
-    init(payload: QuickEntryDraftPayload, category: TransactionCategory?) {
+    init(payload: QuickEntryDraftPayload, category: TransactionCategory?, debt: Debt? = nil) {
         id = payload.id
         mode = switch payload.kind {
         case .expense: .expense
         case .income: .income
         case .transfer: .transfer
+        case .debt: .debt
         }
         accountId = payload.accountId
         destinationAccountId = payload.destinationAccountId
+        destinationAmount = payload.destinationAmount
+        destinationCurrency = payload.destinationCurrency
+        destinationAmountEstimated = payload.destinationAmountEstimated
+        self.debt = debt
         amount = payload.amount.hasPrefix("-") ? String(payload.amount.dropFirst()) : payload.amount
         currency = payload.currency
         self.category = category
@@ -51,6 +60,7 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
         isRecurring = payload.recurrence != nil
         recurrenceFrequency = payload.recurrence?.frequency ?? .monthly
         recurrenceEndAt = payload.recurrence?.endAt
+        recurrenceTimeZone = payload.recurrence?.timeZone
         conversion = payload.conversion
     }
 
@@ -63,7 +73,8 @@ struct QuickEntryDraft: Codable, Equatable, Identifiable, EditableTransaction {
         return TransactionRecurrence(
             id: id,
             frequency: recurrenceFrequency,
-            endAt: recurrenceEndAt
+            endAt: recurrenceEndAt,
+            timeZone: recurrenceTimeZone
         )
     }
 }

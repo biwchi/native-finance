@@ -29,6 +29,7 @@ export const transactionSelection = {
   recurrence: {
     id: recurringSchedules.id,
     frequency: recurringSchedules.frequency,
+    timeZone: recurringSchedules.timeZone,
     endAt: recurringSchedules.endAt,
   },
 };
@@ -39,6 +40,7 @@ type TransactionSelectionRow = typeof transactions.$inferSelect & {
   recurrence: {
     id: string;
     frequency: RecurrenceFrequency;
+    timeZone?: string | null;
     endAt: Date | null;
   } | null;
 };

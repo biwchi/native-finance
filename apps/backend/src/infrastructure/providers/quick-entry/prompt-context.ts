@@ -4,7 +4,7 @@ import type { QuickEntryInterpreterInput } from "../../../application/quick-entr
 export function promptContext(input: QuickEntryInterpreterInput) {
   const byId = new Map(input.categories.map((category) => [category.id.toLowerCase(), category]));
   return {
-    policy_version: "transactions-v4",
+    policy_version: "transactions-v5",
     input_mode: input.photo || input.document ? "scan" : "quick_entry",
     user_request: input.text,
     reference_instant: input.referenceNow,
@@ -13,6 +13,8 @@ export function promptContext(input: QuickEntryInterpreterInput) {
     locale: input.locale,
     selected_account_id: input.defaultAccountId,
     accounts: input.accounts.map(({ id, name, currency }) => ({ id, name, currency })),
+    debt_recipients: (input.debts ?? []).map(({ id, name }) => ({ id, name })),
+    transaction_limit: input.document ? 750 : 100,
     categories: input.categories.filter((category) => category.kind !== "debt").map((category) => {
       const path: string[] = [];
       const visited = new Set<string>();

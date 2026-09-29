@@ -79,6 +79,12 @@ export function normalizeChange(change: SyncChange): SyncChange {
       data = { id, ...times, accountId: identifier(d.accountId), kind: choice(d.kind, ["expense", "income", "debt"]), amount: transactionMoney(d.amount), currency: currency(d.currency), categoryId: optionalId(d.categoryId), counterparty: text(d.counterparty, 2000, true), note: text(d.note, 2000, true) };
       if (change.entity === "transaction") Object.assign(data, { debtId: optionalId(d.debtId), recurringScheduleId: optionalId(d.recurringScheduleId), occurredAt: date(d.occurredAt), scheduledFor: date(d.scheduledFor, true) });
       else Object.assign(data, { frequency: choice(d.frequency, ["daily", "weekly", "monthly", "yearly"]), startAt: date(d.startAt), lastOccurrenceAt: date(d.lastOccurrenceAt), nextScheduledFor: date(d.nextScheduledFor, true), nextOccurrenceAt: date(d.nextOccurrenceAt, true), endAt: date(d.endAt, true) });
+      if (change.entity === "schedule" && d.timeZone != null) {
+        const timeZone = text(d.timeZone, 100);
+        if (!timeZone) throw new Error("Invalid schedule timezone");
+        try { new Intl.DateTimeFormat("en", { timeZone }); } catch { throw new Error("Invalid schedule timezone"); }
+        data.timeZone = timeZone;
+      }
       break;
     }
     case "exclusion": data = { id, scheduleId: identifier(d.scheduleId), scheduledFor: date(d.scheduledFor) }; break;

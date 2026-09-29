@@ -7,4 +7,5 @@ struct TransferRequest: Encodable {
     let note: String?
     let occurredAt: Date
     var counterparty: String? = nil
+    var destinationAmount: String? = nil
 }

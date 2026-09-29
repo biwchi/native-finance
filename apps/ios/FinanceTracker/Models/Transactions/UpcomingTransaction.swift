@@ -14,9 +14,10 @@ struct UpcomingTransaction: Codable, Identifiable, Hashable, EditableTransaction
     /// Original schedule anchor, used to preserve month-end and leap-day repeats.
     var startAt: Date? = nil
     var counterparty: String? = nil
+    var timeZone: String? = nil
 
     var recurrence: TransactionRecurrence? {
-        TransactionRecurrence(id: id, frequency: frequency, endAt: endAt)
+        TransactionRecurrence(id: id, frequency: frequency, endAt: endAt, timeZone: timeZone)
     }
 
     var title: String {

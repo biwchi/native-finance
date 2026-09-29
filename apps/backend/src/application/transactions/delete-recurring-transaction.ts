@@ -43,6 +43,7 @@ export async function deleteRecurringTransaction(
           input.occurredAt,
           schedule.startAt,
           schedule.frequency,
+          schedule.timeZone,
         );
         await store.updateSchedule(schedule.id, {
           lastOccurrenceAt: input.occurredAt, nextScheduledFor: null,

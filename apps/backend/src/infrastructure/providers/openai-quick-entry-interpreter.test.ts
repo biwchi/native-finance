@@ -27,7 +27,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
       for (const selectedAmountIndex of [0, null]) {
         const extraction: ExtractedTransaction = {
           location: "entry 1", documentType: "text", status: "completed", kind: "expense",
-          account: choice.accountChoice, destinationAccountId: null, destinationAccountSource: null,
+          account: choice.accountChoice, destinationAccountId: null, destinationAccountSource: null, destinationAmountIndex: null, debtId: null,
           amounts: [{ value: "300", currency: null, role: "transaction" }], selectedAmountIndex,
           amountChoiceSource: "300", category: { id: null, basis: "unresolved", source: null },
           counterparty: null, note: "Эклер на работе", date: null, schedule: null, unresolved: [],
@@ -36,7 +36,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
           const body = JSON.parse(String(init?.body));
           expect(JSON.parse(body.input)).toMatchObject({ user_request: choice.request, selected_account_id: account.id,
             accounts: [{ id: account.id, name: account.name, currency: "KZT" }, { id: other.id, name: other.name, currency: "USD" }] });
-          return Response.json({ output_text: JSON.stringify({ transactions: [extraction] }) });
+          return Response.json({ output_text: JSON.stringify({ transactions: [extraction], hasMoreTransactions: false, unsupportedRequests: [] }) });
         }) as typeof fetch });
         const unexpected = () => { throw new Error("This local fixture must not access external dependencies"); };
         const result = await interpretQuickEntry({ text: choice.request, defaultAccountId: account.id,
@@ -75,12 +75,12 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
         expect(body.instructions).not.toContain("Set note to null unless the user explicitly supplied a note");
         expect(body.instructions).not.toContain("When the user gives no explicit note instruction, return note null");
         if ("photo" in attachment || "document" in attachment) {
-          expect(JSON.parse(body.input[0].content[0].text)).toMatchObject({ user_request: "", policy_version: "transactions-v4" });
+          expect(JSON.parse(body.input[0].content[0].text)).toMatchObject({ user_request: "", policy_version: "transactions-v5" });
           expect(body.instructions).not.toContain("For note, use the user's description in user_request");
         } else {
           expect(body.instructions).toContain("For note, use the user's description in user_request");
         }
-        return Response.json({ output_text: JSON.stringify({ transactions: [], ...("document" in attachment ? { hasMoreTransactions: false } : {}) }) });
+        return Response.json({ output_text: JSON.stringify({ transactions: [], hasMoreTransactions: false, unsupportedRequests: [] }) });
       }) as typeof fetch });
       await interpreter.interpret({ ...input, ...attachment,
         text: "photo" in attachment || "document" in attachment ? "" : "Эклер на работе 300" });
@@ -95,7 +95,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
       const interpreter = createOpenAIQuickEntryInterpreter({ apiKey: "test-key", fetcher: (async (_url, init) => {
         calls++;
         body = JSON.parse(String(init?.body));
-        return Response.json({ output_text: JSON.stringify({ transactions: [], hasMoreTransactions: false }) });
+        return Response.json({ output_text: JSON.stringify({ transactions: [], hasMoreTransactions: false, unsupportedRequests: [] }) });
       }) as typeof fetch });
       await interpreter.interpret({ ...input, document, text: "Use Daily; do not repeat these payments" });
       expect(calls).toBe(1);
@@ -129,7 +129,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
     const interpreter = createOpenAIQuickEntryInterpreter({ apiKey: "test-key", fetcher: (async (_url, init) => {
       calls++;
       body = JSON.parse(String(init?.body));
-      return Response.json({ output_text: JSON.stringify({ transactions: [] }) });
+      return Response.json({ output_text: JSON.stringify({ transactions: [], hasMoreTransactions: false, unsupportedRequests: [] }) });
     }) as typeof fetch });
     const photo = "data:image/jpeg;base64,/9j/2Q==";
     await interpreter.interpret({ ...input, photo });
@@ -151,7 +151,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
     let body: any;
     const interpreter = createOpenAIQuickEntryInterpreter({ apiKey: "test-key", fetcher: (async (_url, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ output: [{ content: [{ type: "output_text", text: JSON.stringify({ transactions: [] }) }] }] });
+      return Response.json({ output: [{ content: [{ type: "output_text", text: JSON.stringify({ transactions: [], hasMoreTransactions: false, unsupportedRequests: [] }) }] }] });
     }) as typeof fetch });
     const result = await interpreter.interpret({ ...input, text: "coffee 4" });
     const context = JSON.parse(body.input);
@@ -169,7 +169,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
       let schema: any;
       const interpreter = createOpenAIQuickEntryInterpreter({ apiKey: "test-key", fetcher: (async (_url, init) => {
         schema = JSON.parse(String(init?.body)).text.format.schema;
-        return Response.json({ output_text: JSON.stringify({ transactions: [], ...("document" in attachment ? { hasMoreTransactions: false } : {}) }) });
+        return Response.json({ output_text: JSON.stringify({ transactions: [], hasMoreTransactions: false, unsupportedRequests: [] }) });
       }) as typeof fetch });
       await interpreter.interpret({ ...input, ...attachment });
       const integerPaths: string[] = [];
@@ -188,6 +188,7 @@ describe("OpenAI quick entry request contract with a fake provider", () => {
       visit(schema, "root");
       expect(integerPaths.sort()).toEqual([
         "root.transactions.selectedAmountIndex",
+        "root.transactions.destinationAmountIndex",
         ...["date", "schedule.endDate"].flatMap((field) => ["calendarDate.year", "calendarDate.month", "calendarDate.day", "relative.value", "weekday.day"].map((value) => `root.transactions.${field}.${value}`)),
         "root.transactions.schedule.occurrenceCount",
         "root.transactions.schedule.duration.value",

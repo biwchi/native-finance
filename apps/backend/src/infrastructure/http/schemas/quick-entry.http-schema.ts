@@ -22,6 +22,7 @@ export const quickEntryBodySchema = t.Object({
   timeZone: t.String({ minLength: 1, maxLength: 100 }),
   // This is parser context only. Finance writes still pass through validated mutations.
   context: t.Optional(t.Object({
+    debts: t.Optional(t.Array(t.Object({ id: t.String({ format: "uuid" }), name: t.String({ minLength: 1, maxLength: 200 }) }), { maxItems: 5000 })),
     accounts: t.Array(t.Object({ id: t.String({ format: "uuid" }), ...accountBodySchema.properties }), { maxItems: 1000 }),
     categories: t.Array(t.Object({
       id: t.String({ format: "uuid" }), name: t.String({ minLength: 1, maxLength: 80 }), kind: transactionKindSchema,

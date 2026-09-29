@@ -5,7 +5,8 @@ import { extractionSchema } from "./quick-entry/extraction-schema.ts";
 import { promptContext } from "./quick-entry/prompt-context.ts";
 import { documentScanPrompt, scanPrompt } from "./quick-entry/scan-prompt.ts";
 import { textPrompt } from "./quick-entry/text-prompt.ts";
-import { quickEntryDocumentDraftLimit } from "../../application/quick-entry/quick-entry-interpreter.ts";
+import { quickEntryDraftLimitFor } from "../../application/quick-entry/quick-entry-interpreter.ts";
+import { QuickEntryInterpretationError } from "../../application/quick-entry/quick-entry-extraction.ts";
 
 export function createOpenAIQuickEntryInterpreter(options: {
   apiKey: string | undefined;
@@ -50,8 +51,18 @@ export function createOpenAIQuickEntryInterpreter(options: {
       if (!output) throw new Error("No transaction data was returned. Try another description, photo, or document.");
       const parsed: unknown = JSON.parse(output);
       if (!validator.Check(parsed)) throw new Error("The transaction response was incomplete or invalid. Please try again.");
-      if ("hasMoreTransactions" in parsed && parsed.hasMoreTransactions) {
-        throw new Error(`Choose a smaller document with up to ${quickEntryDocumentDraftLimit} transactions. The document could not be read in full.`);
+      if (parsed.hasMoreTransactions) {
+        throw new QuickEntryInterpretationError("too_many_drafts", `Use at most ${quickEntryDraftLimitFor(input)} transactions at a time. Nothing was imported; split the entry and try again.`);
+      }
+      if (parsed.unsupportedRequests.length) {
+        const descriptions = {
+          custom_schedule: "custom or unspecified payment intervals", recurring_transfer: "recurring transfers",
+          recurring_debt: "recurring loans", borrowing: "money you borrow", debt_repayment: "repayments of existing loans",
+          modify_existing: "changing existing records", create_financial_entity: "creating accounts, categories, budgets or goals",
+          variable_payment_plan: "payment plans with unequal amounts", other: "the requested financial operation",
+        };
+        const reasons = [...new Set(parsed.unsupportedRequests.map((item) => descriptions[item.reason]))];
+        throw new QuickEntryInterpretationError("unsupported_quick_entry", `Quick entry does not support ${reasons.join(", ")}. Nothing was added. Remove that request and try again, or use manual entry.`);
       }
       return resolveQuickEntryExtraction(parsed, input);
     },

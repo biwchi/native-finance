@@ -39,6 +39,7 @@ export type TransactionResponse = Omit<
   recurrence: {
     id: string;
     frequency: RecurrenceFrequency;
+    timeZone?: string | null;
     endAt: Date | null;
   } | null;
 };
@@ -56,6 +57,7 @@ export type TransactionInput = {
   note?: string | null;
   recurrence?: {
     frequency: RecurrenceFrequency;
+    timeZone?: string | null;
     endAt?: string | null;
   } | null;
   occurredAt: string;
@@ -65,6 +67,7 @@ export type TransactionDraft = {
   values: TransactionValues;
   recurrence: {
     frequency: RecurrenceFrequency;
+    timeZone?: string | null;
     endAt: Date | null;
   } | null;
 };
@@ -135,6 +138,7 @@ export function createTransaction(
 }
 
 export type TransferInput = {
+  destinationAmount?: string;
   fromAccountId: string;
   toAccountId: string;
   amount: string;
@@ -147,6 +151,7 @@ export type TransferValidationError =
   | "same_account"
   | "account_not_found"
   | "currency_mismatch"
+  | "invalid_destination_amount"
   | "invalid_occurred_at";
 
 export function createTransfer(
@@ -165,11 +170,17 @@ export function createTransfer(
   if (!context.sourceAccount || !context.destinationAccount) {
     return error("account_not_found", "Transfer account not found");
   }
-  if (context.sourceAccount.currency !== context.destinationAccount.currency) {
+  if (context.sourceAccount.currency !== context.destinationAccount.currency && !input.destinationAmount) {
     return error(
       "currency_mismatch",
-      "Transfer accounts must use the same currency",
+      "Enter the amount received in the destination currency",
     );
+  }
+  if (input.destinationAmount !== undefined && (!/^(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/.test(input.destinationAmount) || Number(input.destinationAmount) <= 0)) {
+    return error("invalid_destination_amount", "Enter a positive received amount with at most four decimal places");
+  }
+  if (input.destinationAmount && context.sourceAccount.currency === context.destinationAccount.currency && decimalIdentity(input.destinationAmount) !== decimalIdentity(input.amount)) {
+    return error("invalid_destination_amount", "Same-currency transfers must have equal amounts");
   }
 
   const occurredAt = new Date(input.occurredAt);
@@ -196,6 +207,8 @@ export function createTransfer(
     },
     destination: {
       ...shared,
+      amount: input.destinationAmount ?? input.amount,
+      currency: context.destinationAccount.currency,
       accountId: context.destinationAccount.id,
       kind: "income",
     },
@@ -214,7 +227,11 @@ function createRecurrence(
       "Recurrence end date must be on or after the transaction date",
     );
   }
-  return ok({ frequency: recurrence.frequency, endAt });
+  if (recurrence.timeZone) {
+    try { new Intl.DateTimeFormat("en", { timeZone: recurrence.timeZone }); }
+    catch { return error("invalid_recurrence_end", "Choose a valid schedule timezone"); }
+  }
+  return ok({ frequency: recurrence.frequency, endAt, ...(recurrence.timeZone ? { timeZone: recurrence.timeZone } : {}) });
 }
 
 function cleanOptionalText(value: string | null | undefined): string | null {
@@ -223,6 +240,11 @@ function cleanOptionalText(value: string | null | undefined): string | null {
 
 function amountMagnitude(value: string): string {
   return value.startsWith("-") ? value.slice(1) : value;
+}
+
+function decimalIdentity(value: string): string {
+  const [whole, fraction = ""] = value.split(".");
+  return `${whole}.${fraction.replace(/0+$/, "")}`;
 }
 
 export type UpcomingTransaction = {
@@ -236,6 +258,7 @@ export type UpcomingTransaction = {
   note: string | null;
   frequency: RecurrenceFrequency;
   startAt: Date;
+  timeZone?: string | null;
   endAt: Date | null;
   occurredAt: Date;
 };

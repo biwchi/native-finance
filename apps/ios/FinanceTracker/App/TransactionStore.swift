@@ -79,11 +79,11 @@ final class TransactionStore: ObservableObject {
     func interpretQuickEntry(text: String, defaultAccountID: UUID, locale: String = Locale.current.identifier, timeZone: String = TimeZone.current.identifier, photo: String? = nil, document: ReceiptDocument? = nil, persistReview: Bool = true) async throws -> QuickEntryReviewPresentation {
         let epoch = try repository.value(Int.self, key: "localEpoch") ?? 0
         let response = try await apiClient.interpretQuickEntry(QuickEntryRequest(text: text, defaultAccountId: defaultAccountID, locale: locale, timeZone: timeZone,
-            context: QuickEntryLocalContext(accounts: repository.snapshot.sortedAccounts, categories: categories), photo: photo, document: document))
+            context: QuickEntryLocalContext(accounts: repository.snapshot.sortedAccounts, categories: categories, debts: debts), photo: photo, document: document))
         try Task.checkCancellation()
         guard (try repository.value(Int.self, key: "localEpoch") ?? 0) == epoch else { throw CancellationError() }
         let source: QuickEntryReviewPresentation.Source? = document != nil ? .document : photo != nil ? .photo : nil
-        let presentation = QuickEntryReviewPresentation(prompt: document?.filename ?? (photo == nil ? text : "Scanned photo"), drafts: response.transactions.map { payload in QuickEntryDraft(payload: payload, category: categories.first { $0.id == payload.categoryId }) }, source: source)
+        let presentation = QuickEntryReviewPresentation(prompt: document?.filename ?? (photo == nil ? text : "Scanned photo"), drafts: response.transactions.map { payload in QuickEntryDraft(payload: payload, category: categories.first { $0.id == payload.categoryId }, debt: debts.first { $0.id == payload.debtId }) }, source: source)
         if persistReview { try repository.saveValue(presentation, key: "quickEntryReview") }
         // A scan or edits made while the request was running must keep their text.
         if source == nil, quickEntryText.trimmingCharacters(in: .whitespacesAndNewlines) == text.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -166,10 +166,15 @@ final class TransactionStore: ObservableObject {
                 guard repository.snapshot.sortedAccounts.first(where: { $0.id == draft.accountId })?.currency == draft.currency else {
                     throw LocalDataError(message: "Review the transfer amount after changing the account currency.")
                 }
-                _ = try editor.transfer(TransferRequest(fromAccountId: draft.accountId, toAccountId: destinationID, amount: draft.amount, note: draft.note, occurredAt: draft.occurredAt, counterparty: draft.counterparty))
+                guard let destination = repository.snapshot.sortedAccounts.first(where: { $0.id == destinationID }),
+                      draft.destinationCurrency == nil || draft.destinationCurrency == destination.currency else {
+                    throw LocalDataError(message: "Review the received amount after changing the destination currency.")
+                }
+                guard !draft.isRecurring else { throw LocalDataError(message: "Recurring transfers are not supported.") }
+                _ = try editor.transfer(TransferRequest(fromAccountId: draft.accountId, toAccountId: destinationID, amount: draft.amount, note: draft.note, occurredAt: draft.occurredAt, counterparty: draft.counterparty, destinationAmount: draft.destinationAmount))
             } else {
                 _ = try editor.saveTransaction(request: TransactionRequest(accountId: draft.accountId, kind: draft.kind, amount: draft.amount, categoryId: draft.category?.id, note: draft.note, occurredAt: draft.occurredAt,
-                    debtId: draft.debtId, recurrence: draft.isRecurring ? RecurrenceRequest(frequency: draft.recurrenceFrequency, endAt: draft.recurrenceEndAt) : nil, currency: draft.currency, counterparty: draft.counterparty))
+                    debtId: draft.debtId, recurrence: draft.isRecurring ? RecurrenceRequest(frequency: draft.recurrenceFrequency, endAt: draft.recurrenceEndAt, timeZone: draft.recurrenceTimeZone) : nil, currency: draft.currency, counterparty: draft.counterparty))
             }
         }
     }

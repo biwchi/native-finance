@@ -83,6 +83,6 @@ Navigation sheets need no spacing modifier. The default is part of `AppSheet`, s
 
 Do not add per-screen toolbar padding or restore `appSheetToolbarSpacing()`. The architecture tests require shared presentation styling and flag new content-layout exceptions for review. The simulator suite measures toolbar placement and compares rendered pixels above and below the inset boundary in light and dark mode.
 
-Choose an explicit `background:` token when required. The date filter uses `AppColor.elevatedSurface`; the receipt camera uses `AppColor.cameraBackground` and retains its dark appearance. Content backgrounds and scroll backgrounds still belong to their views. Do not put `presentationCornerRadius` or `presentationBackground` in feature views or list adapters. `DesignSystemArchitectureTests` checks that the shared presenter owns them.
+Choose an explicit `background:` token when required. The date filter uses `AppColor.sheetBackground` in dark mode and `AppColor.elevatedSurface` in light mode; the receipt camera uses `AppColor.cameraBackground` and retains its dark appearance. Content backgrounds and scroll backgrounds still belong to their views. Do not put `presentationCornerRadius` or `presentationBackground` in feature views or list adapters. `DesignSystemArchitectureTests` checks that the shared presenter owns them.
 
 See [the sheet audit and simulator verification](../../../../docs/app-sheets.md) for presentation coverage and native OS differences.

@@ -175,6 +175,10 @@ struct QuickEntryReviewView: View {
     }
 
     private func originalAmountText(for draft: QuickEntryDraft) -> String? {
+        if draft.mode == .transfer, let amount = draft.destinationAmount.flatMap({ Decimal(string: $0) }),
+           let currency = draft.destinationCurrency {
+            return "\(draft.destinationAmountEstimated == true ? "Estimated received" : "Received") \(MoneyFormatter.format(amount, currency: currency))"
+        }
         guard let conversion = draft.conversion,
               let amount = Decimal(
                 string: conversion.originalAmount,
@@ -190,6 +194,9 @@ struct QuickEntryReviewView: View {
     }
 
     private func title(for draft: QuickEntryDraft) -> String? {
+        if draft.mode == .debt, draft.debt == nil {
+            return draft.counterparty.map { "Lent to \($0) · choose recipient" } ?? "Choose loan recipient"
+        }
         guard draft.mode == .transfer else { return nil }
         let destination = draft.destinationAccountId.flatMap(account)
         return destination.map { "Transfer to \($0.name)" } ?? "Transfer"
@@ -239,12 +246,18 @@ struct QuickEntryReviewView: View {
             return !draft.isRecurring && draft.category == nil && transactionStore.debts.contains { $0.id == draft.debtId }
         }
         if draft.mode == .transfer {
+            guard !draft.isRecurring else { return false }
             guard amount > 0 else { return false }
             guard let destinationID = draft.destinationAccountId,
                   destinationID != draft.accountId,
                   let source = account(draft.accountId),
                   let destination = account(destinationID) else { return false }
-            return source.currency == destination.currency && source.currency == draft.currency
+            guard source.currency == draft.currency,
+                  draft.destinationCurrency == nil || draft.destinationCurrency == destination.currency else { return false }
+            if source.currency == destination.currency {
+                return draft.destinationAmount == nil || draft.destinationAmount.flatMap { Decimal(string: $0) } == amount
+            }
+            return draft.destinationAmount.flatMap { Decimal(string: $0) }.map { $0 > 0 } == true
         }
         return !draft.isRecurring || draft.recurrenceEndAt == nil || draft.recurrenceEndAt! >= draft.occurredAt
     }

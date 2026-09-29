@@ -40,6 +40,7 @@ export async function listUpcomingTransactions(
 
       note: schedule.note,
       frequency: schedule.frequency,
+      timeZone: schedule.timeZone,
       startAt: schedule.startAt,
       endAt: schedule.endAt,
       occurredAt,

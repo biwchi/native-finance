@@ -3,6 +3,36 @@ import XCTest
 
 @MainActor
 final class LocalRecurrenceTests: XCTestCase {
+    func testLocalCalendarMatchesDraftDatesAndSurvivesReopening() throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let start = LocalTestData.date("2100-02-28T19:30:00Z")
+        let end = LocalTestData.date("2100-04-30T19:30:00Z")
+        _ = try repository.edit(now: start) {
+            try $0.saveTransaction(request: LocalTestData.transaction(account.id, occurredAt: start,
+                recurrence: RecurrenceRequest(frequency: .monthly, endAt: end, timeZone: "Asia/Almaty")))
+        }
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        try reopened.edit(now: end) { try $0.materialize() }
+        XCTAssertEqual(reopened.snapshot.transactions.values.map(\.occurredAt).sorted().map(LocalJSON.timestamp), [
+            "2100-02-28T19:30:00.000Z", "2100-03-31T19:30:00.000Z", "2100-04-30T19:30:00.000Z",
+        ])
+        XCTAssertEqual(reopened.snapshot.schedules.values.first?.timeZone, "Asia/Almaty")
+        XCTAssertNil(reopened.snapshot.schedules.values.first?.nextOccurrenceAt)
+    }
+
+    func testLocalDailyRecurrenceHandlesDSTGapAndOverlapLikeBackend() throws {
+        let start = LocalTestData.date("2026-03-07T07:30:00Z")
+        var bill = UpcomingTransaction(id: UUID(), accountId: UUID(), kind: .expense, amount: "10", currency: "USD",
+            category: nil, note: nil, frequency: .daily, occurredAt: start, startAt: start, timeZone: "America/New_York")
+        let second = try XCTUnwrap(RecurrenceSchedule.nextOccurrence(after: start, bill: bill))
+        XCTAssertEqual(second, LocalTestData.date("2026-03-08T07:30:00Z"))
+        XCTAssertEqual(RecurrenceSchedule.nextOccurrence(after: second, bill: bill), LocalTestData.date("2026-03-09T06:30:00Z"))
+        let fall = LocalTestData.date("2026-10-31T05:30:00Z")
+        bill.startAt = fall
+        XCTAssertEqual(RecurrenceSchedule.nextOccurrence(after: fall, bill: bill), LocalTestData.date("2026-11-01T05:30:00Z"))
+    }
+
     func testAccountCurrencyChangePreservesRecordedAndProjectedRecurringEdits() throws {
         for hasRecordedOccurrence in [false, true] {
             let repository = try LocalTestData.repository()

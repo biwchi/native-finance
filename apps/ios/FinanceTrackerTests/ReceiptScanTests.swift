@@ -6,6 +6,107 @@ import XCTest
 
 @MainActor
 final class ReceiptScanTests: XCTestCase {
+    func testLendingCrossCurrencyAndZonedDraftsSurviveReviewAndOfflineSave() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let destination = try LocalTestData.account(repository, name: "Savings", currency: "KZT")
+        let debt = try repository.edit { try $0.saveDebt(name: "Alex", icon: "user", color: .blue) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScanProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel(); ScanProtocol.responseData = Data() }
+        let first = "2100-02-28T19:30:00Z"
+        ScanProtocol.responseData = try JSONSerialization.data(withJSONObject: [
+            "referenceNow": first,
+            "transactions": [
+                ["id": UUID().uuidString, "kind": "debt", "accountId": account.id.uuidString, "debtId": debt.id.uuidString,
+                 "amount": "500", "currency": "USD", "counterparty": "Alex", "occurredAt": first],
+                ["id": UUID().uuidString, "kind": "transfer", "accountId": account.id.uuidString, "destinationAccountId": destination.id.uuidString,
+                 "amount": "100", "currency": "USD", "destinationAmount": "49500", "destinationCurrency": "KZT", "occurredAt": first],
+                ["id": UUID().uuidString, "kind": "expense", "accountId": account.id.uuidString, "amount": "120", "currency": "USD", "occurredAt": first,
+                 "recurrence": ["frequency": "monthly", "endAt": "2100-04-30T19:30:00Z", "timeZone": "Asia/Almaty"]],
+            ],
+        ])
+        let store = TransactionStore(apiClient: APIClient(baseURL: URL(string: "https://scan.test")!, session: session), repository: repository)
+        let review = try await store.interpretQuickEntry(text: "Lent Alex 500; transferred 100 to Savings; gym 120 monthly", defaultAccountID: account.id)
+        XCTAssertTrue(store.allTransactions.isEmpty)
+        XCTAssertEqual(review.drafts[0].debt, debt)
+        XCTAssertEqual(review.drafts[0].mode, .debt)
+        let reopened = try LocalFinanceRepository(path: repository.requireDatabase().pool.path)
+        let offlineStore = TransactionStore(repository: reopened)
+        let recovered = try XCTUnwrap(offlineStore.savedQuickEntryReview())
+        XCTAssertEqual(recovered.drafts[1].destinationAmount, "49500")
+        XCTAssertEqual(recovered.drafts[1].destinationCurrency, "KZT")
+        XCTAssertEqual(recovered.drafts[2].recurrenceTimeZone, "Asia/Almaty")
+        XCTAssertEqual(AddTransactionViewModel(transaction: recovered.drafts[2]).recurrenceTimeZone, "Asia/Almaty")
+        _ = try await offlineStore.commitQuickEntryDrafts(recovered.drafts)
+        XCTAssertEqual(offlineStore.allTransactions.count, 4)
+        XCTAssertEqual(offlineStore.debtTransactions.first?.debt?.id, debt.id)
+        XCTAssertEqual(offlineStore.allTransactions.first { $0.accountId == destination.id }?.amount, "49500")
+        XCTAssertEqual(offlineStore.allTransactions.first { $0.accountId == destination.id }?.currency, "KZT")
+        let schedule = try XCTUnwrap(reopened.snapshot.schedules.values.first)
+        XCTAssertEqual(schedule.timeZone, "Asia/Almaty")
+        XCTAssertEqual(schedule.nextOccurrenceAt, LocalTestData.date("2100-03-31T19:30:00Z"))
+        XCTAssertNil(offlineStore.savedQuickEntryReview())
+    }
+
+    func testCrossCurrencyDraftWithoutReceivedAmountRollsBackEntireBatch() async throws {
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository)
+        let destination = try LocalTestData.account(repository, name: "Savings", currency: "KZT")
+        let payload = QuickEntryDraftPayload(id: UUID(), kind: .transfer, accountId: account.id, destinationAccountId: destination.id,
+            amount: "100", currency: "USD", categoryId: nil, note: nil, occurredAt: LocalTestData.now, recurrence: nil, conversion: nil)
+        let store = TransactionStore(repository: repository)
+        let draft = QuickEntryDraft(payload: payload, category: nil)
+        try store.saveQuickEntryReview(QuickEntryReviewPresentation(prompt: "Transfer", drafts: [draft]))
+        do { _ = try await store.commitQuickEntryDrafts([draft]); XCTFail("Both transfer amounts are required") } catch {}
+        XCTAssertTrue(store.allTransactions.isEmpty)
+        XCTAssertNotNil(store.savedQuickEntryReview())
+        var valid = draft
+        valid.destinationAmount = "49500"
+        valid.destinationCurrency = "KZT"
+        valid.isRecurring = true
+        do { _ = try await store.commitQuickEntryDrafts([valid]); XCTFail("Recurring transfers must remain unsupported") } catch {}
+        XCTAssertTrue(store.allTransactions.isEmpty)
+    }
+
+    func testLendingAndCrossCurrencyReviewAndEditorRenderInBothAppearances() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let repository = try LocalTestData.repository()
+        let account = try LocalTestData.account(repository, name: "Daily")
+        let destination = try LocalTestData.account(repository, name: "Savings", currency: "KZT")
+        let debt = try repository.edit { try $0.saveDebt(name: "Alex", icon: "user", color: .blue) }
+        let transfer = QuickEntryDraft(payload: QuickEntryDraftPayload(id: UUID(), kind: .transfer, accountId: account.id,
+            destinationAccountId: destination.id, amount: "100", currency: "USD", categoryId: nil, note: nil,
+            occurredAt: LocalTestData.now, recurrence: nil, conversion: nil, destinationAmount: "49500", destinationCurrency: "KZT"), category: nil)
+        let loan = QuickEntryDraft(payload: QuickEntryDraftPayload(id: UUID(), kind: .debt, accountId: account.id,
+            destinationAccountId: nil, amount: "500", currency: "USD", categoryId: nil, note: nil,
+            occurredAt: LocalTestData.now, recurrence: nil, conversion: nil, counterparty: "Alex", debtId: debt.id), category: nil, debt: debt)
+        let store = TransactionStore(repository: repository)
+        let accounts = AccountStore(repository: repository)
+        for scheme in [ColorScheme.light, .dark] {
+            for (name, view) in [
+                ("review", AnyView(QuickEntryReviewView(presentation: QuickEntryReviewPresentation(prompt: "Lent Alex 500; transfer 100 USD, received 49500 KZT", drafts: [loan, transfer])))),
+                ("transfer-editor", AnyView(AddTransactionView(draft: transfer, onSaveDraft: { _ in }))),
+            ] {
+                let controller = UIHostingController(rootView: view.environmentObject(store).environmentObject(accounts).preferredColorScheme(scheme))
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+                try await Task.sleep(for: .milliseconds(500))
+                let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                    XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "Quick-entry-\(name)-\(scheme)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
     func testCanonicalQuickEntryPayloadPreservesCounterpartyAndNoteThroughOfflineReviewAndSave() async throws {
         let repository = try LocalTestData.repository()
         let account = try LocalTestData.account(repository, currency: "KZT")

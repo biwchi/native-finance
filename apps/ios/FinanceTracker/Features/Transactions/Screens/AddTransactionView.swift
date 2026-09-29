@@ -24,6 +24,7 @@ struct AddTransactionView: View {
     @State private var mode = QuickTransactionMode.expense
     @State private var amountExpression = AmountExpression()
     @State private var destinationAccountID: UUID?
+    @State private var receivedAmountText = ""
     @State private var expandedCategoryID: UUID?
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -71,6 +72,7 @@ struct AddTransactionView: View {
             initialValue: AmountExpression(rawValue: original?.amount ?? "")
         )
         _destinationAccountID = State(initialValue: draft?.destinationAccountId)
+        _receivedAmountText = State(initialValue: draft?.destinationAmount ?? "")
     }
 
     var body: some View {
@@ -124,6 +126,9 @@ struct AddTransactionView: View {
         .onChange(of: mode) { _, newMode in
             handleModeChange(newMode)
         }
+        .onChange(of: viewModel.amountText) { _, _ in receivedAmountText = "" }
+        .onChange(of: viewModel.accountID) { _, _ in receivedAmountText = "" }
+        .onChange(of: destinationAccountID) { _, _ in receivedAmountText = "" }
         .task {
             await accountStore.loadAccounts()
             viewModel.configureAccount(
@@ -201,6 +206,16 @@ struct AddTransactionView: View {
                 }
             }
             classificationSelector
+            if mode == .transfer, let destinationAccount, destinationAccount.currency != selectedAccount?.currency {
+                HStack {
+                    Text("Received (\(destinationAccount.currency))")
+                    TextField(estimatedReceivedAmount ?? "Amount", text: $receivedAmountText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("transferReceivedAmount")
+                }
+                .font(.subheadline)
+            }
             TransactionKeypad(onClear: clearAmount) { key in
                 amountExpression.enter(key)
                 viewModel.setAmountText(amountExpression.canonicalResult ?? "")
@@ -266,7 +281,7 @@ struct AddTransactionView: View {
     private var availableModes: [QuickTransactionMode] {
         if isCSVImport { return [.income, .expense, .debt] }
         if quickEntryDraft != nil {
-            return accountStore.accounts.count > 1 ? [.income, .expense, .transfer] : [.income, .expense]
+            return accountStore.accounts.count > 1 ? QuickTransactionMode.allCases : [.income, .expense, .debt]
         }
         if upcomingTransaction != nil || transaction?.recurrence != nil { return [.income, .expense] }
         if isEditing { return [.income, .expense, .debt] }
@@ -341,7 +356,7 @@ struct AddTransactionView: View {
         let stored = Set(transactionStore.allTransactions.lazy
             .filter { $0.accountId == viewModel.accountID }
             .map(\.currency))
-        guard let draft = quickEntryDraft else { return stored }
+        guard let draft = quickEntryDraft else { return stored.union(accountStore.accounts.map(\.currency)) }
         return stored.union(accountStore.accounts.map(\.currency)).union([draft.currency])
     }
 
@@ -355,6 +370,22 @@ struct AddTransactionView: View {
 
     private var destinationAccounts: [Account] {
         accountStore.accounts.filter { $0.id != viewModel.accountID }
+    }
+
+    private var estimatedReceivedAmount: String? {
+        guard let source = selectedAccount, let destination = destinationAccount,
+              let value = viewModel.canonicalAmount().flatMap({ Decimal(string: $0) }),
+              let converted = exchangeRateStore.snapshot?.convert(value, from: source.currency, to: destination.currency) else { return nil }
+        var convertedValue = converted
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &convertedValue, 4, .plain)
+        return rounded > 0 ? NSDecimalNumber(decimal: rounded).stringValue : nil
+    }
+
+    private var receivedAmount: String? {
+        if selectedAccount?.currency == destinationAccount?.currency { return viewModel.canonicalAmount() }
+        let text = receivedAmountText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? estimatedReceivedAmount : canonicalTransactionAmount(text, locale: Locale.current)
     }
 
     private var destinationAccountCarouselItems: [CenteredSelectionCarouselItem<UUID>] {
@@ -631,6 +662,7 @@ struct AddTransactionView: View {
     private func hasDraftChanges(from draft: QuickEntryDraft) -> Bool {
         mode != draft.mode ||
             (mode == .transfer && destinationAccountID != draft.destinationAccountId) ||
+            (mode == .transfer && receivedAmount != draft.destinationAmount) ||
             viewModel.hasChanges(from: draft)
     }
 
@@ -658,8 +690,8 @@ struct AddTransactionView: View {
                 errorMessage = "Choose a different destination account."
                 return
             }
-            guard selectedAccount?.currency == destinationAccount?.currency else {
-                errorMessage = "Transfers currently require accounts with the same currency."
+            guard receivedAmount != nil else {
+                errorMessage = "Enter the amount received in the destination currency."
                 return
             }
             guard viewModel.currency(for: selectedAccount) == selectedAccount?.currency else {
@@ -728,6 +760,11 @@ struct AddTransactionView: View {
         updated.mode = mode
         updated.accountId = accountID
         updated.destinationAccountId = mode == .transfer ? destinationAccountID : nil
+        updated.destinationAmount = mode == .transfer ? receivedAmount : nil
+        updated.destinationCurrency = mode == .transfer ? destinationAccount?.currency : nil
+        updated.destinationAmountEstimated = mode == .transfer && selectedAccount?.currency != destinationAccount?.currency
+            ? receivedAmountText.isEmpty || (draft.destinationAmountEstimated == true && receivedAmountText == draft.destinationAmount && !amountChanged && accountID == draft.accountId && destinationAccountID == draft.destinationAccountId)
+            : nil
         updated.debt = mode == .debt ? transactionStore.debts.first { $0.id == viewModel.debtID } : nil
         updated.amount = amountChanged ? amount : draft.amount
         updated.currency = viewModel.currency(for: selectedAccount) ?? draft.currency
@@ -744,6 +781,7 @@ struct AddTransactionView: View {
         updated.isRecurring = !isCSVImport && mode != .transfer && mode != .debt && viewModel.isRecurring
         updated.recurrenceFrequency = viewModel.recurrenceFrequency
         updated.recurrenceEndAt = updated.isRecurring ? viewModel.recurrenceEndAt : nil
+        updated.recurrenceTimeZone = updated.isRecurring ? viewModel.recurrenceTimeZone ?? (draft.isRecurring ? nil : TimeZone.current.identifier) : nil
 
         if mode != draft.mode || accountID != draft.accountId || amountChanged {
             updated.conversion = nil
@@ -759,7 +797,8 @@ struct AddTransactionView: View {
                 amount: amount,
                 note: optionalText(viewModel.note),
                 occurredAt: viewModel.occurredAt,
-                counterparty: viewModel.counterparty
+                counterparty: viewModel.counterparty,
+                destinationAmount: receivedAmount
             )
         )
     }
@@ -781,7 +820,8 @@ struct AddTransactionView: View {
             recurrence: viewModel.isRecurring
                 ? RecurrenceRequest(
                     frequency: viewModel.recurrenceFrequency,
-                    endAt: viewModel.recurrenceEndAt
+                    endAt: viewModel.recurrenceEndAt,
+                    timeZone: viewModel.recurrenceTimeZone
                 )
                 : nil,
             currency: transaction != nil || upcomingTransaction != nil ? viewModel.currency(for: selectedAccount) : nil,

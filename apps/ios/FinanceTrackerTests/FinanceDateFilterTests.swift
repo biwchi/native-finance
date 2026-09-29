@@ -247,7 +247,8 @@ final class FinanceDateFilterTests: XCTestCase {
                 let filter = FinanceDateFilter(preset: preset, anchor: now, customEnd: now)
                 let controller = UIHostingController(rootView:
                     AppColor.groupedBackground
-                        .appSheet(isPresented: .constant(true), layout: .content, background: AppColor.elevatedSurface) {
+                        .appSheet(isPresented: .constant(true), layout: .content,
+                                  background: FinanceDateFilterSheet.background(for: scheme)) {
                             FinanceDateFilterSheet(selection: filter, calendar: self.calendar) { _, _ in }
                                 .environment(\.calendar, self.calendar)
                                 .environment(\.locale, self.locale)

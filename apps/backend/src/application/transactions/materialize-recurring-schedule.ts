@@ -16,6 +16,8 @@ export async function materializeRecurringSchedule(
       schedule.frequency,
       schedule.endAt,
       through,
+      undefined,
+      schedule.timeZone,
     );
     await store.insertOccurrences(schedule, plan.dates);
     await store.updateSchedule(schedule.id, {

@@ -75,6 +75,7 @@ export async function createTransactionBatch(
       const schedule = await store.insertSchedule({
         ...scheduleTemplate(values),
         frequency: recurrence.frequency,
+        timeZone: recurrence.timeZone,
         startAt: values.occurredAt,
         lastOccurrenceAt: values.occurredAt,
         nextOccurrenceAt: boundedNextOccurrence(
@@ -82,6 +83,7 @@ export async function createTransactionBatch(
           values.occurredAt,
           recurrence.frequency,
           recurrence.endAt,
+          recurrence.timeZone,
         ),
         endAt: recurrence.endAt,
       });

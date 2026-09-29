@@ -48,6 +48,10 @@ Occurrence identity is UUID v5 using the schedule UUID as namespace and the orig
 
 Local and server generators use the same identity and persist exclusions for skips/deletions. Progress-only updates do not change the schedule template version. Recurring actions carry their original target and effective time, so server generation passing a due date does not invalidate an offline stop or date edit. Shared fixtures in `fixtures/local-first-recurrence.json` cover identity, month ends, leap days, and deletion behavior.
 
+Quick Entry schedules store an IANA `timeZone` with their original anchor. Draft counts/end dates, local projections, and server generation use that calendar, preserving local time and month-end anchors. Missing wall times move forward preserving minutes; overlapping times use the first occurrence. Schedules without a timezone retain the legacy UTC behavior. Migration `0018_recurrence_timezone.sql` adds the nullable server field; the generic SQLite record store needs no schema migration.
+
+Cross-currency transfers carry separate source and destination amounts. Quick Entry preserves both stated amounts or calculates the missing side using exchange rates. Review displays the received amount and identifies estimates; edits can replace it. Both sides save atomically. Transfers cannot repeat. Lending drafts carry an existing debt recipient ID; a new or ambiguous borrower requires choosing or creating a recipient in review before saving.
+
 ## Resets and review
 
 Delete all data commits an empty local ledger and a durable reset barrier immediately. Later local operations depend on that reset. Its acknowledgment advances their workspace generation. Repeating an in-flight reset retains its mutation ID, and responses for removed operations are ignored. In-flight AI interpretation is also invalidated by the local reset epoch.

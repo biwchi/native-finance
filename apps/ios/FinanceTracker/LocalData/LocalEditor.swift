@@ -152,6 +152,7 @@ struct LocalEditor {
             guard r.categoryId == nil, r.recurrence == nil, let debtID = r.debtId, snapshot.debts[debtID] != nil else { throw LocalDataError(message: "Choose a debt recipient. Debt transactions cannot repeat or have categories.") }
         } else if r.debtId != nil { throw LocalDataError(message: "Only debt transactions can have a recipient.") }
         if let end = r.recurrence?.endAt, end < r.occurredAt { throw LocalDataError(message: "The recurrence end must be on or after the first transaction.") }
+        if let zone = r.recurrence?.timeZone, TimeZone(identifier: zone) == nil { throw LocalDataError(message: "Choose a valid schedule timezone.") }
         return StoredTransaction(id: id, accountId: account.id, kind: r.kind, amount: try transactionAmount(r.amount), currency: currency,
             categoryId: r.categoryId, debtId: r.debtId, recurringScheduleId: existing?.recurringScheduleId, scheduledFor: existing?.scheduledFor, note: try optionalText(r.note, limit: 2000),
             occurredAt: r.occurredAt, createdAt: existing?.createdAt ?? now, updatedAt: now,
@@ -166,8 +167,8 @@ struct LocalEditor {
             let scheduleID = existingSchedule?.id ?? UUID()
             var schedule = StoredSchedule(id: scheduleID, accountId: t.accountId, kind: t.kind, amount: t.amount, currency: t.currency, categoryId: t.categoryId, note: t.note, frequency: recurrence.frequency, startAt: existingSchedule?.startAt ?? t.occurredAt,
                 lastOccurrenceAt: existingSchedule?.lastOccurrenceAt ?? t.occurredAt, nextOccurrenceAt: existingSchedule?.nextOccurrenceAt,
-                endAt: recurrence.endAt, createdAt: existingSchedule?.createdAt ?? now, updatedAt: now, nextScheduledFor: existingSchedule?.nextScheduledFor, counterparty: t.counterparty)
-            if existingSchedule == nil || existingSchedule?.frequency != recurrence.frequency || schedule.nextOccurrenceAt == nil { schedule.nextOccurrenceAt = schedule.next(after: schedule.lastOccurrenceAt); if existingSchedule?.frequency != recurrence.frequency { schedule.nextScheduledFor = nil } }
+                endAt: recurrence.endAt, createdAt: existingSchedule?.createdAt ?? now, updatedAt: now, nextScheduledFor: existingSchedule?.nextScheduledFor, counterparty: t.counterparty, timeZone: recurrence.timeZone ?? existingSchedule?.timeZone)
+            if existingSchedule == nil || existingSchedule?.frequency != recurrence.frequency || existingSchedule?.timeZone != schedule.timeZone || schedule.nextOccurrenceAt == nil { schedule.nextOccurrenceAt = schedule.next(after: schedule.lastOccurrenceAt); if existingSchedule?.frequency != recurrence.frequency { schedule.nextScheduledFor = nil } }
             if let end = schedule.endAt, let next = schedule.nextOccurrenceAt, next > end { schedule.nextOccurrenceAt = nil }
             t.recurringScheduleId = scheduleID; t.scheduledFor = t.scheduledFor ?? t.occurredAt
             if id == nil { t.id = occurrenceID(scheduleID: scheduleID, scheduledFor: t.scheduledFor!) }
@@ -182,12 +183,15 @@ struct LocalEditor {
 
     mutating func transfer(_ request: TransferRequest) throws -> TransferResponse {
         let source = try account(request.fromAccountId); let destination = try account(request.toAccountId)
-        guard source.id != destination.id, source.currency == destination.currency else { throw LocalDataError(message: "Transfers require different accounts using the same currency.") }
-        _ = try amount(request.amount)
-        func input(_ accountID: UUID, _ kind: TransactionKind) -> TransactionRequest {
-            TransactionRequest(accountId: accountID, kind: kind, amount: request.amount, categoryId: nil, note: request.note, occurredAt: request.occurredAt, counterparty: request.counterparty)
+        guard source.id != destination.id else { throw LocalDataError(message: "Transfers require different accounts.") }
+        let sent = try amount(request.amount)
+        guard source.currency == destination.currency || request.destinationAmount != nil else { throw LocalDataError(message: "Enter the amount received in the destination currency.") }
+        let received = try amount(request.destinationAmount ?? sent)
+        guard source.currency != destination.currency || sent == received else { throw LocalDataError(message: "Same-currency transfers must have equal amounts.") }
+        func input(_ accountID: UUID, _ kind: TransactionKind, _ value: String) -> TransactionRequest {
+            TransactionRequest(accountId: accountID, kind: kind, amount: value, categoryId: nil, note: request.note, occurredAt: request.occurredAt, counterparty: request.counterparty)
         }
-        let from = try saveTransaction(request: input(source.id, .expense)); let to = try saveTransaction(request: input(destination.id, .income))
+        let from = try saveTransaction(request: input(source.id, .expense, sent)); let to = try saveTransaction(request: input(destination.id, .income, received))
         return TransferResponse(source: from, destination: to)
     }
     mutating func materialize(limit: Int = 200) throws {
@@ -259,6 +263,7 @@ struct LocalEditor {
             schedule.accountId = values.accountId; schedule.kind = values.kind; schedule.amount = values.amount; schedule.currency = values.currency
             schedule.counterparty = values.counterparty; schedule.categoryId = values.categoryId; schedule.note = values.note
             schedule.frequency = recurrence.frequency; schedule.endAt = recurrence.endAt; schedule.updatedAt = now
+            schedule.timeZone = recurrence.timeZone ?? schedule.timeZone
             if anchorChanged { schedule.startAt = request.occurredAt }
             if recorded != nil {
                 var t = values; t.recurringScheduleId = schedule.id; t.scheduledFor = recorded?.scheduledFor ?? upcoming.occurredAt

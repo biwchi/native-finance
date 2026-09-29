@@ -1,5 +1,7 @@
 import type { Account } from "../../domain/accounts/account.ts";
 import type { Category } from "../../domain/categories/category.ts";
+import type { Debt, DebtRepository } from "../../domain/debts/debt.ts";
+import { QuickEntryInterpretationError } from "./quick-entry-extraction.ts";
 import { validateQuickEntryDocument, type QuickEntryDocument } from "./quick-entry-document.ts";
 import type { AccountRepository } from "../accounts/account.repository.ts";
 import type { CategoryRepository } from "../categories/category.repository.ts";
@@ -29,7 +31,11 @@ export type QuickEntryConversion = {
 
 export type QuickEntryDraft = {
   id: string;
-  kind: "expense" | "income" | "transfer";
+  kind: "expense" | "income" | "transfer" | "debt";
+  debtId?: string | null;
+  destinationAmount?: string | null;
+  destinationCurrency?: string | null;
+  destinationAmountEstimated?: boolean;
   accountId: string;
   destinationAccountId: string | null;
   amount: string;
@@ -41,6 +47,7 @@ export type QuickEntryDraft = {
   recurrence: {
     frequency: RecurrenceFrequency;
     endAt: string | null;
+    timeZone?: string;
   } | null;
   conversion: QuickEntryConversion | null;
 };
@@ -58,7 +65,8 @@ export type QuickEntryError =
   | "exchange_rates_unavailable"
   | "invalid_ai_response"
   | "quick_entry_unavailable"
-  | "too_many_drafts";
+  | "too_many_drafts"
+  | "unsupported_quick_entry";
 
 export async function interpretQuickEntry(
   input: {
@@ -69,6 +77,7 @@ export async function interpretQuickEntry(
     locale: string;
     timeZone: string;
     context?: {
+      debts?: Pick<Debt, "id" | "name">[];
       accounts: Pick<Account, "id" | "name" | "currency" | "icon" | "iconColor">[];
       categories: (Pick<Category, "id" | "name" | "kind"> & Partial<Pick<Category, "parentId" | "icon" | "color" | "examples">>)[];
     };
@@ -76,6 +85,7 @@ export async function interpretQuickEntry(
   dependencies: {
     accounts: AccountRepository;
     categories: CategoryRepository;
+    debts?: DebtRepository;
     exchangeRateRepository: ExchangeRateRepository;
     exchangeRateProvider: ExchangeRateProvider;
     interpreter: QuickEntryInterpreter;
@@ -99,6 +109,7 @@ export async function interpretQuickEntry(
     (account) => canonicalId(account.id) === canonicalId(input.defaultAccountId),
   );
   if (!defaultAccount) return error("account_not_found", "Default account not found");
+  const debts = input.context ? input.context.debts ?? [] : await dependencies.debts?.list() ?? [];
 
   let interpreted;
   try {
@@ -112,8 +123,10 @@ export async function interpretQuickEntry(
       defaultAccountId: defaultAccount.id,
       accounts,
       categories,
+      debts,
     });
   } catch (cause) {
+    if (cause instanceof QuickEntryInterpretationError) return error(cause.code, cause.message);
     const message = cause instanceof Error ? cause.message : "Quick Entry is unavailable";
     return error("quick_entry_unavailable", message);
   }
@@ -151,12 +164,21 @@ export async function interpretQuickEntry(
     }
     resolved.push({ transaction, account, sourceCurrency });
   }
-  const currencies = [...new Set(resolved.flatMap(({ account, sourceCurrency }) => [
+  const currencies = [...new Set(resolved.flatMap(({ transaction, account, sourceCurrency }) => [
     normalizeCurrency(account.currency),
     sourceCurrency,
+    ...(transaction.kind === "transfer" ? [
+      accountById.get(canonicalId(transaction.destinationAccountId ?? ""))?.currency,
+      transaction.destinationCurrency,
+    ].filter((currency): currency is string => !!currency) : []),
   ]))];
 
-  const needsConversion = resolved.some(({ transaction, account, sourceCurrency }) => transaction.amount !== "" && sourceCurrency !== normalizeCurrency(account.currency));
+  const needsConversion = resolved.some(({ transaction, account, sourceCurrency }) => {
+    if (transaction.amount === "") return false;
+    const destination = accountById.get(canonicalId(transaction.destinationAccountId ?? ""));
+    return sourceCurrency !== normalizeCurrency(account.currency) || transaction.kind === "transfer" && !!destination &&
+      (transaction.destinationAmount ? normalizeCurrency(transaction.destinationCurrency ?? destination.currency) !== destination.currency : sourceCurrency !== destination.currency);
+  });
   const exchangeRates = needsConversion ? await getLatestExchangeRates({
     reportingCurrency: defaultAccount.currency,
     currencies,
@@ -176,8 +198,7 @@ export async function interpretQuickEntry(
     const requestedDestination = transaction.kind === "transfer"
       ? accountById.get(canonicalId(transaction.destinationAccountId ?? "")) ?? null
       : null;
-    const destination = requestedDestination && requestedDestination.id !== account.id
-      && requestedDestination.currency === account.currency ? requestedDestination : null;
+    const destination = requestedDestination && requestedDestination.id !== account.id ? requestedDestination : null;
 
     const targetCurrency = normalizeCurrency(account.currency);
     const converted = unresolvedAmount || sourceCurrency === targetCurrency
@@ -191,8 +212,20 @@ export async function interpretQuickEntry(
     if (!converted) {
       return error("exchange_rates_unavailable", "Exchange rates are temporarily unavailable");
     }
+    let destinationAmount: string | null = null;
+    let destinationAmountEstimated = false;
+    if (destination && !unresolvedAmount) {
+      const received = transaction.destinationAmount ?? transaction.amount;
+      const receivedCurrency = normalizeCurrency(transaction.destinationAmount ? transaction.destinationCurrency ?? destination.currency : sourceCurrency);
+      if (!isNonZeroAmount(received)) return error("invalid_ai_response", "AI returned an invalid received amount");
+      const conversion = receivedCurrency === destination.currency ? { amount: received }
+        : exchangeRates?.ok ? convertExchangeAmount(received, receivedCurrency, destination.currency, exchangeRates.value) : null;
+      if (!conversion) return error("exchange_rates_unavailable", "Exchange rates are temporarily unavailable");
+      destinationAmount = conversion.amount;
+      destinationAmountEstimated = receivedCurrency !== destination.currency;
+    }
 
-    const category = transaction.kind === "transfer" || !transaction.categoryId
+    const category = transaction.kind === "transfer" || transaction.kind === "debt" || !transaction.categoryId
       ? null
       : categoryById.get(canonicalId(transaction.categoryId)) ?? null;
     const categoryId = category?.kind === transaction.kind ? category.id : null;
@@ -204,7 +237,7 @@ export async function interpretQuickEntry(
     if (transaction.recurrence?.endAt && !validDate(transaction.recurrence.endAt)) {
       return error("invalid_ai_response", "AI returned an invalid recurrence end date");
     }
-    const recurrence = transaction.kind === "transfer"
+    const recurrence = transaction.kind === "transfer" || transaction.kind === "debt"
       ? null
       : validRecurrence(transaction.recurrence, resolvedOccurredAt);
 
@@ -213,6 +246,9 @@ export async function interpretQuickEntry(
       kind: transaction.kind,
       accountId: account.id,
       destinationAccountId: destination?.id ?? null,
+      destinationAmount, destinationCurrency: destination?.currency ?? null,
+      destinationAmountEstimated,
+      debtId: transaction.kind === "debt" ? debts.find((debt) => canonicalId(debt.id) === canonicalId(transaction.debtId ?? ""))?.id ?? null : null,
       amount: converted.amount,
       currency: targetCurrency,
       categoryId,
@@ -245,7 +281,7 @@ function validDate(value: string | null): Date | null {
 }
 
 function validRecurrence(
-  recurrence: { frequency: RecurrenceFrequency; endAt: string | null } | null,
+  recurrence: { frequency: RecurrenceFrequency; endAt: string | null; timeZone?: string } | null,
   occurredAt: Date,
 ): QuickEntryDraft["recurrence"] {
   if (!recurrence) return null;
@@ -253,6 +289,7 @@ function validRecurrence(
   return {
     frequency: recurrence.frequency,
     endAt: endAt && endAt >= occurredAt ? endAt.toISOString() : null,
+    ...(recurrence.timeZone ? { timeZone: recurrence.timeZone } : {}),
   };
 }
 

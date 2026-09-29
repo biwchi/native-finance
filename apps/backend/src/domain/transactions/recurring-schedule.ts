@@ -11,6 +11,7 @@ export type RecurringSchedule = {
   counterparty?: string | null;
   note: string | null;
   frequency: RecurrenceFrequency;
+  timeZone?: string | null;
   startAt: Date;
   lastOccurrenceAt: Date;
   nextScheduledFor?: Date | null;

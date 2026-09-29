@@ -16,6 +16,7 @@ final class AddTransactionViewModel: ObservableObject {
     @Published private(set) var isRecurring = false
     @Published private(set) var recurrenceFrequency: RecurrenceFrequency = .monthly
     @Published private(set) var recurrenceEndAt: Date?
+    private(set) var recurrenceTimeZone: String?
     @Published private(set) var amountConflict = false
     @Published private(set) var dateConflict = false
     @Published private(set) var isResolvingCategory = false
@@ -62,6 +63,7 @@ final class AddTransactionViewModel: ObservableObject {
             isRecurring = transaction.recurrence != nil
             recurrenceFrequency = transaction.recurrence?.frequency ?? .monthly
             recurrenceEndAt = transaction.recurrence?.endAt
+            recurrenceTimeZone = transaction.recurrence?.timeZone
             hasConfiguredAccount = true
             amountSource = .manual
             kindSource = .manual

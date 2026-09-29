@@ -5,10 +5,17 @@ struct FinanceDateFilterSheet: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draft: Draft
     @State private var contentHeight: CGFloat = 260
+    @State private var navigationDirection: CGFloat = 1
 
     let onApply: (FinanceDateFilter, FinanceDateFilter?) -> Void
+
+    static func background(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? AppColor.sheetBackground : AppColor.elevatedSurface
+    }
 
     init(
         selection: FinanceDateFilter,
@@ -39,15 +46,16 @@ struct FinanceDateFilterSheet: View {
             }
             .padding(.horizontal, AppSpacing.doubleExtraLarge)
             .padding(.top, AppSpacing.doubleExtraLarge)
-            .padding(.bottom, AppSpacing.large)
+            .padding(.bottom, AppSpacing.doubleExtraLarge + AppSpacing.small)
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
                 if height > 0 { contentHeight = ceil(height) }
             }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .scrollEdgeFades(background: AppColor.elevatedSurface)
+        .scrollEdgeFades(background: Self.background(for: colorScheme))
         .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(contentHeight)])
         .presentationDragIndicator(.visible)
+        .sensoryFeedback(.selection, trigger: draft.selection)
     }
 
     private var header: some View {
@@ -55,7 +63,10 @@ struct FinanceDateFilterSheet: View {
             Menu {
                 Picker("Period", selection: Binding(
                     get: { draft.selection.preset },
-                    set: { draft.select($0, calendar: calendar) }
+                    set: {
+                        navigationDirection = 0
+                        draft.select($0, calendar: calendar)
+                    }
                 )) {
                     ForEach(FinanceDateFilter.Preset.allCases) { preset in
                         Text(preset.rawValue).tag(preset)
@@ -66,14 +77,15 @@ struct FinanceDateFilterSheet: View {
                     Text(presetTitle)
                         .font(.subheadline.weight(.medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    AppIcon("nav-arrow-down", size: 14)
+                    AppIcon("nav-arrow-down", size: 12)
+                        .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
                 .foregroundStyle(.primary)
-                .padding(.horizontal, AppSpacing.large)
+                .padding(.horizontal, AppSpacing.medium)
                 .padding(.vertical, AppSpacing.small)
                 .frame(minHeight: AppControlSize.minimumTapTarget)
-                .modifier(CapsuleControlBackground(appearance: .glass))
+                .background(AppColor.controlFill, in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -84,13 +96,11 @@ struct FinanceDateFilterSheet: View {
             Spacer(minLength: 0)
 
             Button { dismiss() } label: {
-                AppIcon("xmark", size: AppControlSize.iconButtonGlyph)
+                AppIcon("xmark", size: 18)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .foregroundStyle(.secondary)
-                    .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
-                    .modifier(CapsuleControlBackground(appearance: .glass))
-                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PeriodControlStyle())
             .accessibilityLabel("Cancel")
             .accessibilityIdentifier("date-filter-cancel")
         }
@@ -125,6 +135,8 @@ struct FinanceDateFilterSheet: View {
             : AnyLayout(HStackLayout(spacing: AppSpacing.medium))
         return layout {
             Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
                 .fixedSize()
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
             DatePicker(title, selection: selection, in: minimumDate..., displayedComponents: .date)
@@ -155,12 +167,63 @@ struct FinanceDateFilterSheet: View {
     }
 
     private var periodLabel: some View {
-        Text(periodTitle)
-            .font(.title3.weight(.medium))
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity)
-            .accessibilityIdentifier("date-filter-selected-period")
+        ZStack {
+            periodText
+                .id(periodTitle)
+                .transition(periodTransition)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.small)
+        .clipped()
+        .animation(reduceMotion ? .easeOut(duration: 0.16) : .smooth(duration: 0.32), value: periodTitle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(periodTitle)
+        .accessibilityIdentifier("date-filter-selected-period")
+    }
+
+    private var periodText: some View {
+        VStack(spacing: AppSpacing.extraSmall) {
+            Text(draft.selection.preset == .month ? monthComponent("LLLL") : periodTitle)
+                .font(.title2.weight(.semibold))
+                .tracking(-0.4)
+                .foregroundStyle(.primary)
+            if draft.selection.preset == .month {
+                Text(monthComponent("y"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var periodTransition: AnyTransition {
+        guard !reduceMotion, navigationDirection != 0 else { return .opacity }
+        let distance = AppSpacing.doubleExtraLarge * navigationDirection
+        return .asymmetric(
+            insertion: .modifier(
+                active: PeriodLabelEffect(offset: distance, blur: 3, opacity: 0),
+                identity: PeriodLabelEffect(offset: 0, blur: 0, opacity: 1)
+            ),
+            removal: .modifier(
+                active: PeriodLabelEffect(offset: -distance, blur: 3, opacity: 0),
+                identity: PeriodLabelEffect(offset: 0, blur: 0, opacity: 1)
+            )
+        )
+    }
+
+    private struct PeriodLabelEffect: ViewModifier {
+        let offset: CGFloat
+        let blur: CGFloat
+        let opacity: Double
+
+        func body(content: Content) -> some View {
+            content
+                .blur(radius: blur)
+                .opacity(opacity)
+                .offset(x: offset)
+        }
     }
 
     private var presetTitle: String {
@@ -171,12 +234,7 @@ struct FinanceDateFilterSheet: View {
     private var periodTitle: String {
         let selection = draft.selection
         if selection.preset == .month {
-            let formatter = DateFormatter()
-            formatter.calendar = calendar
-            formatter.locale = locale
-            formatter.timeZone = calendar.timeZone
-            formatter.setLocalizedDateFormatFromTemplate("LLLL y")
-            return formatter.string(from: selection.anchor)
+            return monthComponent("LLLL y")
         }
         if selection.preset == .last7Days || selection.preset == .last30Days,
            let interval = selection.interval(calendar: calendar),
@@ -187,19 +245,50 @@ struct FinanceDateFilterSheet: View {
         return selection.label(calendar: calendar, locale: locale)
     }
 
+    private func monthComponent(_ template: String) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = locale
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        return formatter.string(from: draft.selection.anchor)
+    }
+
     private func navigationButton(forward: Bool) -> some View {
-        PrimaryIconButton(
-            forward ? "Next period" : "Previous period",
-            iconName: forward ? "nav-arrow-right" : "nav-arrow-left",
-            iconSize: 18,
-            appearance: .glass
-        ) {
+        Button {
+            navigationDirection = forward ? 1 : -1
             draft.shift(by: forward ? 1 : -1, calendar: calendar)
+        } label: {
+            AppIcon(forward ? "nav-arrow-right" : "nav-arrow-left", size: 18)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .foregroundStyle(.primary)
         }
-        .controlSize(.small)
+        .buttonStyle(PeriodControlStyle())
+        .accessibilityLabel(forward ? "Next period" : "Previous period")
         .accessibilityIdentifier(forward ? "date-filter-next" : "date-filter-previous")
         .accessibilityHint(draft.selection.shifted(by: forward ? 1 : -1, calendar: calendar)
             .label(calendar: calendar, locale: locale))
+    }
+
+    private struct PeriodControlStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                .background(AppColor.controlFill, in: Circle())
+                .overlay {
+                    if configuration.isPressed {
+                        Circle().fill(AppColor.controlFill)
+                    }
+                }
+                .compositingGroup()
+                .opacity(isEnabled ? 1 : 0.45)
+                .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
+                .frame(width: AppControlSize.minimumTapTarget, height: AppControlSize.minimumTapTarget)
+                .contentShape(Circle())
+        }
     }
 
     private var customStart: Binding<Date> {

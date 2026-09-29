@@ -36,6 +36,7 @@ export async function createTransaction(
     const schedule = await store.insertSchedule({
       ...scheduleTemplate(values),
       frequency: recurrence.frequency,
+      timeZone: recurrence.timeZone,
       startAt: values.occurredAt,
       lastOccurrenceAt: values.occurredAt,
       nextOccurrenceAt: boundedNextOccurrence(
@@ -43,6 +44,7 @@ export async function createTransaction(
         values.occurredAt,
         recurrence.frequency,
         recurrence.endAt,
+        recurrence.timeZone,
       ),
       endAt: recurrence.endAt,
     });

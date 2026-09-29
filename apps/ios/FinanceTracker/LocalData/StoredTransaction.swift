@@ -22,6 +22,6 @@ struct StoredTransaction: Codable, Equatable, Sendable {
         return FinanceTransaction(id: id, accountId: accountId, kind: kind, amount: amount, currency: currency,
             category: categoryId.flatMap { snapshot.categories[$0] }, note: note,
             occurredAt: occurredAt, createdAt: createdAt, updatedAt: updatedAt, debtId: debtId,
-            debt: debtId.flatMap { snapshot.debts[$0] }, recurrence: schedule.map { TransactionRecurrence(id: $0.id, frequency: $0.frequency, endAt: $0.endAt) }, counterparty: counterparty)
+            debt: debtId.flatMap { snapshot.debts[$0] }, recurrence: schedule.map { TransactionRecurrence(id: $0.id, frequency: $0.frequency, endAt: $0.endAt, timeZone: $0.timeZone) }, counterparty: counterparty)
     }
 }

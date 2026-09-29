@@ -127,6 +127,13 @@
       "when": 1790067054912,
       "tag": "0017_savings_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790507904585,
+      "tag": "0018_recurrence_timezone",
+      "breakpoints": true
     }
   ]
 }

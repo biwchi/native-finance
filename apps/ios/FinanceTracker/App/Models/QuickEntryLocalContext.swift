@@ -1,3 +1,7 @@
 import Foundation
 
-struct QuickEntryLocalContext: Encodable { let accounts: [Account]; let categories: [TransactionCategory] }
+struct QuickEntryLocalContext: Encodable {
+    let accounts: [Account]
+    let categories: [TransactionCategory]
+    var debts: [Debt] = []
+}

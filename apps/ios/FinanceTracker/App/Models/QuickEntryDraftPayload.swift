@@ -13,4 +13,8 @@ struct QuickEntryDraftPayload: Decodable {
     let recurrence: QuickEntryRecurrence?
     let conversion: QuickEntryConversion?
     var counterparty: String? = nil
+    var debtId: UUID? = nil
+    var destinationAmount: String? = nil
+    var destinationCurrency: String? = nil
+    var destinationAmountEstimated: Bool? = nil
 }

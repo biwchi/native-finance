@@ -1,5 +1,6 @@
 import type { Account } from "../../domain/accounts/account.ts";
 import type { Category } from "../../domain/categories/category.ts";
+import type { Debt } from "../../domain/debts/debt.ts";
 import type { RecurrenceFrequency } from "../../domain/transactions/transaction.ts";
 import type { QuickEntryDocument } from "./quick-entry-document.ts";
 
@@ -11,7 +12,10 @@ export function quickEntryDraftLimitFor(input: Pick<QuickEntryInterpreterInput, 
 }
 
 export type InterpretedQuickEntryTransaction = {
-  kind: "expense" | "income" | "transfer";
+  kind: "expense" | "income" | "transfer" | "debt";
+  debtId?: string | null;
+  destinationAmount?: string | null;
+  destinationCurrency?: string | null;
   accountId: string | null;
   destinationAccountId: string | null;
   amount: string;
@@ -23,6 +27,7 @@ export type InterpretedQuickEntryTransaction = {
   recurrence: {
     frequency: RecurrenceFrequency;
     endAt: string | null;
+    timeZone?: string;
   } | null;
 };
 
@@ -40,6 +45,7 @@ export type QuickEntryInterpreterInput = {
   defaultAccountId: string;
   accounts: Account[];
   categories: Category[];
+  debts?: Debt[];
 };
 
 export interface QuickEntryInterpreter {

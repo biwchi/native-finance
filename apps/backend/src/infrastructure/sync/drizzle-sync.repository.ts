@@ -232,7 +232,7 @@ export function stableJSON(value: unknown): string {
 function comparable(value: Record<string, unknown> | null) {
   return stableJSON(Object.fromEntries(Object.entries(value ?? {}).filter(([key, v]) => !["createdAt", "updatedAt"].includes(key)).map(([key, v]) => [key, key === "amount" && typeof v === "string" ? v.replace(/\.?(0+)$/, (s) => v.includes(".") ? "" : s) : v])));
 }
-function scheduleSettings(value: Record<string, unknown>) { return comparable(Object.fromEntries(Object.entries(value).filter(([key]) => !["lastOccurrenceAt", "nextOccurrenceAt", "nextScheduledFor"].includes(key)))); }
+function scheduleSettings(value: Record<string, unknown>) { return comparable(Object.fromEntries(Object.entries(value).filter(([key, item]) => !["lastOccurrenceAt", "nextOccurrenceAt", "nextScheduledFor"].includes(key) && !(key === "timeZone" && item == null)))); }
 function failureMessage(cause: unknown): string {
   const error = cause as { code?: string; message?: string; cause?: { code?: string } };
   if (error.code === "23505" || error.cause?.code === "23505") return "A record with these details already exists. Review the local change.";

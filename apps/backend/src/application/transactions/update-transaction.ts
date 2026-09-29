@@ -57,17 +57,20 @@ export async function updateTransaction(
       const schedule = await store.findSchedule(existing.recurringScheduleId, true);
       if (!schedule) throw new Error("Recurring schedule not found");
       const frequencyChanged = schedule.frequency !== recurrence.frequency;
-      const nextOccurrenceAt = frequencyChanged || !schedule.nextOccurrenceAt
+      const timeZone = recurrence.timeZone ?? schedule.timeZone;
+      const nextOccurrenceAt = frequencyChanged || timeZone !== schedule.timeZone || !schedule.nextOccurrenceAt
         ? boundedNextOccurrence(
             schedule.lastOccurrenceAt,
             schedule.startAt,
             recurrence.frequency,
             recurrence.endAt,
+            timeZone,
           )
         : boundExistingNext(schedule.nextOccurrenceAt, recurrence.endAt);
       await store.updateSchedule(schedule.id, {
         ...scheduleTemplate(values),
         frequency: recurrence.frequency,
+        timeZone,
         nextOccurrenceAt,
         endAt: recurrence.endAt,
         updatedAt: new Date(),
@@ -79,6 +82,7 @@ export async function updateTransaction(
     const schedule = await store.insertSchedule({
       ...scheduleTemplate(values),
       frequency: recurrence.frequency,
+      timeZone: recurrence.timeZone,
       startAt: values.occurredAt,
       lastOccurrenceAt: values.occurredAt,
       nextOccurrenceAt: boundedNextOccurrence(
@@ -86,6 +90,7 @@ export async function updateTransaction(
         values.occurredAt,
         recurrence.frequency,
         recurrence.endAt,
+        recurrence.timeZone,
       ),
       endAt: recurrence.endAt,
     });
